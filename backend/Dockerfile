@@ -1,5 +1,6 @@
 # backend/Dockerfile
-FROM python:3.12-slim
+# TODO: pin to digest before production (see security audit M6)
+FROM python:3.12.4-slim
 
 WORKDIR /app
 
@@ -7,5 +8,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+RUN adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

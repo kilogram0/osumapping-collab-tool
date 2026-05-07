@@ -1,20 +1,19 @@
-version: "3.8"
-
 services:
   db:
-    image: postgres:15-alpine
+    # TODO: pin to digest before production (see security audit M6)
+    image: postgres:15.7-alpine
     container_name: osu-modding-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: osu
-      POSTGRES_PASSWORD: osu
-      POSTGRES_DB: modding
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U osu -d modding"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -26,9 +25,9 @@ services:
     container_name: osu-modding-backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://osu:osu@db:5432/modding
+      - DATABASE_URL=${DATABASE_URL}
       - OSU_CLIENT_ID=${OSU_CLIENT_ID}
       - OSU_CLIENT_SECRET=${OSU_CLIENT_SECRET}
       - SECRET_KEY=${SECRET_KEY}
@@ -45,10 +44,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: dev
     container_name: osu-modding-frontend
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     environment:
       - VITE_API_URL=${BACKEND_URL}
     depends_on:
