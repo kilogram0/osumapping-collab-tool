@@ -1,0 +1,10 @@
+fastapi
+sqlmodel
+uvicorn[standard]
+asyncpg
+alembic
+httpx
+python-jose[cryptography]
+pydantic-settings
+pytest
+pytest-asyncio
