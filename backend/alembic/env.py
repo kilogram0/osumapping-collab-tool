@@ -52,6 +52,11 @@ def run_migrations_offline() -> None:
 
     """
     url = config.get_main_option("sqlalchemy.url")
+    if not url or url == "driver://user:pass@localhost/dbname":
+        raise RuntimeError(
+            "DATABASE_URL environment variable is required. "
+            "It is automatically set when running via docker-compose."
+        )
     context.configure(
         url=url,
         target_metadata=target_metadata,
