@@ -4,7 +4,7 @@ import logging
 import os
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # URLs
     FRONTEND_URL: str
     BACKEND_URL: str
+
+    # Token lifetime
+    ACCESS_TOKEN_TTL_DAYS: int = 14
 
     # ------------------------------------------------------------------
     # Validators
@@ -83,9 +86,10 @@ class Settings(BaseSettings):
     def is_https(self) -> bool:
         return self.FRONTEND_URL.startswith("https://")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
 
 # Singleton instance exported to the application

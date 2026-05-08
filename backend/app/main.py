@@ -4,16 +4,23 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.config import settings
+from app.database import engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
-    # Startup
+    # Startup: verify database connectivity
+    async with engine.connect() as conn:
+        result = await conn.execute(text("SELECT 1"))
+        if result.scalar() != 1:
+            raise RuntimeError("Database connectivity check failed")
     yield
     # Shutdown
+    await engine.dispose()
 
 
 def create_app() -> FastAPI:

@@ -12,15 +12,15 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-# Read DATABASE_URL from environment and strip the async driver prefix
-# so Alembic uses a sync dialect for migrations (M5).
+# Read DATABASE_URL from environment. The +asyncpg prefix is kept
+# because run_async_migrations uses async_engine_from_config.
 _db_url = os.environ.get("DATABASE_URL", "")
 if not _db_url:
     raise RuntimeError(
         "DATABASE_URL environment variable is required. "
         "It is automatically set when running via docker-compose."
     )
-config.set_main_option("sqlalchemy.url", _db_url.replace("+asyncpg", ""))
+config.set_main_option("sqlalchemy.url", _db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

@@ -33,6 +33,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - FRONTEND_URL=${FRONTEND_URL}
       - BACKEND_URL=${BACKEND_URL}
+      - ACCESS_TOKEN_TTL_DAYS=${ACCESS_TOKEN_TTL_DAYS:-14}
     depends_on:
       db:
         condition: service_healthy
