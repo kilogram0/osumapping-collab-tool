@@ -126,11 +126,12 @@ frontend/src/
 ## Database & Migrations
 
 - **Source of truth:** `app/models.py` (SQLModel).
-- **Migration tool:** Alembic.
+- **Migration tool:** Alembic with `--autogenerate`.
+- **How autogenerate works:** `alembic/env.py` imports `SQLModel.metadata` from `app.models`. Alembic diffs that metadata against the live PostgreSQL schema to produce the migration script. Therefore **every SQLModel table must be defined (or imported) in `app/models.py`** so that `SQLModel.metadata` registers it. Do not split models into separate packages unless every table is re-exported in `app/models.py`.
 - **Process after any model change:**
-  1. Update `models.py`
+  1. Update `models.py` (add or modify tables)
   2. Generate migration: `docker-compose exec backend alembic revision --autogenerate -m "description"`
-  3. Review generated migration script (ensure it's correct for async PostgreSQL)
+  3. Review the generated script in `alembic/versions/` (ensure it's correct for async PostgreSQL)
   4. Apply: `docker-compose exec backend alembic upgrade head`
 - **Never** manually edit existing migration files after they have been committed/applied.
 - Use `selectinload` for eager loading relationships in async SQLAlchemy.

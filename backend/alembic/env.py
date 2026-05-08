@@ -30,6 +30,9 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
+# NOTE: every SQLModel table must be defined (or imported) in app.models so
+# that SQLModel.metadata registers it. Splitting models into sub-packages
+# without re-exporting them here will silently break autogenerate.
 from app.models import SQLModel
 target_metadata = SQLModel.metadata
 
