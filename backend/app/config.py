@@ -1,37 +1,41 @@
 """Application settings loaded from environment variables."""
 
 import logging
-import os
 
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, field_validator
+
+from app import env
 
 logger = logging.getLogger(__name__)
 
 
-class Settings(BaseSettings):
-    """Pydantic settings model.
+class Settings(BaseModel):
+    """Pydantic model for validated application settings.
 
-    All secrets are injected via environment variables. Never commit
-    real values to version control.
+    Raw values are sourced from :mod:`app.env` — the single source of truth
+    for all ``os.getenv`` calls.  This module only performs validation and
+    exposes computed properties.
     """
 
     # Database
-    DATABASE_URL: str
+    DATABASE_URL: str = env.DATABASE_URL
 
     # osu! OAuth
-    OSU_CLIENT_ID: str
-    OSU_CLIENT_SECRET: str
+    OSU_CLIENT_ID: str = env.OSU_CLIENT_ID
+    OSU_CLIENT_SECRET: str = env.OSU_CLIENT_SECRET
 
     # Security
-    SECRET_KEY: str
+    SECRET_KEY: str = env.SECRET_KEY
 
     # URLs
-    FRONTEND_URL: str
-    BACKEND_URL: str
+    FRONTEND_URL: str = env.FRONTEND_URL
+    BACKEND_URL: str = env.BACKEND_URL
 
     # Token lifetime
-    ACCESS_TOKEN_TTL_DAYS: int = 14
+    ACCESS_TOKEN_TTL_DAYS: int = env.ACCESS_TOKEN_TTL_DAYS
+
+    # Environment
+    ENVIRONMENT: str = env.ENVIRONMENT
 
     # ------------------------------------------------------------------
     # Validators
@@ -50,7 +54,7 @@ class Settings(BaseSettings):
     @classmethod
     def _reject_placeholder_oauth(cls, v: str) -> str:
         if v.startswith("your_") or len(v) < 10:
-            if os.environ.get("ENVIRONMENT", "development").lower() == "production":
+            if env.ENVIRONMENT == "production":
                 raise ValueError(
                     "OAuth credentials must be real values, not placeholders. "
                     "Set them in your .env file."
@@ -86,11 +90,6 @@ class Settings(BaseSettings):
     def is_https(self) -> bool:
         return self.FRONTEND_URL.startswith("https://")
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-    )
-
 
 # Singleton instance exported to the application
 settings = Settings()
@@ -98,7 +97,7 @@ settings = Settings()
 # --------------------------------------------------------------------------
 # Forward-looking runtime warning (L4)
 # --------------------------------------------------------------------------
-if os.environ.get("ENVIRONMENT", "development").lower() == "production":
+if settings.ENVIRONMENT == "production":
     if not settings.is_https:
         logger.warning(
             "FRONTEND_URL is HTTP in a production environment. "

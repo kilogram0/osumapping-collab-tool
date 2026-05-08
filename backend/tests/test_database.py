@@ -1,13 +1,12 @@
-import os
-
 import pytest
 from sqlalchemy import text
 
+from app.config import settings
 from app.database import engine
 
 
 @pytest.mark.skipif(
-    os.environ.get("DATABASE_URL", "").startswith("sqlite") or not os.environ.get("DATABASE_URL"),
+    settings.DATABASE_URL.startswith("sqlite") or not settings.DATABASE_URL,
     reason="Requires a live PostgreSQL database",
 )
 @pytest.mark.asyncio
