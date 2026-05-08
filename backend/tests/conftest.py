@@ -1,11 +1,52 @@
 """Global pytest fixtures for the backend test suite."""
 
+import os
+from typing import AsyncGenerator
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.database import engine
-from app.main import app
+from app.config import settings
+from app.database import get_db
+from app.main import app as _app
+
+
+def _resolve_test_database_url() -> str:
+    """Return the database URL to use for tests.
+
+    Priority:
+    1. TEST_DATABASE_URL setting
+    2. DATABASE_URL with a '_test' suffix appended to the database name
+
+    Raises RuntimeError if the resolved URL does not contain '_test',
+    preventing accidental connection to a non-test database.
+    """
+    if settings.TEST_DATABASE_URL:
+        url = settings.TEST_DATABASE_URL
+    else:
+        # Append _test to the database name in DATABASE_URL
+        # e.g. postgresql+asyncpg://user:pass@host:5432/modding
+        #   -> postgresql+asyncpg://user:pass@host:5432/modding_test
+        url = settings.DATABASE_URL
+        if "/" in url:
+            url = f"{url}_test"
+
+    if "_test" not in url:
+        raise RuntimeError(
+            "Refusing to run tests against a non-test database. "
+            "The test database URL must contain '_test'. "
+            "Set TEST_DATABASE_URL or ensure DATABASE_URL ends with '_test'."
+        )
+    return url
+
+
+# Dedicated async engine for the test suite
+test_engine = create_async_engine(
+    _resolve_test_database_url(),
+    echo=False,
+    future=True,
+)
 
 
 @pytest.fixture
@@ -18,7 +59,7 @@ async def db_session():
     full isolation — no rows persist between tests even when the code under
     test calls ``commit()``.
     """
-    connection = await engine.connect()
+    connection = await test_engine.connect()
     transaction = await connection.begin()
 
     session_factory = async_sessionmaker(
@@ -36,10 +77,26 @@ async def db_session():
     await connection.close()
 
 
+async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a session from the test engine for integration tests."""
+    async with async_sessionmaker(
+        test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )() as session:
+        yield session
+
+
 @pytest.fixture
 async def client():
-    """Yield an httpx.AsyncClient mounted to the FastAPI app."""
+    """Yield an httpx.AsyncClient mounted to the FastAPI app.
+
+    Overrides the ``get_db`` dependency so that integration tests
+    use the test database rather than the application engine.
+    """
+    _app.dependency_overrides[get_db] = _override_get_db
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=_app), base_url="http://test"
     ) as ac:
         yield ac
+    _app.dependency_overrides.clear()

@@ -34,6 +34,8 @@ services:
       - FRONTEND_URL=${FRONTEND_URL}
       - BACKEND_URL=${BACKEND_URL}
       - ACCESS_TOKEN_TTL_DAYS=${ACCESS_TOKEN_TTL_DAYS:-14}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     depends_on:
       db:
         condition: service_healthy

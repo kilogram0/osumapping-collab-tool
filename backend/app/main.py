@@ -25,8 +25,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    # Disable auto-generated docs in production to reduce attack surface (M4).
-    is_prod = settings.FRONTEND_URL.startswith("https://")
+    # Disable auto-generated docs in production to reduce attack surface.
+    is_prod = settings.is_prod
     app = FastAPI(
         title="osu! Modding Forum API",
         description="Private modding forum for osu! mappers",
@@ -43,21 +43,42 @@ def create_app() -> FastAPI:
         allow_origins=[settings.FRONTEND_URL],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
+        allow_headers=[
+            "Content-Type",
+            "Authorization",
+            "X-Requested-With",
+            "X-CSRF-Token",
+        ],
     )
 
-    # Security headers on every response (L5)
+    # Security headers on every response
     @app.middleware("http")
     async def add_security_headers(request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if settings.is_https:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=63072000; includeSubDomains"
+            )
         return response
 
-    @app.get("/api/health", tags=["health"])
-    async def health_check() -> dict:
-        """Health check endpoint."""
+    @app.get("/api/health/live", tags=["health"])
+    async def health_live() -> dict:
+        """Liveness probe — process is up."""
+        return {"status": "ok"}
+
+    @app.get("/api/health/ready", tags=["health"])
+    async def health_ready() -> dict:
+        """Readiness probe — dependencies (database) are reachable."""
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(text("SELECT 1"))
+                if result.scalar() != 1:
+                    raise RuntimeError("DB health check failed")
+        except Exception:
+            return {"status": "unavailable"}
         return {"status": "ok"}
 
     return app

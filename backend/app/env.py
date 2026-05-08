@@ -53,3 +53,9 @@ BACKEND_URL: str = _require("BACKEND_URL")
 # ------------------------------------------------------------------
 ACCESS_TOKEN_TTL_DAYS: int = _require_int("ACCESS_TOKEN_TTL_DAYS", "14")
 ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
+
+# Test database (optional — falls back to DATABASE_URL in test suite)
+TEST_DATABASE_URL: str | None = os.getenv("TEST_DATABASE_URL")
+
+# Postgres password (validated in production to avoid placeholder defaults)
+POSTGRES_PASSWORD: str | None = os.getenv("POSTGRES_PASSWORD")

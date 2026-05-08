@@ -2,7 +2,7 @@
 
 import logging
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app import env
 
@@ -20,6 +20,9 @@ class Settings(BaseModel):
     # Database
     DATABASE_URL: str = env.DATABASE_URL
 
+    # Test database (optional)
+    TEST_DATABASE_URL: str | None = env.TEST_DATABASE_URL
+
     # osu! OAuth
     OSU_CLIENT_ID: str = env.OSU_CLIENT_ID
     OSU_CLIENT_SECRET: str = env.OSU_CLIENT_SECRET
@@ -36,6 +39,9 @@ class Settings(BaseModel):
 
     # Environment
     ENVIRONMENT: str = env.ENVIRONMENT
+
+    # Postgres password (for production validation)
+    POSTGRES_PASSWORD: str | None = env.POSTGRES_PASSWORD
 
     # ------------------------------------------------------------------
     # Validators
@@ -65,9 +71,31 @@ class Settings(BaseModel):
             )
         return v
 
+    @model_validator(mode="after")
+    def _check_production_settings(self):
+        """Cross-field validation that only runs after all fields are set."""
+        if self.ENVIRONMENT == "production":
+            if not self.FRONTEND_URL.startswith("https://"):
+                raise ValueError(
+                    "FRONTEND_URL must use HTTPS when ENVIRONMENT=production. "
+                    "Set FRONTEND_URL to an https:// URL."
+                )
+            pw = self.POSTGRES_PASSWORD
+            if pw is None or pw == "osu" or pw.startswith("CHANGE_ME"):
+                raise ValueError(
+                    "POSTGRES_PASSWORD must be changed from the default placeholder "
+                    "when ENVIRONMENT=production."
+                )
+        return self
+
     # ------------------------------------------------------------------
-    # Computed cookie properties
+    # Computed properties
     # ------------------------------------------------------------------
+    @property
+    def is_prod(self) -> bool:
+        """True when the application is running in production."""
+        return self.ENVIRONMENT == "production"
+
     @property
     def cookie_name(self) -> str:
         """Production uses __Host- prefix which requires Secure + Path=/.
@@ -88,19 +116,9 @@ class Settings(BaseModel):
 
     @property
     def is_https(self) -> bool:
+        """Narrow signal for cookie Secure/prefix decisions only."""
         return self.FRONTEND_URL.startswith("https://")
 
 
 # Singleton instance exported to the application
 settings = Settings()
-
-# --------------------------------------------------------------------------
-# Forward-looking runtime warning (L4)
-# --------------------------------------------------------------------------
-if settings.ENVIRONMENT == "production":
-    if not settings.is_https:
-        logger.warning(
-            "FRONTEND_URL is HTTP in a production environment. "
-            "OAuth callbacks and auth cookies may break. "
-            "Set FRONTEND_URL to https:// in production."
-        )
