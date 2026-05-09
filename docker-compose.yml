@@ -52,8 +52,6 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:5173:5173"
-    environment:
-      - VITE_API_URL=${BACKEND_URL}
     depends_on:
       - backend
     volumes:

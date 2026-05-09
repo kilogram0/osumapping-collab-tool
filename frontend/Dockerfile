@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY --chown=node:node package*.json ./
 RUN npm install
+RUN chown -R node:node /app/node_modules
 
 COPY --chown=node:node . .
 USER node
@@ -23,6 +24,7 @@ WORKDIR /app
 
 COPY --chown=node:node package*.json ./
 RUN npm install
+RUN chown -R node:node /app/node_modules
 
 COPY --chown=node:node . .
 USER node
