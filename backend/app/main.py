@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import engine
+from app.routers import auth
 
 
 @asynccontextmanager
@@ -80,6 +81,9 @@ def create_app() -> FastAPI:
         except Exception:
             return {"status": "unavailable"}
         return {"status": "ok"}
+
+    # Mount routers — all routes live under /api per the API contract
+    app.include_router(auth.router, prefix="/api")
 
     return app
 

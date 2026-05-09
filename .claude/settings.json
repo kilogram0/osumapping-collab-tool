@@ -1,8 +1,4 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(grep -E \"\\\\.env$|\\\\.env\\\\.\")",
-      "Bash(git symbolic-ref *)"
-    ]
   }
 }

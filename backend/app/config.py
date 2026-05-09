@@ -105,6 +105,11 @@ class Settings(BaseModel):
         return "__Host-access_token" if self.is_https else "access_token"
 
     @property
+    def oauth_state_cookie_name(self) -> str:
+        """OAuth state cookie follows the same prefix policy as the session cookie."""
+        return "__Host-oauth_state" if self.is_https else "oauth_state"
+
+    @property
     def cookie_secure(self) -> bool:
         """Secure flag is True when the frontend is served over HTTPS."""
         return self.is_https

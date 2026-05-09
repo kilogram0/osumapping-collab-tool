@@ -11,8 +11,12 @@ import time
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import get_db
+from app.models import User
+from app.services.auth_service import AuthServiceError, decode_access_token
 
 # ------------------------------------------------------------------
 # CSRF / OAuth state helpers
@@ -126,3 +130,40 @@ async def require_csrf_protection(
     """
     # Both sub-dependencies raise on failure; reaching here means both passed.
     pass
+
+
+# ------------------------------------------------------------------
+# Auth / current-user dependency
+# ------------------------------------------------------------------
+
+
+async def get_current_user(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Resolve the current user from the JWT access-token cookie.
+
+    Returns the fully-hydrated ``User`` row.  Raises ``401`` if the cookie
+    is missing, the token is invalid/expired, or the user no longer exists.
+    """
+    token = request.cookies.get(settings.cookie_name)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = decode_access_token(token)
+    except AuthServiceError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    try:
+        user_id = int(payload.get("sub", 0))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    return user
