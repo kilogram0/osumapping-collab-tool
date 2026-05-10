@@ -43,7 +43,7 @@ osu-modding-forum/
 │       ├── dependencies.py     # FastAPI dependencies (DB session, get_current_user)
 │       ├── services/
 │       │   ├── auth_service.py # osu! OAuth logic
-│       │   └── osu_parser.py   # .osu parsing, base-template generation, merging, validation, timestamp extraction
+│       │   # NOTE: osu_parser.py is REMOVED — all .osu processing is client-side.
 │       └── routers/
 │           ├── auth.py         # OAuth routes
 │           ├── mapsets.py      # Mapset CRUD
@@ -100,7 +100,7 @@ All models inherit from `sqlmodel.SQLModel` with `table=True`.
 ### `User`
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `Integer` | PK, Auto-increment | Internal ID. |
+| `id` | `UUID` | PK, default `gen_random_uuid()` | Internal ID. **Server-generated exception:** `User` is created during the OAuth callback before any client crypto context exists, and `User` has no encrypted fields, so AAD bootstrapping does not apply. Every other table uses client-generated UUIDv4.
 | `osu_id` | `Integer` | Unique, NOT NULL | The numeric ID from the osu! API. **Immutable** — this is the stable identifier for the human; `username` and `avatar_url` are display fields and may change. (`UNIQUE` already creates an index in PostgreSQL, no separate `Index` declaration needed.) |
 | `username` | `String` | | osu! username. Refreshed from `/api/v2/me` on every login. |
 | `avatar_url` | `String` | | URL to the user's avatar image. Refreshed on every login. |
@@ -110,20 +110,22 @@ All models inherit from `sqlmodel.SQLModel` with `table=True`.
 ### `Mapset` (Renamed from `Project`)
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `Integer` | PK, Auto-increment | Internal ID. |
-| `name` | `String` | | Mapset title. |
-| `description` | `String` | Nullable | Optional mapset description. |
-| `song_length_ms` | `Integer` | | Total length of the audio in milliseconds. Used to render the timeline scrubber. Shared across all difficulties — **intentional**: a mapset is by definition one song, so all difficulties target the same `AudioFilename` and the same length. We do not enforce this at the schema level (different difficulties' `.osu` files could in principle reference different audio after a critical-ack upload), because in normal collaborative use it doesn't happen and an owner who genuinely needs different audio per diff can coordinate it manually. If a future contest needs per-difficulty audio, revisit then. |
-| `owner_id` | `Integer` | FK -> `User.id`, ondelete="RESTRICT" | Creator of the mapset. RESTRICT prevents deleting a `User` who still owns mapsets — they must first transfer ownership (`PUT /mapsets/{id}/members/{user_id}`). |
+| `id` | `UUID` | PK, client-generated | The client generates a UUIDv4 before encrypting and includes it in the AAD. This solves the AAD bootstrapping problem: the row identity is known before INSERT. |
+| `encrypted_title` | `Text` | NOT NULL | AES-256-GCM ciphertext of the mapset title. |
+| `encrypted_description` | `Text` | Nullable | AES-256-GCM ciphertext of the optional mapset description. |
+| `encrypted_song_length_ms` | `Text` | NOT NULL | AES-256-GCM ciphertext of the audio length in milliseconds (JSON envelope `{"v":245000}`). The envelope shape is uniform across all encrypted fields so the decrypt path never branches on field type — a small plaintext overhead that simplifies the frontend encryption layer. Used to render the timeline scrubber after decryption. |
+| `passphrase_salt` | `String` | NOT NULL | 16-byte random salt (base64-encoded) for PBKDF2 key derivation. Public by design. |
+| `encrypted_verification` | `Text` | NOT NULL | AES-256-GCM ciphertext of a fixed canary string (e.g. "verified"). Used by the frontend to confirm a passphrase is correct without decrypting real content. Harmless without the key, but because it's a known-plaintext canary, user-chosen passphrases are forbidden — the auto-generated 48-char passphrase provides sufficient entropy to resist offline brute-force. |
+| `owner_id` | `UUID` | FK -> `User.id`, ondelete="RESTRICT" | Creator of the mapset. RESTRICT prevents deleting a `User` who still owns mapsets — they must first transfer ownership (`PUT /mapsets/{id}/members/{user_id}`). |
 | `created_at` | `DateTime` | Default: `func.now()` | |
 | `updated_at` | `DateTime` | Default: `func.now()`, onupdate | |
 
 ### `MapsetMember` (Renamed from `ProjectMember`)
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `Integer` | PK, Auto-increment | |
-| `mapset_id` | `Integer` | FK -> `Mapset.id`, ondelete="CASCADE" | Membership rows die with the mapset. |
-| `user_id` | `Integer` | FK -> `User.id`, ondelete="CASCADE" | If a user is deleted (no endpoint today, but FK semantics matter), their memberships go with them. |
+| `id` | `UUID` | PK, client-generated | |
+| `mapset_id` | `UUID` | FK -> `Mapset.id`, ondelete="CASCADE" | Membership rows die with the mapset. |
+| `user_id` | `UUID` | FK -> `User.id`, ondelete="CASCADE" | If a user is deleted (no endpoint today, but FK semantics matter), their memberships go with them. |
 | `role` | `MapsetRole` (PG enum) | Default: `modder`, NOT NULL | PostgreSQL `ENUM('owner', 'mapper', 'modder')`. Use SQLModel's `Enum` type so a typo at the call site is a runtime error and the DB rejects unknown values at write time. |
 | `created_at` | `DateTime` | Default: `func.now()` | When the user was added to this mapset. |
 | `updated_at` | `DateTime` | Default: `func.now()`, onupdate | When the role was last changed. |
@@ -138,9 +140,9 @@ All models inherit from `sqlmodel.SQLModel` with `table=True`.
 ### `Difficulty`
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `Integer` | PK, Auto-increment | |
-| `mapset_id` | `Integer` | FK -> `Mapset.id`, ondelete="CASCADE" | Difficulties die with the mapset. |
-| `name` | `String` | | Difficulty name (e.g., "Easy", "Normal", "Hard", "Insane"). |
+| `id` | `UUID` | PK, client-generated | |
+| `mapset_id` | `UUID` | FK -> `Mapset.id`, ondelete="CASCADE" | Difficulties die with the mapset. |
+| `encrypted_name` | `Text` | NOT NULL | AES-256-GCM ciphertext of the difficulty name (e.g., "Easy", "Normal", "Hard", "Insane"). |
 | `created_at` | `DateTime` | Default: `func.now()` | |
 | `updated_at` | `DateTime` | Default: `func.now()`, onupdate | |
 
@@ -149,14 +151,14 @@ All models inherit from `sqlmodel.SQLModel` with `table=True`.
 ### `DifficultyBaseOsuVersion`
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `Integer` | PK, Auto-increment | |
-| `difficulty_id` | `Integer` | FK -> `Difficulty.id`, ondelete="CASCADE" | |
-| `content` | `Text` | | The base template content: headers + filtered timing points + empty `[HitObjects]`. |
+| `id` | `UUID` | PK, client-generated | |
+| `difficulty_id` | `UUID` | FK -> `Difficulty.id`, ondelete="CASCADE" | |
+| `encrypted_content` | `Text` | NOT NULL | AES-256-GCM ciphertext of the base template content: headers + filtered timing points + empty `[HitObjects]`. |
 | `version` | `Integer` | | Incremental version number per difficulty. |
 | `is_active` | `Boolean` | Default: `false` | Exactly one active version per difficulty. Enforced by partial unique index `WHERE is_active = true`. |
-| `source_section_version_id` | `Integer` | FK -> `SectionOsuVersion.id`, Nullable, ondelete="SET NULL" | The section upload that produced this base version (for traceability). If the source section version is deleted (only happens when the section itself is deleted), keep the base version row but blank the pointer — base history must outlive its triggers. |
+| `source_section_version_id` | `UUID` | FK -> `SectionOsuVersion.id`, Nullable, ondelete="SET NULL" | The section upload that produced this base version (for traceability). If the source section version is deleted (only happens when the section itself is deleted), keep the base version row but blank the pointer — base history must outlive its triggers. |
 | `created_at` | `DateTime` | Default: `func.now()` | |
-| `updated_at` | `DateTime` | Default: `func.now()`, onupdate | Tracks the last `is_active` flip. The row's `content` is immutable. |
+| `updated_at` | `DateTime` | Default: `func.now()`, onupdate | Tracks the last `is_active` flip. The row's `encrypted_content` is immutable. |
 
 **Active version invariant:** Exactly one `DifficultyBaseOsuVersion` per `difficulty_id` has `is_active = true` whenever any base exists. Same uniqueness rule applies to `SectionOsuVersion` per `section_id`. Both are enforced at the DB level via partial unique indexes:
 
@@ -173,43 +175,42 @@ Activations and rollbacks must run inside a single transaction (deactivate previ
 ### `Section`
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `Integer` | PK, Auto-increment | |
-| `difficulty_id` | `Integer` | FK -> `Difficulty.id`, ondelete="CASCADE" | Each difficulty has its own independent sections; sections die with their difficulty. |
-| `name` | `String` | | Section label (e.g., "Intro", "Kiai 1"). |
-| `start_time_ms` | `Integer` | | Start of the section. |
-| `end_time_ms` | `Integer` | | End of the section. |
-| `sort_order` | `Integer` | Default: 0 | For manual reordering. |
+| `id` | `UUID` | PK, client-generated | |
+| `difficulty_id` | `UUID` | FK -> `Difficulty.id`, ondelete="CASCADE" | Each difficulty has its own independent sections; sections die with their difficulty. |
+| `encrypted_name` | `Text` | NOT NULL | AES-256-GCM ciphertext of the section label (e.g., "Intro", "Kiai 1"). |
+| `encrypted_start_time_ms` | `Text` | NOT NULL | AES-256-GCM ciphertext of the section start time in milliseconds (JSON envelope `{"v":0}`). |
+| `encrypted_end_time_ms` | `Text` | NOT NULL | AES-256-GCM ciphertext of the section end time in milliseconds (JSON envelope `{"v":0}`). |
+| `encrypted_sort_order` | `Text` | NOT NULL | AES-256-GCM ciphertext of the sort order (JSON envelope `{"v":0}`). |
 | `created_at` | `DateTime` | Default: `func.now()` | |
 | `updated_at` | `DateTime` | Default: `func.now()`, onupdate | |
 
 ### `SectionOsuVersion`
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `Integer` | PK, Auto-increment | |
-| `section_id` | `Integer` | FK -> `Section.id`, ondelete="CASCADE" | |
-| `content` | `Text` | | The full .osu file content as uploaded. |
+| `id` | `UUID` | PK, client-generated | |
+| `section_id` | `UUID` | FK -> `Section.id`, ondelete="CASCADE" | |
+| `encrypted_content` | `Text` | NOT NULL | AES-256-GCM ciphertext of the full .osu file content as uploaded. |
 | `version` | `Integer` | | Incremental version number per section. |
 | `is_active` | `Boolean` | Default: `false` | Only one version per section should be active. |
-| `uploaded_by` | `Integer` | FK -> `User.id`, ondelete="RESTRICT" | The user who uploaded this version. RESTRICT preserves the audit trail — a `User` cannot be deleted while they have uploaded versions on record. |
+| `uploaded_by` | `UUID` | FK -> `User.id`, ondelete="RESTRICT" | The user who uploaded this version. RESTRICT preserves the audit trail — a `User` cannot be deleted while they have uploaded versions on record. |
 | `created_at` | `DateTime` | Default: `func.now()` | |
-| `updated_at` | `DateTime` | Default: `func.now()`, onupdate | Tracks the last `is_active` flip. The row's `content` is immutable. |
+| `updated_at` | `DateTime` | Default: `func.now()`, onupdate | Tracks the last `is_active` flip. The row's `encrypted_content` is immutable. |
 
 **Active version:** A section's currently active `.osu` version is the `SectionOsuVersion` row with `is_active = true` for that `section_id`. There is exactly one active version per section at any time. We deliberately do **not** denormalize this onto `Section` (e.g., `active_osu_version_id`) to avoid a circular foreign-key dependency between the two tables and to keep a single source of truth.
 
 ### `Post`
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `Integer` | PK, Auto-increment | |
-| `difficulty_id` | `Integer` | FK -> `Difficulty.id`, ondelete="CASCADE" | The difficulty this post is associated with; posts die with their difficulty. |
-| `author_id` | `Integer` | FK -> `User.id`, ondelete="RESTRICT" | RESTRICT preserves the audit trail — a `User` cannot be deleted while they have authored posts. |
-| `timestamp_ms` | `Integer` | Nullable | **Auto-extracted** from the `content` field (first timestamp found). Used for timeline placement and sorting. |
-| `hit_object_combos` | `String` | Nullable | **Auto-extracted** from the `content` field (first timestamp found). The raw combo selection string, e.g., `(2,3,4)`. **Must be preserved in the osu:// URL.** |
+| `id` | `UUID` | PK, client-generated | |
+| `difficulty_id` | `UUID` | FK -> `Difficulty.id`, ondelete="CASCADE" | The difficulty this post is associated with; posts die with their difficulty. |
+| `author_id` | `UUID` | FK -> `User.id`, ondelete="RESTRICT" | RESTRICT preserves the audit trail — a `User` cannot be deleted while they have authored posts. |
+| `parent_id` | `UUID` | FK -> `Post.id`, Nullable, ondelete="CASCADE" | If set, this post is a reply to another post. Top-level posts are `NULL`. Deleting a parent cascades to all its replies. |
 | `tag` | `PostTag` (PG enum) | NOT NULL | PostgreSQL `ENUM('general', 'suggestion', 'problem', 'praise')`. Same rationale as `MapsetMember.role`: typo-proof at write time. |
-| `content` | `Text` | | The full body of the modding post. May contain multiple timestamps; only the first is extracted into the columns above. |
+| `encrypted_body` | `Text` | NOT NULL | AES-256-GCM ciphertext of the full modding post body. |
 | `created_at` | `DateTime` | Default: `func.now()` | |
 | `updated_at` | `DateTime` | Default: `func.now()`, onupdate | |
 
-**Section grouping is computed, not stored.** A post is attached only to a difficulty. Which `Section` a post belongs to is derived on the frontend by checking whether the post's `timestamp_ms` falls within a section's `[start_time_ms, end_time_ms]` range. Posts with no extracted timestamp are shown as "General" for that difficulty. This way, rearranging or renaming sections is a pure frontend recompute — no database migration or post updates needed.
+**Section grouping is computed, not stored.** A post is attached only to a difficulty. Which `Section` a post belongs to is derived on the frontend by checking whether the post's extracted timestamp (computed from decrypted `encrypted_body`) falls within a section's decrypted `[start_time_ms, end_time_ms]` range. Posts with no extracted timestamp are shown as "General" for that difficulty. This way, rearranging or renaming sections is a pure frontend recompute — no database migration or post updates needed.
 
 ---
 
@@ -230,34 +231,34 @@ Activations and rollbacks must run inside a single transaction (deactivate previ
 ### Mapsets (`/mapsets`)
 | Method | Route | Who | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/mapsets` | Any logged-in user | Create a new mapset. Payload: `{ name, description, song_length_ms }`. Automatically adds the creator as an `owner` in `MapsetMember`. |
-| `GET` | `/mapsets` | Any logged-in user | List all mapsets where the current user is a member (via `MapsetMember`). |
-| `GET` | `/mapsets/{id}` | Any member | Get full mapset details, including all `Difficulty`s. Returns `403` if the user is not a member. |
-| `PUT` | `/mapsets/{id}` | Owner/Mapper | Update mapset name, description, or song length. |
+| `POST` | `/mapsets` | Any logged-in user | Create a new mapset. Payload: `{ encrypted_title, encrypted_description, encrypted_song_length_ms, passphrase_salt, encrypted_verification }`. The frontend auto-generates a 48-character alphanumeric passphrase, derives the AES key via PBKDF2, and encrypts all content fields before sending. Automatically adds the creator as an `owner` in `MapsetMember`. |
+| `GET` | `/mapsets` | Any logged-in user | List all mapsets where the current user is a member (via `MapsetMember`). Returns encrypted fields; the frontend decrypts titles for display if the key is cached in `sessionStorage`. |
+| `GET` | `/mapsets/{id}` | Any member | Get full mapset details, including all `Difficulty`s. Returns `403` if the user is not a member. All content fields are encrypted ciphertext. |
+| `PUT` | `/mapsets/{id}` | Owner/Mapper | Update mapset. Payload contains encrypted fields (e.g., `encrypted_title`, `encrypted_description`). The backend stores them verbatim without inspection. |
 | `DELETE` | `/mapsets/{id}` | Owner | Delete a mapset and all related data. |
 
 ### Difficulties (`/mapsets/{id}/difficulties`)
 | Method | Route | Who | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/mapsets/{id}/difficulties` | Owner/Mapper | Create a new difficulty. Payload: `{ name }`. |
-| `GET` | `/mapsets/{id}/difficulties` | Any member | List all difficulties for this mapset. |
-| `GET` | `/difficulties/{did}` | Any member | Get a single difficulty with all its `Section`s and `Post`s. |
-| `PUT` | `/difficulties/{did}` | Owner/Mapper | Rename a difficulty. |
+| `POST` | `/mapsets/{id}/difficulties` | Owner/Mapper | Create a new difficulty. Payload: `{ encrypted_name }`. |
+| `GET` | `/mapsets/{id}/difficulties` | Any member | List all difficulties for this mapset. Returns encrypted names. |
+| `GET` | `/difficulties/{did}` | Any member | Get a single difficulty with all its `Section`s and `Post`s. All content fields are encrypted ciphertext. |
+| `PUT` | `/difficulties/{did}` | Owner/Mapper | Rename a difficulty. Payload: `{ encrypted_name }`. |
 | `DELETE` | `/difficulties/{did}` | Owner/Mapper | Delete a difficulty and all its sections/posts. |
 
 ### Sections (`/difficulties/{did}/sections`)
 | Method | Route | Who | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/difficulties/{did}/sections` | Owner/Mapper | Create a new section. Payload: `{ name, start_time_ms, end_time_ms, sort_order }`. |
-| `PUT` | `/difficulties/{did}/sections/{sid}` | Owner/Mapper | Update section details. |
+| `POST` | `/difficulties/{did}/sections` | Owner/Mapper | Create a new section. Payload: `{ encrypted_name, encrypted_start_time_ms, encrypted_end_time_ms, encrypted_sort_order }`. |
+| `PUT` | `/difficulties/{did}/sections/{sid}` | Owner/Mapper | Update section details. Payload contains encrypted fields. |
 | `DELETE` | `/difficulties/{did}/sections/{sid}` | Owner/Mapper | Remove a section. Posts are unaffected (they're attached to the difficulty, not the section). |
 
 ### Posts (`/difficulties/{did}/posts`)
 | Method | Route | Who | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/difficulties/{did}/posts` | Any member | Create a new post. Payload: `{ tag, content }`. The backend **automatically scans `content` for the first timestamp** and populates `timestamp_ms` and `hit_object_combos`. Section attribution is computed client-side from `timestamp_ms`. |
-| `PUT` | `/difficulties/{did}/posts/{pid}` | Author only | Edit an existing post. Only the original `author_id` is permitted. The backend re-scans `content` and updates the extracted timestamp fields. |
-| `DELETE` | `/difficulties/{did}/posts/{pid}` | Author or Owner | Delete a post. The original `author_id` or the mapset `owner`. |
+| `POST` | `/difficulties/{did}/posts` | Any member | Create a new post. Payload: `{ tag, encrypted_body, parent_id? }`. `parent_id` references an existing post in the same difficulty. The frontend extracts the first timestamp from the plaintext body **before encrypting**, for use in `osu://` link generation and timeline placement. The backend stores the ciphertext verbatim and never sees the plaintext. |
+| `PUT` | `/difficulties/{did}/posts/{pid}` | Author only | Edit an existing post. Only the original `author_id` is permitted. Payload: `{ encrypted_body }`. The backend replaces the ciphertext verbatim. |
+| `DELETE` | `/difficulties/{did}/posts/{pid}` | Author or Owner | Delete a post. If the post has replies, they are also deleted (DB-level cascade). The original `author_id` or the mapset `owner`. |
 
 ### Members (`/mapsets/{id}/members`)
 | Method | Route | Who | Description |
@@ -268,12 +269,15 @@ Activations and rollbacks must run inside a single transaction (deactivate previ
 | `DELETE` | `/mapsets/{id}/members/{user_id}` | Owner | Remove a member from this mapset. The path param is `User.id` — i.e., the global user identifier the frontend already has, not `MapsetMember.id`. Backend looks up the `MapsetMember` row by `(mapset_id, user_id)` and deletes it. The owner cannot remove themselves (returns `409`); they must transfer ownership via `PUT` first, or delete the entire mapset. |
 
 ### `.osu` File Management (`/difficulties/{did}/sections/{sid}/osu`)
+
+> **Architecture change:** All `.osu` parsing, base generation, diffing, merging, and the critical/notice ack flow happen **entirely in the frontend**. The backend is a dumb encrypted blob store. It validates only the outer envelope (file size ≤ 1 MB) and manages version metadata (`is_active` flags). It never inspects `.osu` content.
+
 | Method | Route | Who | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/difficulties/{did}/sections/{sid}/osu` | Owner/Mapper | Upload a complete `.osu` file for this section. Multipart body: the file plus optional `acknowledge_critical: bool` field (default `false`). Validates `≤ 1 MB` and presence of `[HitObjects]`. Diffs the candidate base against the active base — see Section 8 for the full algorithm: critical mismatch without ack → `409` with diff; critical mismatch with ack → owner regens base, mapper has section normalized to base; notice mismatch → new `DifficultyBaseOsuVersion` + new `SectionOsuVersion`; no diff → new section version only. All persistence runs in a single transaction. |
-| `GET` | `/difficulties/{did}/sections/{sid}/osu` | Any member | Download the section's current active `.osu` file exactly as uploaded (for editing). Returns `404` if none uploaded. |
-| `GET` | `/difficulties/{did}/base.osu` | Any member | Download the active base template: headers + positive BPM timing points, empty hit objects. Returns `404` until the first section upload. |
-| `GET` | `/difficulties/{did}/merged.osu` | Any member | Download the full merged difficulty. Backend combines: active base headers + deduplicated & sorted timing points + all hit objects from all active section versions sorted by timestamp. |
+| `POST` | `/difficulties/{did}/sections/{sid}/osu` | Owner/Mapper | Upload a `.osu` section version and optionally a new base version. Payload: `{ encrypted_section_content, encrypted_base_content? }`. The frontend has already parsed the file, computed the candidate base, run the critical/notice diff algorithm, and handled any ack modals. The backend inserts the section version first, then the base version, in a single transaction. Both UUIDs are client-generated and sent in the same payload — section-first ordering is a transaction-level FK requirement (the base references the section), not an id-discovery round-trip. |
+| `GET` | `/difficulties/{did}/sections/{sid}/osu` | Any member | Download the section's current active `.osu` ciphertext. Returns `404` if none uploaded. The frontend decrypts before presenting to the user. |
+| `GET` | `/difficulties/{did}/base.osu` | Any member | Download the active base template ciphertext. Returns `404` until the first section upload. The frontend decrypts before presenting to the user. |
+| `GET` | `/difficulties/{did}/merged.osu` | — | **Removed.** Merged difficulty assembly is frontend-only. The frontend fetches the active base + all active section versions, decrypts, merges, and triggers a browser download via `URL.createObjectURL`. |
 | `GET` | `/difficulties/{did}/base/versions` | Any member | List base version history (version number, source section version, created_at, is_active). |
 | `POST` | `/difficulties/{did}/base/versions/{vid}/activate` | Owner/Mapper | Roll back to a previous base version. Single-transaction flip. |
 | `GET` | `/difficulties/{did}/sections/{sid}/osu/versions` | Any member | List section version history (version number, uploaded_by, created_at, is_active). |
@@ -329,24 +333,90 @@ The `*` wildcard is incompatible with `allow_credentials=True` per the CORS spec
   - `mapper`: Can edit mapset details, manage difficulties/sections, create/edit/delete their own posts.
   - `modder`: Can create/edit/delete their own posts only.
 
+### End-to-End Encryption
+
+All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stores only ciphertext and **cannot decrypt it** — not even the server administrator can read posts, `.osu` files, or mapset metadata.
+
+#### Threat Model
+- **Protected against:** Database administrator curiosity, server compromise, backup theft, insider threats.
+- **Not protected against:** Compromised client device, XSS on an unlocked session, a malicious group member sharing the passphrase, the passphrase leaking via the out-of-band sharing channel (Discord, email, etc.), browser dev tools, or a compromised server delivering modified frontend JavaScript that exfiltrates the passphrase on entry. The security model assumes the JS bundle the user receives is the audited one; SRI / repository pinning / browser extension audits are out of scope for the MVP.
+- **Member removal is not access revocation.** Deleting a `MapsetMember` row revokes API access, but the removed user may still have the passphrase in their `sessionStorage` or memory. They can also decrypt any ciphertext they downloaded before removal. There is no passphrase rotation flow in the MVP; the only recovery from a compromise is to create a new mapset and re-upload everything.
+- **Server integrity limitations:** The server is trusted to report the correct "active" version for each section and base (i.e., which `SectionOsuVersion` and `DifficultyBaseOsuVersion` row has `is_active = true`). A malicious server could serve an old version as the active one — the ciphertext is genuine and GCM-valid, so the client would display outdated content without detecting tampering. Version rollback is not mitigated by E2EE; it requires server integrity. This is an accepted trade-off for the MVP. Future mitigation would require chaining version rows (e.g., each row's AAD includes the previous version's ciphertext hash), which is a non-trivial schema change.
+  - **Detection:** The version history UI (`OsuVersionHistory`, `BaseVersionHistory`) displays version numbers, so a collaborator who checks the history may notice "we were on v7 yesterday, why is it v5?" However, the main mapset view does not surface version numbers prominently — most users will not notice a silent rollback without explicitly opening the history.
+
+#### Cryptographic Primitives
+- **Key derivation:** PBKDF2-SHA256, **600,000 iterations** (OWASP 2023 guidance), 256-bit AES key. Argon2id is the modern recommendation for new systems, but Web Crypto API does not ship it natively. PBKDF2 is the pragmatic choice for a browser-only implementation; the high iteration count and 48-char passphrase provide sufficient defense in depth.
+- **Encryption:** AES-256-GCM with a random 96-bit IV per encryption operation.
+- **AAD (Additional Authenticated Data):** Every encryption operation binds the ciphertext to its row identity using AAD constructed as the exact UTF-8 string `` `${table}|${id}|${mapset_id}` ``, where `id` is the **row's own primary key** (e.g. `SectionOsuVersion.id`, not `section_id`). This deterministic format (no JSON, no whitespace, fixed key order) prevents ciphertext swapping attacks — a compromised server cannot move a post's encrypted body onto a different post, or swap two versions of the same section, and have it decrypt successfully.
+  - **Per-table AAD recipes:**
+    - `Mapset`: `Mapset|<mapset_id>|<mapset_id>` (the `id` and `mapset_id` are the same UUID; duplicate is intentional and deterministic).
+    - `MapsetMember`: `MapsetMember|<member_id>|<mapset_id>`.
+    - `Difficulty`: `Difficulty|<difficulty_id>|<mapset_id>`.
+    - `Section`: `Section|<section_id>|<mapset_id>`.
+    - `Post`: `Post|<post_id>|<mapset_id>`.
+    - `SectionOsuVersion`: `SectionOsuVersion|<version_id>|<mapset_id>`.
+    - `DifficultyBaseOsuVersion`: `DifficultyBaseOsuVersion|<version_id>|<mapset_id>`.
+  - **AAD bootstrapping on INSERT:** All primary keys are **UUIDv4 generated by the client** before encryption. The client creates the UUID, includes it in the AAD, encrypts the payload, and sends both the UUID and the ciphertext to the backend. The backend uses the client-provided UUID as the primary key. This avoids the circular dependency of needing the DB-assigned auto-increment ID before encryption.
+  - **What AAD does NOT authenticate:** Structural metadata such as foreign keys (`parent_id`, `difficulty_id`, `section_id`) and flags (`is_active`, `version`) are unencrypted and therefore not bound by AAD. A malicious server could, for example, re-parent a reply (`Post.parent_id`) or reorder sections by tampering with `sort_order` ciphertext (which it cannot read) — but it cannot swap ciphertext between rows. This is an accepted limitation: AAD protects ciphertext integrity, not relational semantics.
+- **Passphrase:** 48-character alphanumeric string, **auto-generated per mapset on creation**. Shared out-of-band (Discord, etc.).
+  - **User-chosen passphrases are forbidden.** Because `encrypted_verification` is a known-plaintext canary, a stolen database enables offline PBKDF2 brute-force. The 48-char auto-generated passphrase (~286 bits of entropy) makes this infeasible; a weak user-chosen passphrase would not. The create-mapset flow must enforce auto-generation with no override.
+
+#### Key Storage
+- **Passphrase + salt** are stored in **`sessionStorage`** (survives refresh, dies with tab or browser uninstall). The derived `CryptoKey` itself lives only in **JavaScript memory** and is recreated lazily on demand via PBKDF2. This preserves the Web Crypto API's `extractable: false` property.
+- **Wrong-passphrase detection:** The frontend attempts to decrypt `Mapset.encrypted_verification` with the derived key. If the GCM authentication tag fails (AES-GCM throws), the passphrase is wrong. Do not store a hash of the passphrase — that would create a second offline brute-force surface and defeat the canary design.
+- The passphrase is **never sent to the server**.
+- If a user loses their session (browser uninstalled, cache cleared), they must re-enter the passphrase. If they don't have it, they must obtain it from another group member. **There is no server-side recovery — this is by design.**
+
+#### Encrypted vs. Unencrypted Data
+
+**Unencrypted (structural metadata only):**
+- All primary/foreign keys (`id`, `mapset_id`, `user_id`, `parent_id`, etc.)
+- `MapsetMember.role`
+- `Mapset.passphrase_salt` (public by design)
+- `Mapset.encrypted_verification` (ciphertext, harmless without the key)
+- Version flags (`is_active`, `version`)
+- Audit metadata (`uploaded_by`, `created_at`, `updated_at`)
+
+**Encrypted (server never sees plaintext):**
+- `Mapset`: title, description, song_length_ms
+- `Difficulty`: name
+- `Section`: name, start_time_ms, end_time_ms, sort_order
+- `Post`: content (body)
+- `SectionOsuVersion`: content
+- `DifficultyBaseOsuVersion`: content
+
+#### UX Implications
+- **Dashboard:** Mapsets where the user does not have the passphrase in `sessionStorage` are shown as "🔒 Encrypted Mapset" (or just the ID). If the passphrase is cached, the real decrypted title is shown.
+- **Mapset Page:** If the key is missing, a full-screen passphrase input modal is shown. Nothing else renders until the correct passphrase is entered.
+- **Passphrase Sharing:** New members must obtain the passphrase from an existing member out-of-band (Discord, etc.). Any member whose session has the passphrase cached can re-view it in the UI — this is a social convention, not a technical restriction (all unlocked sessions have equal access to the key).
+- **Passphrase Rotation:** There is no passphrase rotation or re-encryption flow in the MVP. If a passphrase leaks (e.g., shared in the wrong Discord channel), the only recovery is to create a new mapset and migrate content manually. This is a known limitation.
+
+#### Performance Implications
+Because the server cannot read encrypted fields, certain operations that would normally happen server-side must happen client-side:
+- **Section ordering:** The backend cannot sort by `sort_order`, `start_time_ms`, or `end_time_ms`. The frontend fetches all sections for a difficulty, decrypts them, and sorts in memory.
+- **Mapset title sorting:** The dashboard cannot sort mapsets alphabetically by title server-side. The frontend decrypts titles and sorts.
+- **Post filtering by time range:** The backend cannot index or filter posts by timestamp. The frontend decrypts all posts and derives timestamps client-side.
+- **Post count:** Typically <100 per difficulty, so in-memory decryption and sorting is imperceptible. If mapsets grow to thousands of posts, this design will need revisiting (e.g., searchable encrypted indexes or server-side proxy re-encryption).
+
 ---
 
 ## 6. Frontend Architecture
 
 ### Routing (React Router)
-- `/login`: Simple page with a "Login with osu!" button.
-- `/dashboard`: Grid/list of mapsets the user is a member of. Button to create a new mapset.
-- `/mapsets/:id`: The main Mapset View page.
+- `/login`: Simple page with a "Login with osu!" button. Displays a prominent security notice: *"All mapset data is end-to-end encrypted with AES-256-GCM. The server cannot read your content. Your mapset passphrase is never sent to the server."* Links to the open-source repository for audit (adjust or remove the link if the repository is private).
+- `/dashboard`: Grid/list of mapsets the user is a member of. Button to create a new mapset. Mapsets without a cached key show "🔒 Encrypted Mapset".
+- `/mapsets/:id`: The main Mapset View page. If the user does not have the decryption key for this mapset, a `PassphraseModal` is shown and no content renders.
 
 ### Mapset View Layout
 This is the core of the application. It will be a single-page layout:
 
 1. **Header Bar:**
-   - Mapset name and description.
-   - Song length displayed as `MM:SS`.
+   - Mapset name and description (decrypted from `encrypted_title`/`encrypted_description` if key is available).
+   - Song length displayed as `MM:SS` (decrypted from `encrypted_song_length_ms`).
    - "Manage Members" button (for Owner/Mapper).
-   - **"Download Base Template"** button (downloads the active base template for the selected difficulty).
-   - **"Download Full Difficulty (.osu)"** button (downloads the merged difficulty).
+   - **"View Passphrase"** button (for Owner, only if key is in memory).
+   - **"Download Base Template"** button (fetches encrypted base, decrypts, triggers download).
+   - **"Download Full Difficulty (.osu)"** button (fetches all encrypted blobs, decrypts, merges in browser, triggers download via `URL.createObjectURL`).
 
 2. **Difficulty Tabs / Selector (Below Header):**
    - Tabs or a dropdown listing all difficulties in the mapset (e.g., Easy, Normal, Hard).
@@ -357,6 +427,7 @@ This is the core of the application. It will be a single-page layout:
    - List of sections for the **currently selected difficulty**.
    - Clicking a section filters the forum posts.
    - "Add Section" and "Edit Section" controls (for Owner/Mapper).
+   - Each section row shows the **active version number** (e.g., "v3") next to the section name. This provides a cheap at-a-glance rollback-detection affordance — collaborators can notice "we were on v7 yesterday, why is it v5?" without opening the history modal.
    - Each section row shows a small **uploader indicator** for the active `.osu` version: the uploader's avatar (or a fallback icon if no `.osu` has been uploaded yet) with a tooltip on hover that reads `Last upload: <username> · <relative time>`. This is the at-a-glance "whose version is current?" affordance — full history is still available via Version History.
    - **Per-section `.osu` controls** (for Owner/Mapper):
      - "Upload .osu" button (file picker).
@@ -364,16 +435,17 @@ This is the core of the application. It will be a single-page layout:
      - "Version History" button (lists past uploads, allows rollback).
 
 4. **Timeline Scrubber (Top of Main Area):**
-   - A horizontal bar representing the full `song_length_ms` of the mapset.
-   - Visual markers/dots indicate where posts with `timestamp_ms` exist **for the current difficulty**.
+   - A horizontal bar representing the full decrypted `song_length_ms` of the mapset.
+   - Visual markers/dots indicate where posts with extracted timestamps exist **for the current difficulty**. The frontend decrypts all posts, extracts timestamps, and computes marker positions.
    - Clicking anywhere on the bar sets a "Current Time" state.
    - Zooming/panning is **not** required for the MVP; a simple linear scale is sufficient.
 
 5. **Forum Thread (Main Area):**
-   - Chronological list of `PostCard` components for the selected difficulty.
+   - Chronological list of `PostCard` components for the selected difficulty. Replies are indented or visually grouped beneath their parent post.
    - "New Post" input box at the top or bottom.
    - **No pagination.** osu!'s own forums don't paginate modding threads, and a typical difficulty rarely exceeds ~100 posts. The full list is fetched and rendered.
    - **Collapsible posts.** Each `PostCard` has a collapse/expand affordance (chevron in the header). Collapsed state shows only the header (avatar, username, tag badge, primary timestamp link, post date) and hides the body and actions, so users can scroll past threads they've already addressed without losing them. Collapse state is per-user, per-post, persisted to `localStorage` keyed on `(user_id, post_id)` — it's a UI preference, not server state. A "Collapse all" / "Expand all" button in the thread header toggles every post in the current view.
+   - **Replies.** Each `PostCard` displays a "Reply" action. Clicking it opens the `CreatePostForm` in reply mode, pre-filling the `parent_id` and showing a snippet of the parent post for context.
 
 ### Key Components
 
@@ -381,23 +453,32 @@ This is the core of the application. It will be a single-page layout:
 - **Author Info:** Avatar (small circle), username.
 - **Tag Badge:** Color-coded badge (e.g., Blue for Suggestion, Red for Problem, Green for Praise, Grey for General).
 - **Primary Timestamp Link:**
-  - If `timestamp_ms` exists, display a clickable link.
+  - After decrypting `encrypted_body`, extract the first timestamp. If one exists, display a clickable link.
   - Format: `osu://edit/MM:SS:MMM` or `osu://edit/MM:SS:MMM%20(combos)`.
   - Example: `<a href="osu://edit/00:46:140%20(2,3,4)">00:46:140 (2,3,4)</a>`.
   - Clicking this triggers the browser to open the osu! client.
-- **Content:** The text body. The frontend should also scan the text and turn any other valid timestamps into clickable links, even though only the first one is stored in the DB columns.
-- **Actions:** "Edit" and "Delete" buttons, visible only if the current user is the author (or mapset owner).
+- **Content:** The decrypted text body. The frontend should scan the text and turn any other valid timestamps into clickable links.
+  - **XSS prevention:** Decrypted post content is rendered as plain text via React (which auto-escapes HTML). Only the timestamp linkifier may inject `<a>` elements, and the linkifier must extract regex matches as plain strings — never use `dangerouslySetInnerHTML`. Post bodies are user-controlled and must not be interpreted as HTML under any circumstances.
+- **Actions:** "Reply", "Edit", and "Delete" buttons. "Reply" is visible to any member. "Edit" and "Delete" are visible only if the current user is the author (or mapset owner).
 
 #### `CreatePostForm`
 - **No separate timestamp input field.** Users simply write their post in a `Textarea`.
 - **Tag Selector:** Dropdown for `general`, `suggestion`, `problem`, `praise`.
 - **Content:** Textarea. Users paste strings like `00:46:140 (2,3,4) - these are too close` directly.
 - **No section selector.** The post's section is derived from its extracted timestamp on the frontend.
-- **Submit Button:** Creates the post via `POST /difficulties/{did}/posts`. The backend handles timestamp extraction.
+- **Reply mode.** When opened as a reply to a specific post, the form displays the parent author and a short excerpt of the parent body. The payload includes `parent_id`.
+- **Submit Button:** Frontend extracts the first timestamp from the plaintext body (for `osu://` link generation and timeline placement), then encrypts the body with the mapset key and sends `encrypted_body` (and `parent_id` if replying) via `POST /difficulties/{did}/posts`. The backend stores the ciphertext verbatim.
 
 #### `OsuUploadButton`
 - Simple file input wrapper (hidden `<input type="file" accept=".osu">`) triggered by a styled button.
-- On file selection, uploads via `POST /difficulties/{did}/sections/{sid}/osu`.
+- On file selection, the frontend:
+  1. Reads the file as text.
+  2. Validates it (contains `[HitObjects]`, ≤ 1 MB).
+  3. Parses it and computes the candidate base.
+  4. Diffs the candidate base against the active base (fetched and decrypted from the backend).
+  5. Handles critical/notice ack modals if needed.
+  6. Encrypts the final section content (and new base content if applicable) with the mapset key.
+  7. Sends encrypted payload(s) via `POST /difficulties/{did}/sections/{sid}/osu`.
 - Shows upload progress and success/error states.
 
 #### `OsuVersionHistory`
@@ -406,11 +487,13 @@ This is the core of the application. It will be a single-page layout:
 - "Activate" button on each non-active version to rollback.
 
 #### `DownloadOsuButton`
-- A simple anchor link or button that triggers a file download.
-- Used for: section `.osu` download, base template download, and merged difficulty download.
+- For **section download:** fetches encrypted ciphertext from `GET /difficulties/{did}/sections/{sid}/osu`, decrypts with the mapset key, creates a `Blob`, and triggers download via `URL.createObjectURL`.
+- For **base template download:** same pattern using `GET /difficulties/{did}/base.osu`.
+- For **merged difficulty download:** fetches active base + all active section ciphertexts, decrypts all, runs the merge algorithm in `osuMerge.ts`, creates a `Blob`, and triggers download. **No backend endpoint for merged download.**
 
 ### State Management
 - **Global Auth State:** Managed via `useAuth` hook and React Context. Checks `/auth/me` on app load.
+- **Encryption State:** Managed via `useEncryption` hook and React Context. Stores a `Map<string, CryptoKey>` (mapset UUID → derived AES key) in **JavaScript memory**, and stores the **passphrase + salt** in **`sessionStorage`** so keys can be re-derived lazily after refresh. Functions: `unlockMapset(mapsetId, passphrase, salt)` derives key via PBKDF2 and verifies against `encrypted_verification` canary. `getKey(mapsetId)` returns the in-memory key or re-derives it from `sessionStorage`. `lockMapset(mapsetId)` clears both memory and `sessionStorage`.
 - **Server State:** All mapset, difficulty, section, and post data is managed via TanStack Query (`useQuery`, `useMutation`).
   - Mutations (create/edit/delete post) will invalidate the difficulty query to automatically refresh the forum thread.
 
@@ -418,8 +501,10 @@ This is the core of the application. It will be a single-page layout:
 
 ## 7. Timestamp & osu:// Link Logic
 
+> **Architecture change:** Timestamp extraction happens **entirely in the frontend**. Because post bodies are encrypted (`encrypted_body`), the backend cannot scan them. The frontend extracts timestamps from plaintext before encryption, and re-extracts them from decrypted plaintext for display.
+
 ### Input Format
-Users will copy strings from the osu! editor status bar or type them manually. These appear inline in their post `content`:
+Users will copy strings from the osu! editor status bar or type them manually. These appear inline in their post body:
 - `00:46:140`
 - `00:46:140 (2,3,4)`
 - `01:47:766`
@@ -428,44 +513,25 @@ Users will copy strings from the osu! editor status bar or type them manually. T
 A single post may contain multiple timestamps:
 > "00:46:140 (2,3,4) - these circles are too close. Also 01:47:766 feels a bit empty."
 
-### Backend Extraction Logic
-When creating or updating a post, the backend scans `content` for the **first** valid timestamp and extracts it into the database columns. The rest of the text remains untouched.
+### Frontend Extraction Logic
+Before encrypting a post body for upload, the frontend scans the plaintext for the **first** valid timestamp and extracts it into `{ ms, combos }` for use in `osu://` link generation and timeline placement. The encrypted payload sent to the backend contains only the ciphertext; the extracted timestamp lives only in frontend memory.
 
-```python
-import re
+```typescript
+function extractFirstTimestamp(content: string): { ms: number; combos?: string } | null {
+  const pattern = /(\d{2}):(\d{2}):(\d{3})(?:\s+(\([^)]+\)))?/;
+  const match = content.match(pattern);
+  if (!match) return null;
 
-def extract_first_timestamp(content: str) -> dict | None:
-    """
-    Scans text for the first occurrence of a timestamp like '00:46:140' or '00:46:140 (2,3,4)'.
-    Returns: { 'ms': int, 'combos': str | None } or None if no match found.
-    """
-    # Regex looks for MM:SS:MMM optionally followed by space + (numbers).
-    # The strict {2}:{2}:{3} shape is intentional and safe: users do not type
-    # timestamps by hand. They select hit objects in the osu! editor and copy,
-    # which always emits the canonical zero-padded MM:SS:MMM form (with combos).
-    # Abbreviated forms like "0:46:14" are not produced by the client and so
-    # are not a concern here.
-    #
-    # Known limit: this matches up to 99:59:999 (~100 minutes). The longest
-    # ranked osu! map is roughly an hour, so this is fine for the contests
-    # this tool targets. If a future use case involves a >99-minute map
-    # (unlikely on a collab), widen the minutes group then.
-    pattern = r'(\d{2}):(\d{2}):(\d{3})(?:\s+(\([^)]+\)))?'
-    match = re.search(pattern, content)
-    if not match:
-        return None
-    
-    minutes, seconds, milliseconds, combos = match.groups()
-    total_ms = int(minutes) * 60000 + int(seconds) * 1000 + int(milliseconds)
-    
-    return {
-        "ms": total_ms,
-        "combos": combos  # e.g., "(2,3,4)"
-    }
+  const [, minutes, seconds, milliseconds, combos] = match;
+  const totalMs = parseInt(minutes, 10) * 60000 + parseInt(seconds, 10) * 1000 + parseInt(milliseconds, 10);
+  return { ms: totalMs, combos };
+}
 ```
 
+> **Type safety note:** `combos` may be `undefined`. Downstream code that constructs `osu://` links must guard against this (e.g., `combos ? \`osu://edit/${timeStr}%20${combos}\` : \`osu://edit/${timeStr}\``) rather than using a non-null assertion (`combos!`).
+
 ### URL Generation (Frontend)
-When rendering the primary timestamp link from the DB columns:
+When rendering the primary timestamp link after decrypting the post body:
 ```typescript
 function generateOsuLink(ms: number, combos?: string): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -476,7 +542,7 @@ function generateOsuLink(ms: number, combos?: string): string {
   const timeStr = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(milliseconds).padStart(3, '0')}`;
   
   if (combos) {
-    return `osu://edit/${timeStr}%20${combos}`;
+    return `osu://edit/${timeStr}%20${encodeURIComponent(combos)}`;
   }
   return `osu://edit/${timeStr}`;
 }
@@ -487,19 +553,21 @@ function generateOsuLink(ms: number, combos?: string): string {
 
 ## 8. `.osu` File Management & Merging
 
-This is a core feature that transforms the forum into a collaborative beatmap manager. Each `Section` can have its own `.osu` file, and the full difficulty can be downloaded as a merged, valid `.osu` file.
+> **Architecture change:** All `.osu` parsing, base generation, diffing, merging, and the critical/notice ack flow happen **entirely in the frontend** (TypeScript / Web Crypto API). The backend is a dumb encrypted blob store — it stores and serves ciphertext only. The rules below describe the **client-side** algorithm.
+
+This is a core feature that transforms the forum into a collaborative beatmap manager. Each `Section` can have its own `.osu` file, and the full difficulty can be downloaded as a merged, valid `.osu` file assembled in the browser.
 
 ### Storage
-Since `.osu` files are small (a few KB), they are stored as `TEXT` columns directly in PostgreSQL. This ensures portability, simple backups, and easy version control. Uploaded files are capped at **1 MB** — generous for a text format, and any larger file is almost certainly malformed or malicious.
+Since `.osu` files are small (a few KB), they are stored as encrypted `TEXT` columns directly in PostgreSQL. This ensures portability, simple backups, and easy version control. Uploaded files are capped at **1 MB** — generous for a text format, and any larger file is almost certainly malformed or malicious. The backend validates only the size; all parsing and validation happen client-side.
 
 ### What we store, what we don't
-A `.osu` file is **just a text file** describing a beatmap: headers, timing points, hit objects, and references (by filename) to external assets. We store and serve only the `.osu` text. We do **not** store, upload, or merge:
+A `.osu` file is **just a text file** describing a beatmap: headers, timing points, hit objects, and references (by filename) to external assets. We store and serve only the encrypted `.osu` text. We do **not** store, upload, or merge:
 - **Audio** (`AudioFilename` references the mapper's local `.mp3`/`.ogg`)
 - **Background images / video** (referenced from `[Events]`)
 - **Custom hitsounds** (the `.wav` files referenced from `[Events]` or hit object samples)
 - **Skin elements** (any image/sound override)
 
-The merged difficulty download (`merged.osu`) is therefore a single text file. To actually play the merged map, the user must have the same audio (and any referenced custom hitsounds/storyboard assets) locally in the matching beatmap folder. This is by design: this is a modding/collaboration tool, not a beatmap distribution platform, and `AudioFilename` is treated as a Critical setting precisely so all collaborators agree on which local file the `.osu` references.
+The merged difficulty download is a single text file assembled in the browser. To actually play the merged map, the user must have the same audio (and any referenced custom hitsounds/storyboard assets) locally in the matching beatmap folder. This is by design: this is a modding/collaboration tool, not a beatmap distribution platform, and `AudioFilename` is treated as a Critical setting precisely so all collaborators agree on which local file the `.osu` references.
 
 ### Base Template — Per-Upload Regeneration with Versioning
 
@@ -518,38 +586,37 @@ When comparing a new candidate base against the currently active base, header li
 
 | Bucket | Lines | On mismatch (default) |
 | :--- | :--- | :--- |
-| **Critical** | All key/value lines in `[Difficulty]`; `AudioFilename` in `[General]` | **Reject the upload** with `409 Conflict`. Response body lists the conflicting keys with both values plus the uploader's role, so the frontend can show a role-aware modal. Nothing is written. The uploader either cancels or re-submits with `acknowledge_critical: true` — see "Acknowledged critical mismatch" below. **Only the mapset `owner` can permanently change critical settings.** |
-| **Notice** | All other lines in `[General]`, `[Events]`, `[Metadata]` — **except `Version` in `[Metadata]`**, which mappers customize per-collaborator | Save a new `DifficultyBaseOsuVersion` (next version, `is_active = true`, previous active flipped to `false` in the same transaction). Section upload proceeds. The response includes a warning summarizing which keys changed. |
+| **Critical** | All key/value lines in `[Difficulty]`; `AudioFilename` in `[General]` | **Reject the upload** with a frontend modal. Nothing is written. The uploader either cancels or confirms — see "Acknowledged critical mismatch" below. **Only the mapset `owner` can permanently change critical settings.** |
+| **Notice** | All other lines in `[General]`, `[Events]`, `[Metadata]` — **except `Version` in `[Metadata]`**, which mappers customize per-collaborator | The frontend sends both a new `DifficultyBaseOsuVersion` and a new `SectionOsuVersion` to the backend in a single transaction. The response includes a warning summarizing which keys changed. |
 | **Ignored** | `[Metadata] Version` (collab convention); `[TimingPoints]` (positive lines are folded into the base via the candidate filter, the rest are merged at download time); `[Colours]` (cosmetic, last-write-wins on the base); `[Editor]` (per-mapper editor state — bookmarks, distance spacing, beat divisor — never authoritative across the collab) | No effect on the base unless the line falls into a bucket above. |
 
 The positive `[TimingPoints]` content of the candidate base **is** compared against the active base — if BPM points changed, that's a notice-bucket update (it changes the base content but it's not user-facing settings).
 
 #### Acknowledged critical mismatch
 
-When the upload route is re-submitted with `acknowledge_critical: true` (request body field) after a `409`, the behavior depends on the uploader's role:
+When the frontend detects a critical mismatch, it shows a role-aware modal. On confirm, it re-submits the upload with the user's choice encoded into the payload:
 
-- **Owner:** treats the new file as authoritative. The base is regenerated with the new critical settings (new `DifficultyBaseOsuVersion`), and the section is saved as-is. The frontend should present this as a destructive confirmation: *"CRITICAL: are you sure? You're about to change `OverallDifficulty`, `AudioFilename`, … on the base. Every collaborator's section will use these settings going forward."*
-- **Mapper:** the base wins. The backend rewrites the section's critical lines to match the active base's values **before** persisting the section version, and saves the rewritten file. The base is **not** changed. The frontend should present this as a non-destructive warning: *"Your diff's `OverallDifficulty`, `AudioFilename`, … differ from the base. Make sure you're uploading the correct difficulty. (Cancel) (I'm aware)"* — clicking "I'm aware" re-submits with the flag and the user accepts that their file's critical fields will be normalized.
+- **Owner:** treats the new file as authoritative. The frontend sends the new section version + a new base version (with the new critical settings) to the backend. The backend stores them verbatim in a single transaction. The frontend should present this as a destructive confirmation: *"CRITICAL: are you sure? You're about to change `OverallDifficulty`, `AudioFilename`, … on the base. Every collaborator's section will use these settings going forward."*
+- **Mapper:** the base wins. The frontend rewrites the section's critical lines to match the active base's values **before encrypting**, then sends the (rewritten) section version to the backend. The base is **not** changed. The frontend should present this as a non-destructive warning: *"Your diff's `OverallDifficulty`, `AudioFilename`, … differ from the base. Make sure you're uploading the correct difficulty. (Cancel) (I'm aware)"* — clicking "I'm aware" accepts that their file's critical fields will be normalized.
 - **Modder:** can't reach this code path; modders cannot upload `.osu` at all (`403`).
 
 This split is deliberate. Owners are the only role with authority over critical mapset properties (difficulty, audio); mappers can iterate on their section's hit objects and timing details but not silently change the difficulty's identity.
 
-#### Algorithm — on every section upload
+#### Algorithm — on every section upload (frontend)
 
 1. Validate the file is well-formed (contains `[HitObjects]`) and ≤ 1 MB.
 2. Parse and compute the candidate base.
-3. **No active base for this difficulty (first upload):** in one transaction, insert the section version (`is_active = true`) **first** to obtain its id, then insert the candidate base as version 1 (`is_active = true`, `source_section_version_id = <new section version id>`).
+3. **No active base for this difficulty (first upload):** encrypt the section content and the candidate base, then send both to the backend. The backend inserts the section version first, then the candidate base as version 1 with `source_section_version_id` pointing at it. Because all primary keys are client-generated UUIDs, both IDs are known before the transaction begins; the ordering is required only to satisfy the FK constraint (the base references the section), not to "obtain" an id.
 4. **Active base exists** — diff candidate against active base:
-   - **Critical mismatch and `acknowledge_critical` is not set** → `409` with the diff. Nothing is written.
-   - **Critical mismatch with `acknowledge_critical: true`:**
-     - Owner → in one transaction: deactivate prior section version, insert new section version (`is_active = true`); then deactivate prior base, insert new base version (`is_active = true`, `source_section_version_id = <new section version id>`). Section-first ordering is required because the new base's `source_section_version_id` FK must reference an existing row. Response is `200` with `warnings`.
-     - Mapper → in one transaction: deactivate prior section version, insert new section version whose critical lines have been rewritten to match the active base. Base is untouched. Response is `200` with `warnings` listing which fields were normalized.
-   - **Notice mismatch (or positive timing-point-line diff):** in one transaction, deactivate prior section version, insert new section version (`is_active = true`); then deactivate prior base, insert new base version (`is_active = true`, `source_section_version_id = <new section version id>`). Section-first for the same FK reason. Response is `200` with `warnings`.
-   - **No diff:** in one transaction, deactivate prior section version, insert new section version. Base is untouched.
+   - **Critical mismatch and user has not confirmed →** show modal, abort upload. Nothing is written.
+   - **Critical mismatch with owner confirmation:** encrypt section as-is, encrypt new base, send both to backend. Backend inserts section version first, then base version, in one transaction. (Section-first ordering satisfies the FK constraint; both IDs are client-generated and known in advance.)
+   - **Critical mismatch with mapper confirmation:** rewrite section's critical lines to match active base, encrypt the rewritten section, send to backend. Backend inserts section version only (base untouched) in one transaction.
+   - **Notice mismatch (or any positive timing-point-line diff):** encrypt section, encrypt new base, send both to backend. Backend inserts section version first, then base version, in one transaction. (Section-first ordering satisfies the FK constraint; both IDs are client-generated and known in advance.)
+   - **No diff:** encrypt section, send to backend. Backend inserts section version only in one transaction. Base untouched.
 
-> **Insert order matters.** Whenever a base version is created, its `source_section_version_id` references the section version produced by the same upload. Insert the section version first, capture its id, then insert the base — otherwise the FK fails at INSERT time (the constraint is not deferred).
+> **Insert order matters.** Whenever a base version is created, its `source_section_version_id` references the section version produced by the same upload. The backend must insert the section version first, then the base — otherwise the FK fails at INSERT time (the constraint is not deferred). Both IDs are client-generated UUIDs sent in the same payload; the ordering is a transaction-level FK requirement, not an id-discovery round-trip.
 >
-> The "single transaction" requirement is what makes the partial-unique-index DB constraints (Section 3) safe. Without it the index would fire mid-flight and abort the whole operation. With it, deactivate-then-activate is atomic.
+> The "single transaction" requirement is what keeps the partial-unique-index DB constraints (Section 3) safe. Without it the index would fire mid-flight and abort the whole operation. With it, deactivate-then-activate is atomic.
 
 ### Concurrent uploads
 Two simultaneous uploads to the same difficulty are not coordinated with an application-level lock. The partial unique indexes on `is_active` will reject the second commit (`IntegrityError`); the route should catch it and return `409` so the client can retry. We accept this trade-off because:
@@ -564,25 +631,27 @@ All previous section uploads and base versions are preserved. Users can:
 - List all section versions and all base versions with metadata (version number, uploader / source section version, timestamp, active status).
 - Activate any previous section version (flips section `is_active` in a transaction). **Activating a previous section version does not retroactively change the base** — base history is independent and only advances on uploads.
 
-### Merged Difficulty Download (`GET /difficulties/{did}/merged.osu`)
-The backend assembles a complete, valid `.osu` file from the active base + every section's active version:
+### Merged Difficulty Download (Frontend-only)
+The frontend assembles a complete, valid `.osu` file from the active base + every section's active version:
 
-1. **Headers:** start with the active `DifficultyBaseOsuVersion.content` (everything before `[HitObjects]`). This is the authoritative source of `[General]`, `[Metadata]`, `[Events]`, `[Difficulty]`, `[Colours]`.
-2. **Timing points:** collect lines from:
+1. **Fetch & decrypt:** download the active base ciphertext and all active section ciphertexts, then decrypt them using the mapset key.
+2. **Headers:** start with the active base content (everything before `[HitObjects]`). This is the authoritative source of `[General]`, `[Metadata]`, `[Events]`, `[Difficulty]`, `[Colours]`.
+3. **Timing points:** collect lines from:
    - The active base (positive BPM points only).
    - Every section's active `.osu` file (all timing points — positive and negative).
-3. **Sort & deduplicate:**
+4. **Sort & deduplicate:**
    - Sort by `time` (first column) ascending.
    - Deduplicate by (timestamp, type) where type is "positive" (`beatLength > 0`) or "negative" (`beatLength < 0`):
      - At most one positive line per timestamp.
      - At most one negative line per timestamp.
      - One positive + one negative at the same timestamp is allowed and preserved (this is how osu! encodes a BPM change with a custom SV at the same instant).
    - **Tiebreaker when two lines of the same type collide on the same timestamp:** section content overrides the base; among sections, the lower `Section.sort_order` wins (with `Section.id` as a stable secondary tiebreaker). This makes the merge deterministic and gives the earliest section authority over its own boundary.
-4. **Hit objects:** collect `[HitObjects]` lines from every section's active version, sort ascending by `time` (third column).
-5. **Assemble:** write headers → `[TimingPoints]` → `[HitObjects]`.
+5. **Hit objects:** collect `[HitObjects]` lines from every section's active version, sort ascending by `time` (third column).
+6. **Assemble:** write headers → `[TimingPoints]` → `[HitObjects]`.
+7. **Trigger download:** create a `Blob` from the assembled string, generate `URL.createObjectURL`, and programmatically click an `<a download="...">` element.
 
 ### Section Download (`GET /difficulties/{did}/sections/{sid}/osu`)
-Returns the exact `.osu` file content of the currently active version for that section, byte-for-byte as uploaded. This lets a mapper edit the file in the osu! editor and re-upload.
+Returns the encrypted `.osu` ciphertext of the currently active version for that section. The frontend decrypts it before presenting it to the user for editing. The decrypted content is byte-for-byte identical to what was originally uploaded.
 
 ### Bookmark Import (Optional Stretch)
 As a convenience feature, users can optionally upload a `.osu` file to auto-generate `Section` records from `[Editor] Bookmarks:`. This is unchanged from the original spec but is now considered a Phase 7 stretch feature rather than part of core `.osu` management.
@@ -652,73 +721,80 @@ A phased approach to keep the project testable and avoid large merge conflicts. 
 
 ---
 
-### Phase 2: Mapset Management
+### Phase 2: Mapset Management & Encryption Foundation
 
 | # | Task | What It Produces | Verification |
 |---|------|------------------|------------|
-| 2.1 | Create `Mapset` and `MapsetMember` models + migration | Update `models.py` | DB schema matches spec; write model unit tests |
-| 2.2 | Implement `POST /mapsets` | Create mapset + auto-add owner as `MapsetMember` | Can create mapset via API; write integration test |
-| 2.3 | Implement `GET /mapsets` | List mapsets for current user | Returns only user's mapsets; write test |
-| 2.4 | Implement `GET /mapsets/{id}` | Full mapset details | Returns 403 for non-members; write test |
-| 2.5 | Implement `PUT /mapsets/{id}` + `DELETE /mapsets/{id}` | Update/delete with role checks | Only owner/mapper can update; only owner can delete; write tests |
-| 2.6 | Build Dashboard page | `src/pages/DashboardPage.tsx` + `src/components/MapsetCard.tsx` | Lists user's mapsets; write component test |
-| 2.7 | Build "Create Mapset" form | Modal/form with name, description, song length | Creates mapset, appears on dashboard; write component test |
+| 2.1 | Create `Mapset` and `MapsetMember` models + migration | Update `models.py` with encrypted fields, `passphrase_salt`, `encrypted_verification`. **Migration strategy:** Since Phase 1 created plaintext `User` only, this is a clean additive migration. If any plaintext content tables exist from prior work, drop and recreate them **only if** (a) explicitly authorized by the project owner and (b) the table contains no rows — otherwise stop and ask. | DB schema matches spec; write model unit tests |
+| 2.2 | Implement frontend crypto layer | `src/utils/crypto.ts` with PBKDF2 + AES-GCM encrypt/decrypt | Round-trip tests in `crypto.test.ts`; wrong passphrase fails; tampered ciphertext fails |
+| 2.3 | Implement `EncryptionContext` | `src/contexts/EncryptionContext.tsx` with `sessionStorage` persistence | Key survives refresh, dies with tab; can unlock/lock mapsets |
+| 2.4 | Implement `POST /mapsets` | Create mapset + auto-add owner as `MapsetMember`. Payload uses encrypted fields + salt + verification | Can create mapset via API; write integration test |
+| 2.5 | Implement `GET /mapsets` | List mapsets for current user | Returns only user's mapsets; write test |
+| 2.6 | Implement `GET /mapsets/{id}` | Full mapset details | Returns 403 for non-members; write test |
+| 2.7 | Implement `PUT /mapsets/{id}` + `DELETE /mapsets/{id}` | Update/delete with role checks | Only owner/mapper can update; only owner can delete; write tests |
+| 2.8 | Build Dashboard page | `src/pages/DashboardPage.tsx` + `src/components/MapsetCard.tsx` | Lists user's mapsets; encrypted titles decrypt if key is cached; write component test |
+| 2.9 | Build "Create Mapset" form | Modal/form. Auto-generates 48-char passphrase, shows it with **"Copy to clipboard"** and a mandatory **"I have saved this passphrase"** checkbox. The checkbox must be checked before the form can be submitted. Include a warning: *"If you lose this passphrase and no other member has it, all mapset data is permanently unrecoverable. There is no server-side recovery."* | Creates mapset with encrypted fields; appears on dashboard; write component test |
+| 2.10 | Build `PassphraseModal` | `src/components/PassphraseModal.tsx` | Prompts for passphrase on locked mapset; unlocks and decrypts on correct entry; write component test |
+| 2.11 | Update Login page with security banner | `src/pages/LoginPage.tsx` | Displays E2EE notice and links to source code; write component test |
 
-**Deliverable:** A user can create a mapset and see it on their dashboard. All tests pass.
+**Deliverable:** A user can create an encrypted mapset, see it on their dashboard, and unlock it with the passphrase. All tests pass.
 
 ---
 
-### Phase 3: Difficulties, Sections, & `.osu` Upload
+### Phase 3: Difficulties, Sections, & Frontend `.osu` Engine
 
 | # | Task | What It Produces | Verification |
 |---|------|------------------|------------|
-| 3.1 | Create `Difficulty`, `Section`, `SectionOsuVersion`, `DifficultyBaseOsuVersion` models + migration (incl. partial unique indexes on `is_active`) | Update `models.py` | DB schema matches spec; partial unique indexes prevent two `is_active = true` rows per section/difficulty; write model tests |
-| 3.2 | Implement Difficulty CRUD routes | `POST/GET/PUT/DELETE` for difficulties | Full CRUD works via API; write integration tests |
-| 3.3 | Implement Section CRUD routes | `POST/PUT/DELETE` for sections | Sections scoped to difficulty; write tests |
-| 3.4 | Build Difficulty Tabs UI | `src/components/DifficultyTabs.tsx` | Switching difficulties updates view; write component test |
-| 3.5 | Build Section Sidebar UI | `src/components/SectionList.tsx` | Sections display per difficulty; write component test |
-| 3.6 | Implement `.osu` upload for sections | `POST /difficulties/{did}/sections/{sid}/osu` | Upload succeeds, content stored; write integration test |
-| 3.7 | Implement base template generation + per-upload regen | Compute candidate base on every upload, diff against active `DifficultyBaseOsuVersion` (critical/notice/ignored buckets, plus `acknowledge_critical` ack flow per Section 8), insert new base version when needed | Base v1 created on first upload; subsequent uploads with notice diffs create v2/v3 with warnings; critical mismatch returns `409`; ack flow regens base for owner, normalizes section for mapper. Unit test the parser + bucket classification; integration test all four branches of the algorithm. |
-| 3.8 | Implement section `.osu` download | `GET /difficulties/{did}/sections/{sid}/osu` | Returns exact uploaded file; write test |
-| 3.9 | Add `.osu` upload/download UI | `OsuUploadButton`, download button in Section Sidebar | File picker works, download returns correct content; write component tests |
-| 3.10 | Implement section version history endpoints | `GET /difficulties/{did}/sections/{sid}/osu/versions`, `POST .../activate` | Can list section versions and roll back atomically; write tests for the active-version invariant |
-| 3.11 | Implement base version history endpoints | `GET /difficulties/{did}/base/versions`, `POST /difficulties/{did}/base/versions/{vid}/activate` | Can list base versions and roll back atomically; write tests for the active-version invariant. Activation must run in one transaction. |
-| 3.12 | Add section version history UI | `OsuVersionHistory` modal | Can view section history and switch versions; write component test |
-| 3.13 | Add base version history UI | `BaseVersionHistory` modal in the difficulty header (next to "Download Base Template") | Lists base versions with their `source_section_version_id` so users can see which section upload triggered each base change; activate any prior version; write component test |
-| 3.14 | Add critical-ack upload flow UI | Frontend handler for `409` from section upload that branches on the user's role: owner sees a destructive "CRITICAL: Are you sure?" modal listing the changed keys; mapper sees a "your diff differs from the base, (Cancel) (I'm aware)" modal; both retry the upload with `acknowledge_critical: true` on confirm | Both modals render correctly; "I'm aware" path produces an upload whose stored content has critical lines normalized to base values; write component tests for both branches |
+| 3.1 | Create `Difficulty`, `Section`, `SectionOsuVersion`, `DifficultyBaseOsuVersion` models + migration (incl. partial unique indexes on `is_active`) | Update `models.py` with encrypted fields | DB schema matches spec; partial unique indexes prevent two `is_active = true` rows per section/difficulty; write model tests |
+| 3.2 | Implement Difficulty CRUD routes | `POST/GET/PUT/DELETE` for difficulties (encrypted payloads) | Full CRUD works via API; write integration tests |
+| 3.3 | Implement Section CRUD routes | `POST/PUT/DELETE` for sections (encrypted payloads) | Sections scoped to difficulty; write tests |
+| 3.4 | Build Difficulty Tabs UI | `src/components/DifficultyTabs.tsx` | Switching difficulties updates view; decrypts names if key available; write component test |
+| 3.5 | Build Section Sidebar UI | `src/components/SectionList.tsx` | Sections display per difficulty; decrypts names/boundaries if key available; write component test |
+| 3.6 | Build frontend `.osu` parser | `src/utils/osuParser.ts` | Parse `.osu` text into sections; extract timing points and hit objects; validate `[HitObjects]` presence and ≤ 1 MB; write unit tests with sample `.osu` fixtures |
+| 3.7 | Build frontend base generator & diff engine | `src/utils/osuBase.ts` | Compute candidate base; classify into Critical/Notice/Ignored buckets; diff candidate vs active base; return mismatch report | Unit test parser, base generator, bucket classification, and diff algorithm |
+| 3.8 | Build frontend merge engine | `src/utils/osuMerge.ts` | Collect timing points from base + sections, sort, deduplicate by (timestamp, type), collect hit objects, assemble final `.osu` string | Unit test merge with sample files; verify deterministic output |
+| 3.9 | Implement `.osu` upload endpoint (backend blob store) | `POST /difficulties/{did}/sections/{sid}/osu` accepts encrypted section + optional encrypted base | Backend stores ciphertext verbatim, manages `is_active` flags in single transaction; write integration test |
+| 3.10 | Implement section `.osu` download | `GET /difficulties/{did}/sections/{sid}/osu` returns encrypted ciphertext | Frontend decrypts before presenting; write test |
+| 3.11 | Add `.osu` upload/download UI | `OsuUploadButton`, download button in Section Sidebar | File picker → frontend parses → handles ack modals → encrypts → uploads; download fetches ciphertext → decrypts → triggers `URL.createObjectURL`; write component tests |
+| 3.12 | Implement section version history endpoints | `GET /difficulties/{did}/sections/{sid}/osu/versions`, `POST .../activate` | Can list section versions and roll back atomically; write tests for the active-version invariant |
+| 3.13 | Implement base version history endpoints | `GET /difficulties/{did}/base/versions`, `POST /difficulties/{did}/base/versions/{vid}/activate` | Can list base versions and roll back atomically; write tests for the active-version invariant |
+| 3.14 | Add section version history UI | `OsuVersionHistory` modal | Can view section history and switch versions; write component test |
+| 3.15 | Add base version history UI | `BaseVersionHistory` modal in the difficulty header | Lists base versions with their `source_section_version_id`; activate any prior version; write component test |
+| 3.16 | Add critical-ack upload flow UI | Frontend handler for upload that branches on role: owner sees destructive "CRITICAL: Are you sure?" modal; mapper sees "your diff differs from the base, (Cancel) (I'm aware)" modal; both proceed with appropriate encrypted payload on confirm | Both modals render correctly; "I'm aware" path produces an upload whose stored content has critical lines normalized to base values; write component tests for both branches |
+| 3.17 | Verify backend has no `.osu` parsing logic | Confirm `backend/app/services/osu_parser.py` does not exist; if it does, delete it and update imports. Add a CI check: `! grep -rn --include='*.py' -P '(import\s+osu_parser|from\s+.*osu_parser|services\.osu_parser)' backend/app/` so regressions fail the build. This catches imports and service references but ignores comments and test fixtures. | Backend is a pure blob store with no parsing logic; verify `pytest` still passes |
 
-**Deliverable:** Users can create difficulties and sections, upload `.osu` files per section, download them back, and manage versions. All tests pass.
+**Deliverable:** Users can create difficulties and sections, upload `.osu` files (with client-side parsing, base diffing, and ack flow), download decrypted sections, and manage versions. All tests pass.
 
 ---
 
-### Phase 4: Forum Posts
+### Phase 4: Forum Posts (Client-Side Encrypted)
 
 | # | Task | What It Produces | Verification |
 |---|------|------------------|------------|
-| 4.1 | Create `Post` model + migration | Update `models.py` | DB schema matches spec; write model test |
-| 4.2 | Implement Post CRUD routes | `POST/PUT/DELETE` for posts | Author-only edit, author/owner delete; write tests |
-| 4.3 | Implement post listing | Posts returned with difficulty details | Chronological order; write test |
-| 4.4 | Build `PostCard` component | Avatar, tag badge, content display | Renders correctly; write component test |
-| 4.5 | Build `CreatePostForm` component | Textarea, tag selector | Creates post via API; write component test |
-| 4.6 | Render forum thread | Posts list in Mapset View | Posts display per difficulty; write integration test |
+| 4.1 | Create `Post` model + migration | Update `models.py` with `encrypted_body`, remove `timestamp_ms`/`hit_object_combos` | DB schema matches spec; write model test |
+| 4.2 | Implement Post CRUD routes | `POST/PUT/DELETE` for posts (encrypted payloads) | Author-only edit, author/owner delete; backend stores ciphertext verbatim; write tests |
+| 4.3 | Implement post listing | Posts returned with difficulty details | Chronological by `created_at`; write test |
+| 4.4 | Build `PostCard` component | Avatar, tag badge, decrypted content display | Decrypts `encrypted_body` via `EncryptionContext`; extracts and linkifies timestamps; write component test |
+| 4.5 | Build `CreatePostForm` component | Textarea, tag selector | Frontend extracts first timestamp from plaintext before encrypting body; creates post via API; write component test |
+| 4.6 | Render forum thread | Posts list in Mapset View | Posts display per difficulty; frontend sorts by extracted timestamp after decryption; write integration test |
 
-**Deliverable:** Users can leave general comments on a specific difficulty. All tests pass.
+**Deliverable:** Users can create encrypted modding posts, view decrypted posts with clickable timestamps, and edit/delete their own posts. All tests pass.
 
 ---
 
-### Phase 5: Timestamps & Merged Difficulty Download
+### Phase 5: Timestamps, Timeline, & Merged Download (Frontend-Only)
 
 | # | Task | What It Produces | Verification |
 |---|------|------------------|------------|
-| 5.1 | Implement timestamp extraction logic | `backend/app/services/osu_parser.py` | Regex extracts first timestamp + combos correctly; write unit test |
-| 5.2 | Integrate extraction into post create/update | Auto-populate `timestamp_ms` and `hit_object_combos` | DB columns updated on post save; write integration test |
+| 5.1 | Implement client-side timestamp extraction | `src/utils/extractTimestamp.ts` | Regex extracts first timestamp + combos from plaintext; write unit test |
+| 5.2 | Integrate extraction into `CreatePostForm` | Frontend extracts timestamp before encrypting body | Timestamp available in memory for `osu://` link generation; write component test |
 | 5.3 | Update `PostCard` with `osu://` links | `generateOsuLink` function, clickable primary timestamp | Link opens osu! client; write component test |
-| 5.4 | Linkify all timestamps in post content | Frontend regex to find additional timestamps | All timestamps in body are clickable; write component test |
-| 5.5 | Add timeline scrubber markers | Dots on timeline for posts with timestamps | Visual markers appear; write component test |
-| 5.6 | Implement merged `.osu` download | `GET /difficulties/{did}/merged.osu` | Combines base + all sections' hit objects + deduped timing points; write integration test with sample .osu files |
-| 5.7 | Add merged download UI | "Download Full Difficulty" button in header | Downloads valid .osu file; write component test |
+| 5.4 | Linkify all timestamps in post content | Frontend regex to find additional timestamps in decrypted body | All timestamps in body are clickable; write component test |
+| 5.5 | Add timeline scrubber markers | Dots on timeline for posts with timestamps | Frontend computes markers from decrypted post timestamps; write component test |
+| 5.6 | Implement merged `.osu` download (frontend) | `src/utils/osuMerge.ts` + download handler | Fetches active base + all active section ciphertexts, decrypts, merges, creates Blob, triggers download; write integration test with sample .osu files |
+| 5.7 | Add merged download UI | "Download Full Difficulty" button in header | Assembles valid .osu file in browser; write component test |
 
-**Deliverable:** Clicking a timestamp opens the osu! editor. Users can download a fully merged difficulty. All tests pass.
+**Deliverable:** Clicking a timestamp opens the osu! editor. Users can download a fully merged difficulty assembled in the browser. All tests pass.
 
 ---
 
@@ -726,13 +802,14 @@ A phased approach to keep the project testable and avoid large merge conflicts. 
 
 | # | Task | What It Produces | Verification |
 |---|------|------------------|------------|
-| 6.1 | Implement post editing (`PUT`) | `PUT /difficulties/{did}/posts/{pid}` | Author can edit, timestamp re-extracted; write test |
+| 6.1 | Implement post editing (`PUT`) | `PUT /difficulties/{did}/posts/{pid}` | Author can edit; frontend re-encrypts new body; write test |
 | 6.2 | Add "Edit" button to `PostCard` | Conditional rendering | Only author sees edit button; write component test |
 | 6.3 | Implement member invitation | `POST /mapsets/{id}/members` | Resolve username to user_id; write integration test |
 | 6.4 | Implement member removal + role change | `DELETE /mapsets/{id}/members/{user_id}` and `PUT /mapsets/{id}/members/{user_id}` | Owner-only; ownership-transfer atomicity; self-demotion is rejected; write tests for all edge cases (Section 4) |
-| 6.5 | Add "Manage Members" UI | Invite/remove members modal | Functional member management; write component test |
+| 6.5 | Add "Manage Members" UI | Invite/remove members modal | Functional member management; owner can re-view passphrase if key is in memory; write component test |
+| 6.6 | Handle new member passphrase flow | When an invited user first opens a mapset, show `PassphraseModal` | User must enter correct passphrase to unlock and see content; write component test |
 
-**Deliverable:** Users can edit posts and invite collaborators. All tests pass.
+**Deliverable:** Users can edit posts, invite collaborators, and new members can unlock mapsets with the shared passphrase. All tests pass.
 
 ---
 
@@ -740,13 +817,14 @@ A phased approach to keep the project testable and avoid large merge conflicts. 
 
 | # | Task | What It Produces | Verification |
 |---|------|------------------|------------|
-| 7.1 | Implement bookmark import (stretch) | Parse `[Editor] Bookmarks:` from `.osu` upload to auto-create sections | Creates sections correctly; write parser unit test |
+| 7.1 | Implement bookmark import (stretch) | Parse `[Editor] Bookmarks:` from decrypted `.osu` upload to auto-create sections | Creates sections correctly; write parser unit test |
 | 7.2 | Add loading states & error handling | Spinners, toast notifications | UX feels responsive; write component tests |
 | 7.3 | Run full test suite | All backend and frontend tests | `pytest` and `npm test` pass; coverage reflects "everything that matters" per Section 11, not a numeric threshold |
 | 7.4 | Final Docker Compose testing | All services start cleanly | `docker-compose up --build` works end-to-end |
 | 7.5 | Update deployment docs | Reflect any final env vars or config changes | Docs are accurate |
+| 7.6 | Verify E2EE claim | Automated integration test: intercept all API requests/responses and assert that (a) no plaintext content field name appears in JSON payloads (fields that must never be plaintext on the wire: `title`, `description`, `song_length_ms`, `name`, `content`, `body`, `start_time_ms`, `end_time_ms`, `sort_order`); and (b) every `encrypted_*` value is base64-decodable and at least 28 bytes (12-byte IV + 16-byte GCM tag), catching the bug where a developer sent plaintext inside an `encrypted_*` wrapper. Confirm every content field uses the `encrypted_*` prefix. Manual audit: inspect DB directly with `psql` and confirm all `encrypted_*` columns contain base64 ciphertext strings, never human-readable text. | Both automated test and manual audit pass; no plaintext leaks detected |
 
-**Deliverable:** A fully functional MVP, containerized, tested, and ready for deployment.
+**Deliverable:** A fully functional MVP with end-to-end encryption, containerized, tested, and ready for deployment.
 
 ---
 
@@ -764,24 +842,23 @@ backend/tests/
 ├── conftest.py          # Shared fixtures: async DB engine, test client, mock user
 ├── test_auth.py         # OAuth flow, JWT cookies, /auth/me
 ├── test_mapsets.py      # Mapset CRUD, permissions
-├── test_difficulties.py # Difficulty CRUD, .osu upload/download/merge
+├── test_difficulties.py # Difficulty CRUD
 ├── test_sections.py     # Section CRUD
-├── test_posts.py        # Post CRUD, timestamp extraction
-├── test_members.py      # Member invitation, permissions
-└── services/
-    └── test_osu_parser.py  # Timestamp regex, .osu merge logic, base template generation
+├── test_posts.py        # Post CRUD
+└── test_members.py      # Member invitation, permissions
 ```
+
+> **Note:** `services/test_osu_parser.py` is removed — all `.osu` parsing, base generation, diffing, and merging are tested in the frontend test suite (`frontend/src/utils/osuParser.test.ts`, `osuBase.test.ts`, `osuMerge.test.ts`).
 
 **Key Fixtures (conftest.py):**
 - `db_session`: Async SQLModel session connected to a **dedicated PostgreSQL test container** (separate from the dev `db` service, with its own volume). We do not test against SQLite — the production driver (`asyncpg`) and Postgres-specific behavior (`selectinload`, partial unique indexes, `ENUM` types, JSON columns, deferrable constraints, dialect quirks) must be exercised in tests, not papered over.
 - `client`: `httpx.AsyncClient` mounted to the FastAPI app.
 - `mock_user`: A pre-authenticated `User` object injected into `get_current_user` dependency for tests.
-- `mock_osu_file`: Sample `.osu` file content for parser tests.
 
 **Testing Rules:**
 - Every API endpoint must have at least one integration test.
-- Every service function (parser, merger) must have unit tests covering normal cases and edge cases.
 - Permission checks must be tested explicitly (e.g., a `modder` cannot upload `.osu`).
+- The backend does not parse `.osu` content — use fake ciphertext strings (e.g., `"encrypted:test"`) in backend tests where encrypted payloads are required.
 
 ### Frontend Tests (Vitest + React Testing Library)
 
@@ -795,13 +872,19 @@ frontend/src/
 ├── api/
 │   └── endpoints.test.ts  # API function mocks
 ├── hooks/
-│   └── useAuth.test.ts    # Auth state logic
+│   ├── useAuth.test.ts    # Auth state logic
+│   └── useEncryption.test.ts  # Encryption key management
+├── utils/
+│   ├── crypto.test.ts     # PBKDF2 + AES-GCM round-trip
+│   ├── osuParser.test.ts  # .osu parsing, base generation, diff algorithm
+│   └── osuMerge.test.ts   # Timing point deduplication, hit object merge
 ├── components/
 │   ├── MapsetCard.test.tsx
 │   ├── PostCard.test.tsx
 │   ├── CreatePostForm.test.tsx
 │   ├── OsuUploadButton.test.tsx
-│   └── OsuVersionHistory.test.tsx
+│   ├── OsuVersionHistory.test.tsx
+│   └── PassphraseModal.test.tsx
 └── pages/
     ├── LoginPage.test.tsx
     └── DashboardPage.test.tsx
