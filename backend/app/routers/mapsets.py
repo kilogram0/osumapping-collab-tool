@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Mapset, MapsetMember, MapsetRole, User
+from app.queries import get_mapset_membership
 from app.schemas import MapsetCreate, MapsetRead, MapsetUpdate
 
 router = APIRouter(prefix="/mapsets", tags=["mapsets"])
@@ -23,19 +24,6 @@ router = APIRouter(prefix="/mapsets", tags=["mapsets"])
 
 def _forbidden() -> HTTPException:
     return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
-
-async def _get_membership(
-    db: AsyncSession, mapset_id: UUID, user_id: UUID
-) -> MapsetMember | None:
-    return (
-        await db.execute(
-            select(MapsetMember).where(
-                MapsetMember.mapset_id == mapset_id,
-                MapsetMember.user_id == user_id,
-            )
-        )
-    ).scalar_one_or_none()
 
 
 @router.post(
@@ -105,7 +93,7 @@ async def get_mapset(
     if mapset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
-    membership = await _get_membership(db, mapset_id, current_user.id)
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
     if membership is None:
         raise _forbidden()
 
@@ -151,7 +139,7 @@ async def update_mapset(
     if mapset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
-    membership = await _get_membership(db, mapset_id, current_user.id)
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
     if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
         raise _forbidden()
 
@@ -188,7 +176,7 @@ async def delete_mapset(
     if mapset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
-    membership = await _get_membership(db, mapset_id, current_user.id)
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
     if membership is None or membership.role != MapsetRole.owner:
         raise _forbidden()
 

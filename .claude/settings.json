@@ -11,7 +11,8 @@
       "Bash(docker-compose exec *)",
       "Bash(git diff *)",
       "Read(//tmp/**)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(docker exec *)"
     ],
     "additionalDirectories": [
       "/tmp"

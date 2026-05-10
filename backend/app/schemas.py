@@ -93,3 +93,85 @@ class MapsetRead(BaseModel):
     owner_id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+_NAME_CT_MAX = 2_048
+_TIME_CT_MAX = 256
+_SORT_ORDER_CT_MAX = 256
+
+
+class DifficultyCreate(BaseModel):
+    """Request body for ``POST /mapsets/{mapset_id}/difficulties``."""
+
+    id: UUID
+    encrypted_name: str = Field(min_length=1, max_length=_NAME_CT_MAX)
+
+
+class DifficultyUpdate(BaseModel):
+    """Request body for ``PATCH /difficulties/{id}``.
+
+    Same str / default=None / type: ignore pattern as MapsetUpdate — see the
+    comment there for rationale (non-nullable column, PATCH semantics).
+    """
+
+    encrypted_name: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=_NAME_CT_MAX
+    )
+
+
+class DifficultyRead(BaseModel):
+    """Difficulty row as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    mapset_id: UUID
+    encrypted_name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SectionCreate(BaseModel):
+    """Request body for ``POST /difficulties/{difficulty_id}/sections``."""
+
+    id: UUID
+    encrypted_name: str = Field(min_length=1, max_length=_NAME_CT_MAX)
+    encrypted_start_time_ms: str = Field(min_length=1, max_length=_TIME_CT_MAX)
+    encrypted_end_time_ms: str = Field(min_length=1, max_length=_TIME_CT_MAX)
+    encrypted_sort_order: str = Field(min_length=1, max_length=_SORT_ORDER_CT_MAX)
+
+
+class SectionUpdate(BaseModel):
+    """Request body for ``PATCH /difficulties/{did}/sections/{sid}``.
+
+    Same str / default=None / type: ignore pattern as MapsetUpdate — see the
+    comment there for rationale (non-nullable columns, PATCH semantics).
+    """
+
+    encrypted_name: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=_NAME_CT_MAX
+    )
+    encrypted_start_time_ms: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=_TIME_CT_MAX
+    )
+    encrypted_end_time_ms: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=_TIME_CT_MAX
+    )
+    encrypted_sort_order: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=_SORT_ORDER_CT_MAX
+    )
+
+
+class SectionRead(BaseModel):
+    """Section row as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    difficulty_id: UUID
+    encrypted_name: str
+    encrypted_start_time_ms: str
+    encrypted_end_time_ms: str
+    encrypted_sort_order: str
+    created_at: datetime
+    updated_at: datetime
