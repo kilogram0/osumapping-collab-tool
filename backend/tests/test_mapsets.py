@@ -6,37 +6,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Mapset, User
-
-
-@pytest.fixture
-async def mapset_owner(db_session):
-    """Create and return a User that can own mapsets."""
-    owner = User(
-        osu_id=77777, username="owner", avatar_url="https://a.ppy.sh/77777"
-    )
-    db_session.add(owner)
-    await db_session.commit()
-    await db_session.refresh(owner)
-    return owner
-
-
-@pytest.fixture
-async def mapset_with_owner(db_session, mapset_owner):
-    """Create and return a Mapset with an owner."""
-    mapset = Mapset(
-        id=uuid4(),
-        encrypted_title="encrypted:title",
-        encrypted_description="encrypted:desc",
-        encrypted_song_length_ms="encrypted:100000",
-        passphrase_salt="salt",
-        encrypted_verification="encrypted:verified",
-        owner_id=mapset_owner.id,
-    )
-    db_session.add(mapset)
-    await db_session.commit()
-    await db_session.refresh(mapset)
-    return mapset
+from app.models import Mapset
 
 
 @pytest.mark.asyncio
@@ -127,7 +97,7 @@ async def test_mapset_fk_violation_for_nonexistent_owner(db_session):
         encrypted_song_length_ms="encrypted:100000",
         passphrase_salt="salt",
         encrypted_verification="encrypted:verified",
-        owner_id=-1,  # does not exist
+        owner_id=uuid4(),  # does not exist
     )
     db_session.add(mapset)
     with pytest.raises(IntegrityError):

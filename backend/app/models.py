@@ -35,7 +35,11 @@ class User(SQLModel, table=True):
 
     __tablename__ = "user"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: UUID | None = Field(
+        default=None,
+        primary_key=True,
+        sa_column_kwargs={"server_default": func.gen_random_uuid()},
+    )
     osu_id: int = Field(index=True, unique=True, nullable=False)
     username: str
     avatar_url: str
@@ -82,7 +86,7 @@ class Mapset(SQLModel, table=True):
     encrypted_verification: str = Field(
         sa_column=sa.Column(sa.Text, nullable=False)
     )
-    owner_id: int = Field(
+    owner_id: UUID = Field(
         sa_column=sa.Column(
             sa.ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
         )
@@ -123,7 +127,7 @@ class MapsetMember(SQLModel, table=True):
             sa.ForeignKey("mapset.id", ondelete="CASCADE"), nullable=False
         )
     )
-    user_id: int = Field(
+    user_id: UUID = Field(
         sa_column=sa.Column(
             sa.ForeignKey("user.id", ondelete="CASCADE"), nullable=False
         )

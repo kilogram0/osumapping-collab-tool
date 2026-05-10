@@ -36,6 +36,9 @@ services:
       - ACCESS_TOKEN_TTL_DAYS=${ACCESS_TOKEN_TTL_DAYS:-14}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       db:
         condition: service_healthy

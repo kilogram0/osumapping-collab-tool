@@ -1,6 +1,7 @@
 """Integration tests for osu! OAuth flow and session management."""
 
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -262,7 +263,7 @@ async def test_me_returns_authenticated_user(client: AsyncClient):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == user.id
+    assert data["id"] == str(user.id)
     assert data["osu_id"] == 55555
     assert data["username"] == "MeUser"
     assert data["avatar_url"] == "https://a.ppy.sh/55555"
@@ -292,7 +293,7 @@ async def test_me_rejects_invalid_token(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_logout_clears_session_cookie(client: AsyncClient):
     """POST /auth/logout must expire the access_token cookie."""
-    token = create_access_token(1)
+    token = create_access_token(uuid4())
     client.cookies.set(settings.cookie_name, token)
     response = await client.post("/api/auth/logout")
 
@@ -366,7 +367,7 @@ async def test_me_rejects_expired_token(client: AsyncClient):
     from datetime import datetime, timedelta, timezone
 
     expired_payload = {
-        "sub": "1",
+        "sub": str(uuid4()),
         "exp": datetime.now(timezone.utc) - timedelta(seconds=1),
         "iat": datetime.now(timezone.utc) - timedelta(days=1),
     }

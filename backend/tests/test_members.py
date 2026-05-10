@@ -4,40 +4,11 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from app.models import Mapset, MapsetMember, MapsetRole, User
-
-
-@pytest.fixture
-async def mapset_owner(db_session):
-    """Create and return a User that can own mapsets."""
-    owner = User(
-        osu_id=77777, username="owner", avatar_url="https://a.ppy.sh/77777"
-    )
-    db_session.add(owner)
-    await db_session.commit()
-    await db_session.refresh(owner)
-    return owner
-
-
-@pytest.fixture
-async def mapset_with_owner(db_session, mapset_owner):
-    """Create and return a Mapset with an owner."""
-    mapset = Mapset(
-        id=uuid4(),
-        encrypted_title="encrypted:title",
-        encrypted_description="encrypted:desc",
-        encrypted_song_length_ms="encrypted:100000",
-        passphrase_salt="salt",
-        encrypted_verification="encrypted:verified",
-        owner_id=mapset_owner.id,
-    )
-    db_session.add(mapset)
-    await db_session.commit()
-    await db_session.refresh(mapset)
-    return mapset
+from app.models import MapsetMember, MapsetRole, User
 
 
 @pytest.mark.asyncio
@@ -107,10 +78,8 @@ async def test_member_roles_round_trip(db_session, mapset_with_owner):
 @pytest.mark.asyncio
 async def test_member_invalid_role_rejected(db_session, mapset_with_owner, mapset_owner):
     """An invalid enum string is rejected at the DB level."""
-    from sqlalchemy.dialects.postgresql import insert
-
     stmt = (
-        insert(MapsetMember)
+        sa.insert(MapsetMember)
         .values(
             id=uuid4(),
             mapset_id=mapset_with_owner.id,
@@ -118,7 +87,7 @@ async def test_member_invalid_role_rejected(db_session, mapset_with_owner, mapse
             role="hacker",  # invalid
         )
     )
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(DBAPIError) as exc_info:
         await db_session.execute(stmt)
         await db_session.commit()
     assert "invalid input value for enum mapsetrole" in str(exc_info.value).lower()
@@ -165,7 +134,7 @@ async def test_member_updated_at_advances_on_role_change(db_session, mapset_with
     original_updated_at = member.updated_at
     assert original_updated_at is not None
 
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.001)
 
     member.role = MapsetRole.mapper
     await db_session.commit()

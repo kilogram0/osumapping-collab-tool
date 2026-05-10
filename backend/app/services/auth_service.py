@@ -6,6 +6,7 @@ responsible for HTTP concerns (cookies, redirects, status codes).
 """
 
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import httpx
 import jwt
@@ -128,7 +129,7 @@ async def upsert_user_by_osu_id(session: AsyncSession, osu_payload: dict) -> Use
 # ------------------------------------------------------------------
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: UUID) -> str:
     """Encode a JWT containing ``sub`` (internal user id) and ``exp``.
 
     The TTL is controlled by :attr:`settings.ACCESS_TOKEN_TTL_DAYS`.

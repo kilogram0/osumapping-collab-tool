@@ -9,6 +9,7 @@ import hmac
 import secrets
 import time
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -155,11 +156,12 @@ async def get_current_user(
     except AuthServiceError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    try:
-        user_id = int(payload.get("sub", 0))
-    except (ValueError, TypeError):
+    sub = payload.get("sub")
+    if not sub:
         raise HTTPException(status_code=401, detail="Invalid token payload")
-    if not user_id:
+    try:
+        user_id = UUID(sub)
+    except (ValueError, TypeError):
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     user = await db.get(User, user_id)

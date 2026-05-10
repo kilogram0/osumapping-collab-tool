@@ -2,6 +2,7 @@
 
 import os
 from typing import AsyncGenerator
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import settings
 from app.database import get_db
 from app.main import app as _app
+from app.models import Mapset, User
 
 
 def _resolve_test_database_url() -> str:
@@ -100,3 +102,33 @@ async def client():
     ) as ac:
         yield ac
     _app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def mapset_owner(db_session):
+    """Create and return a User that can own mapsets."""
+    owner = User(
+        osu_id=77777, username="owner", avatar_url="https://a.ppy.sh/77777"
+    )
+    db_session.add(owner)
+    await db_session.commit()
+    await db_session.refresh(owner)
+    return owner
+
+
+@pytest.fixture
+async def mapset_with_owner(db_session, mapset_owner):
+    """Create and return a Mapset with an owner."""
+    mapset = Mapset(
+        id=uuid4(),
+        encrypted_title="encrypted:title",
+        encrypted_description="encrypted:desc",
+        encrypted_song_length_ms="encrypted:100000",
+        passphrase_salt="salt",
+        encrypted_verification="encrypted:verified",
+        owner_id=mapset_owner.id,
+    )
+    db_session.add(mapset)
+    await db_session.commit()
+    await db_session.refresh(mapset)
+    return mapset

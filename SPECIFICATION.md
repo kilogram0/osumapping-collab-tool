@@ -116,7 +116,7 @@ All models inherit from `sqlmodel.SQLModel` with `table=True`.
 | `encrypted_song_length_ms` | `Text` | NOT NULL | AES-256-GCM ciphertext of the audio length in milliseconds (JSON envelope `{"v":245000}`). The envelope shape is uniform across all encrypted fields so the decrypt path never branches on field type — a small plaintext overhead that simplifies the frontend encryption layer. Used to render the timeline scrubber after decryption. |
 | `passphrase_salt` | `String` | NOT NULL | 16-byte random salt (base64-encoded) for PBKDF2 key derivation. Public by design. |
 | `encrypted_verification` | `Text` | NOT NULL | AES-256-GCM ciphertext of a fixed canary string (e.g. "verified"). Used by the frontend to confirm a passphrase is correct without decrypting real content. Harmless without the key, but because it's a known-plaintext canary, user-chosen passphrases are forbidden — the auto-generated 48-char passphrase provides sufficient entropy to resist offline brute-force. |
-| `owner_id` | `Integer` | FK -> `User.id`, ondelete="RESTRICT" | Creator of the mapset. RESTRICT prevents deleting a `User` who still owns mapsets — they must first transfer ownership (`PUT /mapsets/{id}/members/{user_id}`). |
+| `owner_id` | `UUID` | FK -> `User.id`, ondelete="RESTRICT" | Creator of the mapset. RESTRICT prevents deleting a `User` who still owns mapsets — they must first transfer ownership (`PUT /mapsets/{id}/members/{user_id}`). |
 | `created_at` | `DateTime` | Default: `func.now()` | |
 | `updated_at` | `DateTime` | Default: `func.now()`, onupdate | |
 
@@ -125,7 +125,7 @@ All models inherit from `sqlmodel.SQLModel` with `table=True`.
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | PK, client-generated | |
 | `mapset_id` | `UUID` | FK -> `Mapset.id`, ondelete="CASCADE" | Membership rows die with the mapset. |
-| `user_id` | `Integer` | FK -> `User.id`, ondelete="CASCADE" | If a user is deleted (no endpoint today, but FK semantics matter), their memberships go with them. |
+| `user_id` | `UUID` | FK -> `User.id`, ondelete="CASCADE" | If a user is deleted (no endpoint today, but FK semantics matter), their memberships go with them. |
 | `role` | `MapsetRole` (PG enum) | Default: `modder`, NOT NULL | PostgreSQL `ENUM('owner', 'mapper', 'modder')`. Use SQLModel's `Enum` type so a typo at the call site is a runtime error and the DB rejects unknown values at write time. |
 | `created_at` | `DateTime` | Default: `func.now()` | When the user was added to this mapset. |
 | `updated_at` | `DateTime` | Default: `func.now()`, onupdate | When the role was last changed. |
