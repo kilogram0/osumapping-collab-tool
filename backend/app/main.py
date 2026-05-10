@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import engine
-from app.routers import auth
+from app.routers import auth, mapsets
 
 
 @asynccontextmanager
@@ -84,6 +84,7 @@ def create_app() -> FastAPI:
 
     # Mount routers — all routes live under /api per the API contract
     app.include_router(auth.router, prefix="/api")
+    app.include_router(mapsets.router, prefix="/api")
 
     return app
 
