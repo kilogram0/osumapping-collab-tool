@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import settings
 from app.database import get_db
 from app.main import app as _app
-from app.models import Mapset, User
+from app.models import Difficulty, Mapset, User
 
 
 def _resolve_test_database_url() -> str:
@@ -132,3 +132,17 @@ async def mapset_with_owner(db_session, mapset_owner):
     await db_session.commit()
     await db_session.refresh(mapset)
     return mapset
+
+
+@pytest.fixture
+async def mapset_difficulty(db_session, mapset_with_owner):
+    """Create and return a Difficulty belonging to mapset_with_owner."""
+    diff = Difficulty(
+        id=uuid4(),
+        mapset_id=mapset_with_owner.id,
+        encrypted_name="encrypted:name",
+    )
+    db_session.add(diff)
+    await db_session.commit()
+    await db_session.refresh(diff)
+    return diff

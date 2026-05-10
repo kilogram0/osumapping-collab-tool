@@ -64,6 +64,9 @@ class User(SQLModel, table=True):
     mapset_memberships: list["MapsetMember"] = Relationship(
         back_populates="user"
     )
+    section_uploads: list["SectionOsuVersion"] = Relationship(
+        back_populates="uploader"
+    )
 
 
 class Mapset(SQLModel, table=True):
@@ -110,6 +113,7 @@ class Mapset(SQLModel, table=True):
     # Relationships
     owner: User = Relationship(back_populates="owned_mapsets")
     members: list["MapsetMember"] = Relationship(back_populates="mapset")
+    difficulties: list["Difficulty"] = Relationship(back_populates="mapset")
 
 
 class MapsetMember(SQLModel, table=True):
@@ -155,3 +159,235 @@ class MapsetMember(SQLModel, table=True):
     # Relationships
     mapset: Mapset = Relationship(back_populates="members")
     user: User = Relationship(back_populates="mapset_memberships")
+
+
+class Difficulty(SQLModel, table=True):
+    """A difficulty within a mapset (e.g., Easy, Normal, Hard)."""
+
+    __tablename__ = "difficulty"
+
+    __table_args__ = (
+        sa.Index("ix_difficulty_mapset_id", "mapset_id"),
+    )
+
+    # Why no server_default=gen_random_uuid() like User? Per the E2EE spec, every
+    # encrypted-content table requires a client-generated UUID because the row's
+    # primary key is folded into the AAD before encryption. A server-side default
+    # would silently mint a different UUID than the one bound into the ciphertext,
+    # producing a row whose payload can never decrypt. Failing the INSERT loudly is
+    # the desired behavior. (Mapset follows the same pattern.)
+    id: UUID = Field(primary_key=True)
+    mapset_id: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("mapset.id", ondelete="CASCADE"), nullable=False
+        )
+    )
+    encrypted_name: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    created_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+        },
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+            "onupdate": func.clock_timestamp(),
+        },
+    )
+
+    # Relationships
+    mapset: Mapset = Relationship(back_populates="difficulties")
+    sections: list["Section"] = Relationship(back_populates="difficulty")
+    base_versions: list["DifficultyBaseOsuVersion"] = Relationship(
+        back_populates="difficulty"
+    )
+
+
+class Section(SQLModel, table=True):
+    """A named time range within a difficulty, each with its own .osu version."""
+
+    __tablename__ = "section"
+
+    __table_args__ = (
+        sa.Index("ix_section_difficulty_id", "difficulty_id"),
+    )
+
+    id: UUID = Field(primary_key=True)
+    difficulty_id: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("difficulty.id", ondelete="CASCADE"), nullable=False
+        )
+    )
+    encrypted_name: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    encrypted_start_time_ms: str = Field(
+        sa_column=sa.Column(sa.Text, nullable=False)
+    )
+    encrypted_end_time_ms: str = Field(
+        sa_column=sa.Column(sa.Text, nullable=False)
+    )
+    # Encrypted: opaque to the DB, so server-side ORDER BY / uniqueness on this
+    # column is impossible by design. Clients decrypt and sort in memory. Do not
+    # add a backend index/constraint here — it cannot enforce anything meaningful.
+    encrypted_sort_order: str = Field(
+        sa_column=sa.Column(sa.Text, nullable=False)
+    )
+    created_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+        },
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+            "onupdate": func.clock_timestamp(),
+        },
+    )
+
+    # Relationships
+    difficulty: Difficulty = Relationship(back_populates="sections")
+    osu_versions: list["SectionOsuVersion"] = Relationship(
+        back_populates="section"
+    )
+
+
+class SectionOsuVersion(SQLModel, table=True):
+    """A versioned .osu upload for a section. Exactly one per section is active."""
+
+    __tablename__ = "sectionosuversion"
+
+    # Partial unique index: at most one is_active=true row per section_id.
+    # FK indexes for query performance. Version uniqueness prevents duplicate version numbers.
+    __table_args__ = (
+        sa.Index(
+            "uq_section_active_version",
+            "section_id",
+            unique=True,
+            postgresql_where=sa.text("is_active = true"),
+        ),
+        sa.Index("ix_sectionosuversion_section_id", "section_id"),
+        sa.Index("ix_sectionosuversion_uploaded_by", "uploaded_by"),
+        sa.UniqueConstraint("section_id", "version", name="uq_section_osu_version_number"),
+    )
+
+    id: UUID = Field(primary_key=True)
+    section_id: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("section.id", ondelete="CASCADE"), nullable=False
+        )
+    )
+    encrypted_content: str = Field(
+        sa_column=sa.Column(sa.Text, nullable=False)
+    )
+    version: int = Field(nullable=False)
+    is_active: bool = Field(
+        default=False,
+        sa_column=sa.Column(
+            sa.Boolean, nullable=False, server_default=sa.false()
+        ),
+    )
+    uploaded_by: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
+        )
+    )
+    created_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+        },
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+            "onupdate": func.clock_timestamp(),
+        },
+    )
+
+    # Relationships
+    section: Section = Relationship(back_populates="osu_versions")
+    uploader: User = Relationship(back_populates="section_uploads")
+    base_versions: list["DifficultyBaseOsuVersion"] = Relationship(
+        back_populates="source_section_version"
+    )
+
+
+class DifficultyBaseOsuVersion(SQLModel, table=True):
+    """A versioned base template for a difficulty. Exactly one per difficulty is active."""
+
+    __tablename__ = "difficultybaseosuversion"
+
+    # Partial unique index: at most one is_active=true row per difficulty_id.
+    # FK indexes for query performance. Version uniqueness prevents duplicate version numbers.
+    __table_args__ = (
+        sa.Index(
+            "uq_difficulty_active_base",
+            "difficulty_id",
+            unique=True,
+            postgresql_where=sa.text("is_active = true"),
+        ),
+        sa.Index("ix_difficultybaseosuversion_difficulty_id", "difficulty_id"),
+        sa.Index(
+            "ix_difficultybaseosuversion_source_section_version_id",
+            "source_section_version_id",
+        ),
+        sa.UniqueConstraint(
+            "difficulty_id", "version", name="uq_difficulty_base_version_number"
+        ),
+    )
+
+    id: UUID = Field(primary_key=True)
+    difficulty_id: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("difficulty.id", ondelete="CASCADE"), nullable=False
+        )
+    )
+    encrypted_content: str = Field(
+        sa_column=sa.Column(sa.Text, nullable=False)
+    )
+    version: int = Field(nullable=False)
+    is_active: bool = Field(
+        default=False,
+        sa_column=sa.Column(
+            sa.Boolean, nullable=False, server_default=sa.false()
+        ),
+    )
+    # SET NULL: base history outlives the section version that triggered it.
+    source_section_version_id: UUID | None = Field(
+        default=None,
+        sa_column=sa.Column(
+            sa.ForeignKey("sectionosuversion.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    created_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+        },
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+            "onupdate": func.clock_timestamp(),
+        },
+    )
+
+    # Relationships
+    difficulty: Difficulty = Relationship(back_populates="base_versions")
+    source_section_version: SectionOsuVersion | None = Relationship(
+        back_populates="base_versions"
+    )
