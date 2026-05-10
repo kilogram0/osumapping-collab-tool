@@ -54,6 +54,31 @@ class MapsetCreate(BaseModel):
     )
 
 
+class MapsetUpdate(BaseModel):
+    """Request body for ``PATCH /mapsets/{id}``.
+
+    All fields are optional — the server uses ``model_fields_set`` to decide
+    which fields to write; absent fields are left unchanged.  Only
+    ``encrypted_description`` is nullable (sending ``null`` clears it).
+    ``encrypted_title`` and ``encrypted_song_length_ms`` are non-nullable DB
+    columns, so the schema keeps them as ``str`` — supplying ``null`` for
+    either is a 422 validation error.
+    """
+
+    # str (not str | None): Pydantic rejects an explicit null at validation time,
+    # so only a missing field reaches the default=None.  The # type: ignore
+    # silences mypy's objection to a non-optional annotation with a None default.
+    encrypted_title: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=_TITLE_CT_MAX
+    )
+    encrypted_description: str | None = Field(
+        default=None, max_length=_DESCRIPTION_CT_MAX
+    )
+    encrypted_song_length_ms: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=_SONG_LENGTH_CT_MAX
+    )
+
+
 class MapsetRead(BaseModel):
     """Mapset row as returned by the API."""
 

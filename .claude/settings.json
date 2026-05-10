@@ -7,7 +7,8 @@
       "Bash(python -m alembic upgrade head)",
       "Bash(find /home/potato -name \"alembic\" -type f 2>/dev/null | head -5; find /home/potato -name \"activate\" -path \"*/bin/activate\" 2>/dev/null | head -5)",
       "Read(//home/potato/**)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(docker-compose exec *)"
     ]
   }
 }
