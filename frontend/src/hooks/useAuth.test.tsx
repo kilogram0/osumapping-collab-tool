@@ -5,6 +5,12 @@ import type { ReactNode } from 'react';
 import { AuthProvider, useAuth } from './useAuth';
 import * as endpoints from '../api/endpoints';
 
+const mockClearAll = vi.fn().mockResolvedValue(undefined);
+
+vi.mock('../contexts/EncryptionContext', () => ({
+  useEncryption: () => ({ clearAll: mockClearAll }),
+}));
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -24,6 +30,7 @@ function createWrapper() {
 describe('useAuth', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    mockClearAll.mockClear();
   });
 
   it('returns loading state initially', () => {
@@ -114,7 +121,7 @@ describe('useAuth', () => {
   });
 
   describe('logout', () => {
-    it('calls logout endpoint and sets user to null', async () => {
+    it('clears encryption state, calls logout endpoint, and sets user to null', async () => {
       const mockUser: endpoints.User = {
         id: 1,
         osu_id: 12345,
@@ -136,6 +143,7 @@ describe('useAuth', () => {
 
       await result.current.logout();
 
+      expect(mockClearAll).toHaveBeenCalledTimes(1);
       expect(logoutSpy).toHaveBeenCalledTimes(1);
       await waitFor(() => expect(result.current.isAuthenticated).toBe(false));
       expect(result.current.user).toBeNull();

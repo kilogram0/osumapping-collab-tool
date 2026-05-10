@@ -1,4 +1,6 @@
 const PBKDF2_ITERATIONS = 600_000;
+const PASSPHRASE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const PASSPHRASE_LENGTH = 48;
 const KEY_LENGTH_BITS = 256;
 const IV_BYTES = 12;
 const SALT_BYTES = 16;
@@ -11,11 +13,36 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function fromBase64(b64: string): Uint8Array {
+// ArrayBuffer (not ArrayBufferLike) is required because Web Crypto rejects SharedArrayBuffer.
+function fromBase64(b64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
+  const buf = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buf);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+export function generatePassphrase(): string {
+  // Rejection sampling: discard bytes >= 248 (= 4*62) to eliminate modulo bias.
+  const THRESHOLD = 248;
+  const result: string[] = [];
+  while (result.length < PASSPHRASE_LENGTH) {
+    const bytes = crypto.getRandomValues(new Uint8Array(PASSPHRASE_LENGTH * 2));
+    for (const b of bytes) {
+      if (b < THRESHOLD && result.length < PASSPHRASE_LENGTH) {
+        result.push(PASSPHRASE_CHARS[b % PASSPHRASE_CHARS.length]);
+      }
+    }
+  }
+  return result.join('');
+}
+
+export function mapsetFieldAad(mapsetId: string, field: string): string {
+  return `mapsets|${mapsetId}|${field}`;
+}
+
+export function mapsetVerificationAad(mapsetId: string): string {
+  return `mapsets|${mapsetId}|${mapsetId}`;
 }
 
 export function generateSalt(): string {

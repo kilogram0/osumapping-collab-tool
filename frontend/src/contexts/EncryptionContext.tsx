@@ -1,17 +1,24 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { VERIFICATION_CANARY, decrypt, deriveKey } from '../utils/crypto';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { VERIFICATION_CANARY, decrypt, deriveKey, mapsetVerificationAad } from '../utils/crypto';
+import { idbClear, idbDelete, idbGet, idbSet } from '../utils/idb';
 
-const STORAGE_PREFIX = 'mapset-passphrase:';
-
-interface StoredEntry {
-  passphrase: string;
-  salt: string;
-}
+// sessionStorage tracks *which* mapsets are unlocked so that isUnlocked() is
+// synchronous on mount. The actual CryptoKey lives in IndexedDB — raw key
+// material is never accessible as JS bytes.
+const STORAGE_PREFIX = 'mapset-unlocked:';
+// Prefix used by the previous version that stored {passphrase, salt} in
+// sessionStorage; swept on mount as a one-time migration.
+const LEGACY_STORAGE_PREFIX = 'mapset-passphrase:';
 
 interface EncryptionContextValue {
   unlockMapset: (mapsetId: string, passphrase: string, salt: string, encryptedVerification: string) => Promise<void>;
+  // Bypasses canary verification — caller must guarantee the key is correct
+  // (e.g. it was just derived from a passphrase the caller produced themselves).
+  // Do NOT use this as an entry-point for user-supplied passphrases; use unlockMapset instead.
+  unlockWithKey: (mapsetId: string, key: CryptoKey) => Promise<void>;
   getKey: (mapsetId: string) => Promise<CryptoKey | null>;
-  lockMapset: (mapsetId: string) => void;
+  lockMapset: (mapsetId: string) => Promise<void>;
+  clearAll: () => Promise<void>;
   isUnlocked: (mapsetId: string) => boolean;
 }
 
@@ -19,20 +26,6 @@ const EncryptionContext = createContext<EncryptionContextValue | undefined>(unde
 
 function storageKey(mapsetId: string): string {
   return `${STORAGE_PREFIX}${mapsetId}`;
-}
-
-function readStored(mapsetId: string): StoredEntry | null {
-  const raw = sessionStorage.getItem(storageKey(mapsetId));
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as StoredEntry;
-  } catch {
-    return null;
-  }
-}
-
-function verificationAad(mapsetId: string): string {
-  return `mapsets|${mapsetId}|${mapsetId}`;
 }
 
 export function EncryptionProvider({ children }: { children: React.ReactNode }) {
@@ -46,37 +39,28 @@ export function EncryptionProvider({ children }: { children: React.ReactNode }) 
     return ids;
   });
 
-  const unlockMapset = useCallback(
-    async (mapsetId: string, passphrase: string, salt: string, encryptedVerification: string) => {
-      const key = await deriveKey(passphrase, salt);
-      const plaintext = await decrypt(key, encryptedVerification, verificationAad(mapsetId));
-      if (plaintext !== VERIFICATION_CANARY) {
-        throw new Error('Verification canary mismatch');
-      }
-      keyCache.current.set(mapsetId, key);
-      sessionStorage.setItem(storageKey(mapsetId), JSON.stringify({ passphrase, salt } satisfies StoredEntry));
-      setUnlockedIds((prev) => {
-        if (prev.has(mapsetId)) return prev;
-        const next = new Set(prev);
-        next.add(mapsetId);
-        return next;
-      });
-    },
-    [],
-  );
-
-  const getKey = useCallback(async (mapsetId: string): Promise<CryptoKey | null> => {
-    const cached = keyCache.current.get(mapsetId);
-    if (cached) return cached;
-    const stored = readStored(mapsetId);
-    if (!stored) return null;
-    const key = await deriveKey(stored.passphrase, stored.salt);
-    keyCache.current.set(mapsetId, key);
-    return key;
+  // One-time migration: remove legacy mapset-passphrase:* entries left by
+  // a prior version that stored plaintext {passphrase, salt} in sessionStorage.
+  useEffect(() => {
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const k = sessionStorage.key(i);
+      if (k?.startsWith(LEGACY_STORAGE_PREFIX)) sessionStorage.removeItem(k);
+    }
   }, []);
 
-  const lockMapset = useCallback((mapsetId: string) => {
+  const markUnlocked = useCallback((mapsetId: string) => {
+    sessionStorage.setItem(storageKey(mapsetId), '1');
+    setUnlockedIds((prev) => {
+      if (prev.has(mapsetId)) return prev;
+      const next = new Set(prev);
+      next.add(mapsetId);
+      return next;
+    });
+  }, []);
+
+  const lockMapset = useCallback(async (mapsetId: string): Promise<void> => {
     keyCache.current.delete(mapsetId);
+    await idbDelete(mapsetId);
     sessionStorage.removeItem(storageKey(mapsetId));
     setUnlockedIds((prev) => {
       if (!prev.has(mapsetId)) return prev;
@@ -86,11 +70,56 @@ export function EncryptionProvider({ children }: { children: React.ReactNode }) 
     });
   }, []);
 
+  const unlockWithKey = useCallback(async (mapsetId: string, key: CryptoKey) => {
+    await idbSet(mapsetId, key);
+    keyCache.current.set(mapsetId, key);
+    markUnlocked(mapsetId);
+  }, [markUnlocked]);
+
+  const unlockMapset = useCallback(
+    async (mapsetId: string, passphrase: string, salt: string, encryptedVerification: string) => {
+      const key = await deriveKey(passphrase, salt);
+      const plaintext = await decrypt(key, encryptedVerification, mapsetVerificationAad(mapsetId));
+      if (plaintext !== VERIFICATION_CANARY) {
+        throw new Error('Verification canary mismatch');
+      }
+      await unlockWithKey(mapsetId, key);
+    },
+    [unlockWithKey],
+  );
+
+  const getKey = useCallback(async (mapsetId: string): Promise<CryptoKey | null> => {
+    const cached = keyCache.current.get(mapsetId);
+    if (cached) return cached;
+    const key = await idbGet(mapsetId);
+    if (key) {
+      keyCache.current.set(mapsetId, key);
+      return key;
+    }
+    // IDB was cleared externally (devtools / browser settings) while
+    // sessionStorage still holds the presence flag. Resync so that isUnlocked()
+    // and the PassphraseModal gate reflect reality.
+    if (sessionStorage.getItem(storageKey(mapsetId))) {
+      await lockMapset(mapsetId);
+    }
+    return null;
+  }, [lockMapset]);
+
+  const clearAll = useCallback(async (): Promise<void> => {
+    keyCache.current.clear();
+    await idbClear();
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const k = sessionStorage.key(i);
+      if (k?.startsWith(STORAGE_PREFIX)) sessionStorage.removeItem(k);
+    }
+    setUnlockedIds(new Set());
+  }, []);
+
   const isUnlocked = useCallback((mapsetId: string) => unlockedIds.has(mapsetId), [unlockedIds]);
 
   const value = useMemo<EncryptionContextValue>(
-    () => ({ unlockMapset, getKey, lockMapset, isUnlocked }),
-    [unlockMapset, getKey, lockMapset, isUnlocked],
+    () => ({ unlockMapset, unlockWithKey, getKey, lockMapset, clearAll, isUnlocked }),
+    [unlockMapset, unlockWithKey, getKey, lockMapset, clearAll, isUnlocked],
   );
 
   return <EncryptionContext.Provider value={value}>{children}</EncryptionContext.Provider>;

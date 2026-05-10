@@ -11,6 +11,17 @@ vi.mock('../api/endpoints', () => ({
   logout: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock('../contexts/EncryptionContext', () => ({
+  useEncryption: () => ({
+    clearAll: vi.fn().mockResolvedValue(undefined),
+    isUnlocked: vi.fn(() => false),
+    getKey: vi.fn().mockResolvedValue(null),
+    unlockMapset: vi.fn().mockResolvedValue(undefined),
+    unlockWithKey: vi.fn().mockResolvedValue(undefined),
+    lockMapset: vi.fn().mockResolvedValue(undefined),
+  }),
+}))
+
 function renderWithAuth(ui: ReactNode) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -59,5 +70,20 @@ describe('LoginPage', () => {
       writable: true,
       value: originalLocation,
     })
+  })
+
+  it('displays the E2EE security notice', async () => {
+    renderWithAuth(<LoginPage />)
+    await waitFor(() =>
+      expect(screen.getByText(/AES-256-GCM/i)).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/passphrase is never sent/i)).toBeInTheDocument()
+  })
+
+  it('shows a link to the source code', async () => {
+    renderWithAuth(<LoginPage />)
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: /view source code/i })).toBeInTheDocument(),
+    )
   })
 })

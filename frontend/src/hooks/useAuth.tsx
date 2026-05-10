@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchCurrentUser, logout as apiLogout } from '../api/endpoints';
+import { useEncryption } from '../contexts/EncryptionContext';
 import type { User } from '../api/endpoints';
 
 interface AuthContextValue {
@@ -15,6 +16,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
+  const { clearAll } = useEncryption();
 
   const { data: user, isLoading } = useQuery<User | null>({
     queryKey: ['auth', 'me'],
@@ -28,9 +30,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    await clearAll();
     await apiLogout();
     queryClient.invalidateQueries({ queryKey: ['auth'] });
-  }, [queryClient]);
+  }, [queryClient, clearAll]);
 
   const value = useMemo(
     () => ({

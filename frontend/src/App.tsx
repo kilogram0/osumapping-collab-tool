@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
+import LoginPage from './pages/LoginPage'
+import MapsetPage from './pages/MapsetPage'
 
 export function AppRoutes() {
   return (
@@ -8,6 +9,8 @@ export function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       {/* TODO: protected route — redirect to /login if not authenticated */}
       <Route path="/dashboard" element={<DashboardPage />} />
+      {/* TODO: protected route — redirect to /login if not authenticated */}
+      <Route path="/mapsets/:id" element={<MapsetPage />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )

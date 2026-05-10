@@ -1,7 +1,17 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { EncryptionProvider, useEncryption } from './EncryptionContext';
 import { deriveKey, encrypt, generateSalt, VERIFICATION_CANARY } from '../utils/crypto';
+
+// Mock the IDB module so tests run in jsdom without a real IndexedDB implementation.
+const idbStore = new Map<string, CryptoKey>();
+
+vi.mock('../utils/idb', () => ({
+  idbGet: vi.fn(async (id: string) => idbStore.get(id) ?? null),
+  idbSet: vi.fn(async (id: string, key: CryptoKey) => { idbStore.set(id, key); }),
+  idbDelete: vi.fn(async (id: string) => { idbStore.delete(id); }),
+  idbClear: vi.fn(async () => { idbStore.clear(); }),
+}));
 
 const PASSPHRASE = 'aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789aBcDeFgHiJkL';
 const MAPSET_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
@@ -18,9 +28,10 @@ function wrapper({ children }: { children: React.ReactNode }) {
 describe('EncryptionContext', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    idbStore.clear();
   });
 
-  it('unlocks a mapset with the correct passphrase, persists to sessionStorage, and exposes a key', async () => {
+  it('unlocks a mapset with the correct passphrase, writes key to IDB, marks sessionStorage, and exposes a key', async () => {
     const salt = generateSalt();
     const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
     const { result } = renderHook(() => useEncryption(), { wrapper });
@@ -33,26 +44,39 @@ describe('EncryptionContext', () => {
     });
 
     expect(result.current.isUnlocked(MAPSET_ID)).toBe(true);
-    expect(sessionStorage.getItem(`mapset-passphrase:${MAPSET_ID}`)).not.toBeNull();
+    // sessionStorage stores only a presence flag — no passphrase or salt.
+    expect(sessionStorage.getItem(`mapset-unlocked:${MAPSET_ID}`)).toBe('1');
+    expect(idbStore.has(MAPSET_ID)).toBe(true);
     expect(await result.current.getKey(MAPSET_ID)).not.toBeNull();
   });
 
-  it('rejects an unlock attempt with the wrong passphrase and does not persist', async () => {
+  it('rejects an unlock attempt with the wrong passphrase and writes nothing', async () => {
     const salt = generateSalt();
     const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
     const { result } = renderHook(() => useEncryption(), { wrapper });
 
-    await expect(
-      act(async () => {
-        await result.current.unlockMapset(MAPSET_ID, 'wrongPassphrase000000000000000000000000000000000', salt, verification);
-      }),
-    ).rejects.toThrow();
+    // Catch the error inside act so React state stays clean for subsequent assertions.
+    let caughtError: unknown = null;
+    await act(async () => {
+      try {
+        await result.current.unlockMapset(
+          MAPSET_ID,
+          'wrongPassphrase000000000000000000000000000000000',
+          salt,
+          verification,
+        );
+      } catch (e) {
+        caughtError = e;
+      }
+    });
 
+    expect(caughtError).not.toBeNull();
     expect(result.current.isUnlocked(MAPSET_ID)).toBe(false);
-    expect(sessionStorage.getItem(`mapset-passphrase:${MAPSET_ID}`)).toBeNull();
+    expect(sessionStorage.getItem(`mapset-unlocked:${MAPSET_ID}`)).toBeNull();
+    expect(idbStore.has(MAPSET_ID)).toBe(false);
   });
 
-  it('lockMapset clears both in-memory key and sessionStorage', async () => {
+  it('lockMapset clears in-memory cache, IDB, and sessionStorage', async () => {
     const salt = generateSalt();
     const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
     const { result } = renderHook(() => useEncryption(), { wrapper });
@@ -61,26 +85,87 @@ describe('EncryptionContext', () => {
       await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification);
     });
 
-    act(() => result.current.lockMapset(MAPSET_ID));
+    await act(async () => { await result.current.lockMapset(MAPSET_ID); });
 
     expect(result.current.isUnlocked(MAPSET_ID)).toBe(false);
-    expect(sessionStorage.getItem(`mapset-passphrase:${MAPSET_ID}`)).toBeNull();
+    expect(sessionStorage.getItem(`mapset-unlocked:${MAPSET_ID}`)).toBeNull();
     expect(await result.current.getKey(MAPSET_ID)).toBeNull();
+    expect(idbStore.has(MAPSET_ID)).toBe(false);
   });
 
-  it('rehydrates the key from sessionStorage after a fresh provider mount (refresh simulation)', async () => {
+  it('rehydrates unlock state from sessionStorage and key from IDB on fresh provider mount', async () => {
     const salt = generateSalt();
     const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
 
+    // Simulate first session: unlock and store.
     const first = renderHook(() => useEncryption(), { wrapper });
     await act(async () => {
       await first.result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification);
     });
     first.unmount();
 
-    // Simulate full app remount; sessionStorage persists, in-memory cache does not.
+    // Simulate page reload: sessionStorage persists, in-memory cache is gone,
+    // IDB still has the key (mock map was written above).
     const second = renderHook(() => useEncryption(), { wrapper });
     expect(second.result.current.isUnlocked(MAPSET_ID)).toBe(true);
     expect(await second.result.current.getKey(MAPSET_ID)).not.toBeNull();
+  });
+
+  it('getKey resyncs and returns null when IDB is missing but sessionStorage flag is present (drift)', async () => {
+    // Simulate a session where the mapset was unlocked (flag in sessionStorage)
+    // but IDB was cleared externally (e.g. browser devtools).
+    sessionStorage.setItem(`mapset-unlocked:${MAPSET_ID}`, '1');
+    // idbStore is empty — simulates IDB being cleared.
+
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    // isUnlocked reflects the stale sessionStorage flag on mount.
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(true);
+
+    // getKey detects the drift and calls lockMapset to resync.
+    // Wrap in act so React flushes the setUnlockedIds update from lockMapset.
+    let key: CryptoKey | null = null;
+    await act(async () => {
+      key = await result.current.getKey(MAPSET_ID);
+    });
+    expect(key).toBeNull();
+
+    // After resync, isUnlocked and sessionStorage are cleared.
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(false);
+    expect(sessionStorage.getItem(`mapset-unlocked:${MAPSET_ID}`)).toBeNull();
+  });
+
+  it('clearAll wipes IDB, all sessionStorage flags, and in-memory cache', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    await act(async () => {
+      await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification);
+    });
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(true);
+
+    await act(async () => {
+      await result.current.clearAll();
+    });
+
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(false);
+    expect(sessionStorage.getItem(`mapset-unlocked:${MAPSET_ID}`)).toBeNull();
+    expect(idbStore.size).toBe(0);
+    expect(await result.current.getKey(MAPSET_ID)).toBeNull();
+  });
+
+  it('unlockWithKey stores the provided key directly without running PBKDF2', async () => {
+    const salt = generateSalt();
+    const key = await deriveKey(PASSPHRASE, salt);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    await act(async () => {
+      await result.current.unlockWithKey(MAPSET_ID, key);
+    });
+
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(true);
+    expect(idbStore.get(MAPSET_ID)).toBe(key);
+    expect(await result.current.getKey(MAPSET_ID)).toBe(key);
   });
 });

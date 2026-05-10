@@ -9,7 +9,23 @@ import { AuthProvider } from './hooks/useAuth'
 vi.mock('./api/endpoints', () => ({
   fetchCurrentUser: vi.fn().mockResolvedValue(null),
   logout: vi.fn().mockResolvedValue(undefined),
+  fetchMapsets: vi.fn().mockResolvedValue([]),
 }))
+
+vi.mock('./contexts/EncryptionContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./contexts/EncryptionContext')>()
+  return {
+    ...actual,
+    useEncryption: () => ({
+      isUnlocked: vi.fn(() => false),
+      getKey: vi.fn().mockResolvedValue(null),
+      unlockMapset: vi.fn().mockResolvedValue(undefined),
+      unlockWithKey: vi.fn().mockResolvedValue(undefined),
+      lockMapset: vi.fn().mockResolvedValue(undefined),
+      clearAll: vi.fn().mockResolvedValue(undefined),
+    }),
+  }
+})
 
 const routerFuture = {
   v7_startTransition: true,

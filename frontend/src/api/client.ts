@@ -8,4 +8,11 @@ const client = axios.create({
   },
 });
 
+client.interceptors.request.use((config) => {
+  if (config.method && config.method.toLowerCase() !== 'get') {
+    config.headers['X-Requested-With'] = 'XMLHttpRequest';
+  }
+  return config;
+});
+
 export default client;
