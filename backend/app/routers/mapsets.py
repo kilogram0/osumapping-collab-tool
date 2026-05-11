@@ -45,7 +45,7 @@ async def create_mapset(
     """
     mapset = Mapset(
         id=payload.id,
-        encrypted_title=payload.encrypted_title,
+        title=payload.title,
         encrypted_description=payload.encrypted_description,
         encrypted_song_length_ms=payload.encrypted_song_length_ms,
         passphrase_salt=payload.passphrase_salt,
@@ -145,8 +145,8 @@ async def update_mapset(
 
     # Use model_fields_set to distinguish "field omitted" from "field set to null".
     fields_set = payload.model_fields_set
-    if "encrypted_title" in fields_set:
-        mapset.encrypted_title = payload.encrypted_title
+    if "title" in fields_set:
+        mapset.title = payload.title
     if "encrypted_description" in fields_set:
         mapset.encrypted_description = payload.encrypted_description
     if "encrypted_song_length_ms" in fields_set:

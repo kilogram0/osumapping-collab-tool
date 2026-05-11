@@ -27,7 +27,7 @@ vi.mock('../contexts/EncryptionContext', () => ({
 
 const MAPSET: Mapset = {
   id: 'mapset-1',
-  encrypted_title: 'encrypted:title',
+  title: 'Test Mapset',
   encrypted_description: null,
   encrypted_song_length_ms: 'encrypted:0',
   passphrase_salt: 'c2FsdA==',

@@ -28,7 +28,7 @@ export async function logout(): Promise<void> {
 
 export interface Mapset {
   id: string;
-  encrypted_title: string;
+  title: string;
   encrypted_description: string | null;
   encrypted_song_length_ms: string;
   passphrase_salt: string;
@@ -40,7 +40,7 @@ export interface Mapset {
 
 export interface CreateMapsetPayload {
   id: string;
-  encrypted_title: string;
+  title: string;
   encrypted_description?: string | null;
   encrypted_song_length_ms: string;
   passphrase_salt: string;
@@ -48,7 +48,7 @@ export interface CreateMapsetPayload {
 }
 
 export interface UpdateMapsetPayload {
-  encrypted_title?: string;
+  title?: string;
   encrypted_description?: string | null;
   encrypted_song_length_ms?: string;
 }

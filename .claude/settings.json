@@ -12,7 +12,8 @@
       "Bash(git diff *)",
       "Read(//tmp/**)",
       "Bash(npx tsc *)",
-      "Bash(docker exec *)"
+      "Bash(docker exec *)",
+      "Bash(grep -n \" |$\\\\|encrypted_title\" SPECIFICATION.md)"
     ],
     "additionalDirectories": [
       "/tmp"

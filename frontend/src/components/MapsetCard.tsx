@@ -1,8 +1,6 @@
-import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Mapset } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { decrypt, mapsetFieldAad } from '../utils/crypto';
 
 interface MapsetCardProps {
   mapset: Mapset;
@@ -10,30 +8,10 @@ interface MapsetCardProps {
 }
 
 export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
-  const { isUnlocked, getKey } = useEncryption();
-  const [title, setTitle] = useState<string | null>(null);
+  const { isUnlocked } = useEncryption();
   const navigate = useNavigate();
 
   const unlocked = isUnlocked(mapset.id);
-
-  useEffect(() => {
-    if (!unlocked) {
-      setTitle(null);
-      return;
-    }
-    let cancelled = false;
-    getKey(mapset.id).then(async (key) => {
-      if (cancelled || !key) return;
-      try {
-        const aad = mapsetFieldAad(mapset.id, 'title');
-        const decrypted = await decrypt(key, mapset.encrypted_title, aad);
-        if (!cancelled) setTitle(decrypted);
-      } catch {
-        if (!cancelled) setTitle(null);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [unlocked, mapset.id, mapset.encrypted_title, getKey]);
 
   function handleClick() {
     navigate(`/mapsets/${mapset.id}`);
@@ -54,11 +32,7 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
       data-testid="mapset-card"
     >
       <div className="min-w-0">
-        {unlocked && title ? (
-          <p className="text-white font-semibold truncate">{title}</p>
-        ) : (
-          <p className="text-gray-400 font-semibold">🔒 Encrypted Mapset</p>
-        )}
+        <p className="text-white font-semibold truncate">{mapset.title}</p>
         <p className="text-xs text-gray-500 mt-1">
           {new Date(mapset.created_at).toLocaleDateString()}
         </p>

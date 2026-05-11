@@ -20,15 +20,17 @@ class UserRead(BaseModel):
 
 
 # Per-field ciphertext caps. Plaintext budgets x ~1.4 base64 + GCM overhead.
-# Title/desc/song-length/verification are tiny strings; description is the
+# Description/song-length/verification are tiny strings; description is the
 # only one a user might write at length. These bounds prevent a single
-# 100 MB ``encrypted_title`` from slipping past Starlette's body-size limit.
-_TITLE_CT_MAX = 2_048
+# 100 MB ciphertext blob from slipping past Starlette's body-size limit.
 _DESCRIPTION_CT_MAX = 32_768
 _SONG_LENGTH_CT_MAX = 256
 _VERIFICATION_CT_MAX = 256
 # 16-byte salt → 24 base64 chars; allow up to 32 for padding/encoding slack.
 _SALT_PATTERN = r"^[A-Za-z0-9+/=]+$"
+
+
+_TITLE_PLAIN_MAX = 255
 
 
 class MapsetCreate(BaseModel):
@@ -39,7 +41,7 @@ class MapsetCreate(BaseModel):
     """
 
     id: UUID
-    encrypted_title: str = Field(min_length=1, max_length=_TITLE_CT_MAX)
+    title: str = Field(min_length=1, max_length=_TITLE_PLAIN_MAX)
     encrypted_description: str | None = Field(
         default=None, max_length=_DESCRIPTION_CT_MAX
     )
@@ -58,18 +60,18 @@ class MapsetUpdate(BaseModel):
     """Request body for ``PATCH /mapsets/{id}``.
 
     All fields are optional — the server uses ``model_fields_set`` to decide
-    which fields to write; absent fields are left unchanged.  Only
-    ``encrypted_description`` is nullable (sending ``null`` clears it).
-    ``encrypted_title`` and ``encrypted_song_length_ms`` are non-nullable DB
-    columns, so the schema keeps them as ``str`` — supplying ``null`` for
-    either is a 422 validation error.
+    which fields to write; absent fields are left unchanged.  ``title`` is
+    plaintext (not encrypted). Only ``encrypted_description`` is nullable
+    (sending ``null`` clears it).  ``title`` and ``encrypted_song_length_ms``
+    are non-nullable DB columns, so the schema keeps them as ``str`` —
+    supplying ``null`` for either is a 422 validation error.
     """
 
     # str (not str | None): Pydantic rejects an explicit null at validation time,
     # so only a missing field reaches the default=None.  The # type: ignore
     # silences mypy's objection to a non-optional annotation with a None default.
-    encrypted_title: str = Field(  # type: ignore[assignment]
-        default=None, min_length=1, max_length=_TITLE_CT_MAX
+    title: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=_TITLE_PLAIN_MAX
     )
     encrypted_description: str | None = Field(
         default=None, max_length=_DESCRIPTION_CT_MAX
@@ -85,7 +87,7 @@ class MapsetRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    encrypted_title: str
+    title: str
     encrypted_description: str | None
     encrypted_song_length_ms: str
     passphrase_salt: str

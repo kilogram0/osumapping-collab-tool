@@ -21,7 +21,7 @@ CSRF_HEADERS = {
 def _mapset_payload(mapset_id: UUID | None = None) -> dict:
     return {
         "id": str(mapset_id or uuid4()),
-        "encrypted_title": "encrypted:title",
+        "title": "Test Mapset",
         "encrypted_description": "encrypted:desc",
         "encrypted_song_length_ms": "encrypted:200000",
         "passphrase_salt": "c2FsdC1iYXNlNjQ=",

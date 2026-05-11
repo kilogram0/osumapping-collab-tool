@@ -21,7 +21,7 @@ CSRF_HEADERS = {
 def _build_payload(mapset_id: UUID | None = None) -> dict:
     return {
         "id": str(mapset_id or uuid4()),
-        "encrypted_title": "encrypted:title",
+        "title": "Test Mapset",
         "encrypted_description": "encrypted:desc",
         "encrypted_song_length_ms": "encrypted:200000",
         "passphrase_salt": "c2FsdC1iYXNlNjQ=",
@@ -91,7 +91,7 @@ async def test_create_mapset_succeeds_and_adds_owner_membership(
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["id"] == payload["id"]
-    assert body["encrypted_title"] == payload["encrypted_title"]
+    assert body["title"] == payload["title"]
     assert body["encrypted_description"] == payload["encrypted_description"]
     assert body["encrypted_song_length_ms"] == payload["encrypted_song_length_ms"]
     assert body["passphrase_salt"] == payload["passphrase_salt"]
@@ -165,7 +165,7 @@ async def test_create_mapset_validates_payload(
     client: AsyncClient, authed_user: User
 ):
     bad = _build_payload()
-    del bad["encrypted_title"]
+    del bad["title"]
     response = await client.post("/api/mapsets", json=bad, headers=CSRF_HEADERS)
     assert response.status_code == 422
 
@@ -175,7 +175,7 @@ async def test_create_mapset_rejects_empty_title(
     client: AsyncClient, authed_user: User
 ):
     bad = _build_payload()
-    bad["encrypted_title"] = ""
+    bad["title"] = ""
     response = await client.post("/api/mapsets", json=bad, headers=CSRF_HEADERS)
     assert response.status_code == 422
 
@@ -185,7 +185,7 @@ async def test_create_mapset_rejects_oversized_title(
     client: AsyncClient, authed_user: User
 ):
     bad = _build_payload()
-    bad["encrypted_title"] = "x" * 4_096
+    bad["title"] = "x" * 256
     response = await client.post("/api/mapsets", json=bad, headers=CSRF_HEADERS)
     assert response.status_code == 422
 
@@ -289,7 +289,7 @@ async def test_get_mapset_returns_full_details(
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == payload["id"]
-    assert body["encrypted_title"] == payload["encrypted_title"]
+    assert body["title"] == payload["title"]
     assert body["encrypted_description"] == payload["encrypted_description"]
     assert body["encrypted_song_length_ms"] == payload["encrypted_song_length_ms"]
     assert body["passphrase_salt"] == payload["passphrase_salt"]
@@ -348,11 +348,11 @@ async def test_patch_mapset_owner_can_update(
 
     response = await client.patch(
         f"/api/mapsets/{payload['id']}",
-        json={"encrypted_title": "encrypted:new-title"},
+        json={"title": "New Title"},
         headers=CSRF_HEADERS,
     )
     assert response.status_code == 200
-    assert response.json()["encrypted_title"] == "encrypted:new-title"
+    assert response.json()["title"] == "New Title"
     # Omitted fields are preserved unchanged
     assert response.json()["encrypted_description"] == payload["encrypted_description"]
 
@@ -371,7 +371,7 @@ async def test_patch_mapset_empty_body_returns_unchanged(
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["encrypted_title"] == payload["encrypted_title"]
+    assert body["title"] == payload["title"]
     assert body["encrypted_description"] == payload["encrypted_description"]
     assert body["encrypted_song_length_ms"] == payload["encrypted_song_length_ms"]
 
@@ -424,11 +424,11 @@ async def test_patch_mapset_mapper_can_update(client: AsyncClient):
     client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
     response = await client.patch(
         f"/api/mapsets/{mapset_id}",
-        json={"encrypted_title": "encrypted:mapper-title"},
+        json={"title": "Mapper Title"},
         headers=CSRF_HEADERS,
     )
     assert response.status_code == 200
-    assert response.json()["encrypted_title"] == "encrypted:mapper-title"
+    assert response.json()["title"] == "Mapper Title"
 
     await _delete_user_and_mapsets(owner.id)
     await _delete_user_and_mapsets(mapper_user.id)
@@ -463,7 +463,7 @@ async def test_patch_mapset_modder_cannot_update(client: AsyncClient):
     client.cookies.set(settings.cookie_name, create_access_token(modder_user.id))
     response = await client.patch(
         f"/api/mapsets/{mapset_id}",
-        json={"encrypted_title": "encrypted:modder-title"},
+        json={"title": "Modder Title"},
         headers=CSRF_HEADERS,
     )
     assert response.status_code == 403
@@ -486,7 +486,7 @@ async def test_patch_mapset_non_member_gets_403(client: AsyncClient):
     client.cookies.set(settings.cookie_name, create_access_token(stranger.id))
     response = await client.patch(
         f"/api/mapsets/{payload['id']}",
-        json={"encrypted_title": "encrypted:stolen"},
+        json={"title": "Stolen"},
         headers=CSRF_HEADERS,
     )
     assert response.status_code == 403
@@ -501,7 +501,7 @@ async def test_patch_mapset_returns_404_for_unknown(
 ):
     response = await client.patch(
         f"/api/mapsets/{uuid4()}",
-        json={"encrypted_title": "encrypted:x"},
+        json={"title": "x"},
         headers=CSRF_HEADERS,
     )
     assert response.status_code == 404
@@ -511,7 +511,7 @@ async def test_patch_mapset_returns_404_for_unknown(
 async def test_patch_mapset_rejects_unauthenticated(client: AsyncClient):
     response = await client.patch(
         f"/api/mapsets/{uuid4()}",
-        json={"encrypted_title": "encrypted:x"},
+        json={"title": "x"},
         headers=CSRF_HEADERS,
     )
     assert response.status_code == 401

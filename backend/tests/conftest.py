@@ -121,7 +121,7 @@ async def mapset_with_owner(db_session, mapset_owner):
     """Create and return a Mapset with an owner."""
     mapset = Mapset(
         id=uuid4(),
-        encrypted_title="encrypted:title",
+        title="Test Mapset",
         encrypted_description="encrypted:desc",
         encrypted_song_length_ms="encrypted:100000",
         passphrase_salt="salt",

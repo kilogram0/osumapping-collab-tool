@@ -111,7 +111,7 @@ All models inherit from `sqlmodel.SQLModel` with `table=True`.
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | PK, client-generated | The client generates a UUIDv4 before encrypting and includes it in the AAD. This solves the AAD bootstrapping problem: the row identity is known before INSERT. |
-| `encrypted_title` | `Text` | NOT NULL | AES-256-GCM ciphertext of the mapset title. |
+| `title` | `String(255)` | NOT NULL | **Plaintext** mapset title. Visible on the dashboard and in invitation links so users can distinguish between multiple mapsets without unlocking them. |
 | `encrypted_description` | `Text` | Nullable | AES-256-GCM ciphertext of the optional mapset description. |
 | `encrypted_song_length_ms` | `Text` | NOT NULL | AES-256-GCM ciphertext of the audio length in milliseconds (JSON envelope `{"v":245000}`). The envelope shape is uniform across all encrypted fields so the decrypt path never branches on field type — a small plaintext overhead that simplifies the frontend encryption layer. Used to render the timeline scrubber after decryption. |
 | `passphrase_salt` | `String` | NOT NULL | 16-byte random salt (base64-encoded) for PBKDF2 key derivation. Public by design. |
@@ -231,10 +231,10 @@ Activations and rollbacks must run inside a single transaction (deactivate previ
 ### Mapsets (`/mapsets`)
 | Method | Route | Who | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/mapsets` | Any logged-in user | Create a new mapset. Payload: `{ encrypted_title, encrypted_description, encrypted_song_length_ms, passphrase_salt, encrypted_verification }`. The frontend auto-generates a 48-character alphanumeric passphrase, derives the AES key via PBKDF2, and encrypts all content fields before sending. Automatically adds the creator as an `owner` in `MapsetMember`. |
-| `GET` | `/mapsets` | Any logged-in user | List all mapsets where the current user is a member (via `MapsetMember`). Returns encrypted fields; the frontend decrypts titles for display if the key is cached in `sessionStorage`. |
+| `POST` | `/mapsets` | Any logged-in user | Create a new mapset. Payload: `{ title, encrypted_description, encrypted_song_length_ms, passphrase_salt, encrypted_verification }`. The frontend auto-generates a 48-character alphanumeric passphrase, derives the AES key via PBKDF2, and encrypts all content fields **except `title`** before sending. Automatically adds the creator as an `owner` in `MapsetMember`. |
+| `GET` | `/mapsets` | Any logged-in user | List all mapsets where the current user is a member (via `MapsetMember`). The title is plaintext; other content fields are encrypted ciphertext. |
 | `GET` | `/mapsets/{id}` | Any member | Get full mapset details, including all `Difficulty`s. Returns `403` if the user is not a member. All content fields are encrypted ciphertext. |
-| `PUT` | `/mapsets/{id}` | Owner/Mapper | Update mapset. Payload contains encrypted fields (e.g., `encrypted_title`, `encrypted_description`). The backend stores them verbatim without inspection. |
+| `PUT` | `/mapsets/{id}` | Owner/Mapper | Update mapset. Payload may contain `title` (plaintext) and encrypted fields (e.g., `encrypted_description`). The backend stores them verbatim without inspection. |
 | `DELETE` | `/mapsets/{id}` | Owner | Delete a mapset and all related data. |
 
 ### Difficulties (`/mapsets/{id}/difficulties`)
@@ -378,15 +378,17 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
 - Audit metadata (`uploaded_by`, `created_at`, `updated_at`)
 
 **Encrypted (server never sees plaintext):**
-- `Mapset`: title, description, song_length_ms
+- `Mapset`: description, song_length_ms
 - `Difficulty`: name
 - `Section`: name, start_time_ms, end_time_ms, sort_order
 - `Post`: content (body)
 - `SectionOsuVersion`: content
 - `DifficultyBaseOsuVersion`: content
 
+> **Note:** `Mapset.title` is intentionally **not encrypted**. A user may belong to many mapsets (e.g., multiple contest collaborations) and needs to distinguish them on the dashboard before entering a passphrase. The title is visible to anyone who receives an invitation link. A disclaimer is shown during creation and editing.
+
 #### UX Implications
-- **Dashboard:** Mapsets where the user does not have the passphrase in `sessionStorage` are shown as "🔒 Encrypted Mapset" (or just the ID). If the passphrase is cached, the real decrypted title is shown.
+- **Dashboard:** Mapset titles are always visible (plaintext). Other content remains encrypted until the mapset is unlocked with the passphrase.
 - **Mapset Page:** If the key is missing, a full-screen passphrase input modal is shown. Nothing else renders until the correct passphrase is entered.
 - **Passphrase Sharing:** New members must obtain the passphrase from an existing member out-of-band (Discord, etc.). Any member whose session has the passphrase cached can re-view it in the UI — this is a social convention, not a technical restriction (all unlocked sessions have equal access to the key).
 - **Passphrase Rotation:** There is no passphrase rotation or re-encryption flow in the MVP. If a passphrase leaks (e.g., shared in the wrong Discord channel), the only recovery is to create a new mapset and migrate content manually. This is a known limitation.
@@ -394,7 +396,6 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
 #### Performance Implications
 Because the server cannot read encrypted fields, certain operations that would normally happen server-side must happen client-side:
 - **Section ordering:** The backend cannot sort by `sort_order`, `start_time_ms`, or `end_time_ms`. The frontend fetches all sections for a difficulty, decrypts them, and sorts in memory.
-- **Mapset title sorting:** The dashboard cannot sort mapsets alphabetically by title server-side. The frontend decrypts titles and sorts.
 - **Post filtering by time range:** The backend cannot index or filter posts by timestamp. The frontend decrypts all posts and derives timestamps client-side.
 - **Post count:** Typically <100 per difficulty, so in-memory decryption and sorting is imperceptible. If mapsets grow to thousands of posts, this design will need revisiting (e.g., searchable encrypted indexes or server-side proxy re-encryption).
 
@@ -411,7 +412,7 @@ Because the server cannot read encrypted fields, certain operations that would n
 This is the core of the application. It will be a single-page layout:
 
 1. **Header Bar:**
-   - Mapset name and description (decrypted from `encrypted_title`/`encrypted_description` if key is available).
+   - Mapset name (plaintext `title`) and description (decrypted from `encrypted_description` if key is available).
    - Song length displayed as `MM:SS` (decrypted from `encrypted_song_length_ms`).
    - "Manage Members" button (for Owner/Mapper).
    - **"View Passphrase"** button (for Owner, only if key is in memory).

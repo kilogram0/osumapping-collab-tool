@@ -75,7 +75,7 @@ class Mapset(SQLModel, table=True):
     __tablename__ = "mapset"
 
     id: UUID = Field(primary_key=True)
-    encrypted_title: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    title: str = Field(sa_column=sa.Column(sa.String(255), nullable=False))
     encrypted_description: str | None = Field(
         sa_column=sa.Column(sa.Text, nullable=True)
     )

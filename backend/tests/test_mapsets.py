@@ -21,7 +21,7 @@ async def test_create_and_read_mapset(db_session, mapset_with_owner):
         select(Mapset).where(Mapset.id == mapset.id)
     )
     fetched = result.scalar_one()
-    assert fetched.encrypted_title == "encrypted:title"
+    assert fetched.title == "Test Mapset"
     assert fetched.encrypted_description == "encrypted:desc"
     assert fetched.owner_id == mapset.owner_id
 
@@ -38,7 +38,7 @@ async def test_mapset_owner_relationship(db_session, mapset_with_owner):
 
 @pytest.mark.asyncio
 async def test_mapset_required_fields(db_session, mapset_owner):
-    """Missing required encrypted fields should raise IntegrityError."""
+    """Missing required fields should raise IntegrityError."""
     mapset = Mapset(
         id=uuid4(),
         encrypted_song_length_ms="encrypted:100000",
@@ -70,7 +70,7 @@ async def test_mapset_description_is_nullable(db_session, mapset_owner):
     """encrypted_description may be NULL."""
     mapset = Mapset(
         id=uuid4(),
-        encrypted_title="encrypted:title",
+        title="Nullable Description Mapset",
         encrypted_description=None,
         encrypted_song_length_ms="encrypted:100000",
         passphrase_salt="salt",
@@ -93,7 +93,7 @@ async def test_mapset_fk_violation_for_nonexistent_owner(db_session):
     """Referencing a non-existent owner_id raises IntegrityError."""
     mapset = Mapset(
         id=uuid4(),
-        encrypted_title="encrypted:title",
+        title="Orphan Mapset",
         encrypted_song_length_ms="encrypted:100000",
         passphrase_salt="salt",
         encrypted_verification="encrypted:verified",

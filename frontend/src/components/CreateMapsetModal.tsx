@@ -48,9 +48,8 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
       const salt = generateSalt();
       const key = await deriveKey(passphrase, salt);
 
-      const [encryptedTitle, encryptedDescription, encryptedSongLengthMs, encryptedVerification] =
+      const [encryptedDescription, encryptedSongLengthMs, encryptedVerification] =
         await Promise.all([
-          encrypt(key, title, mapsetFieldAad(id, 'title')),
           description ? encrypt(key, description, mapsetFieldAad(id, 'description')) : Promise.resolve(null),
           encrypt(key, songLengthMs || '0', mapsetFieldAad(id, 'song_length_ms')),
           encrypt(key, VERIFICATION_CANARY, mapsetVerificationAad(id)),
@@ -58,7 +57,7 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
 
       await createMapset.mutateAsync({
         id,
-        encrypted_title: encryptedTitle,
+        title,
         encrypted_description: encryptedDescription,
         encrypted_song_length_ms: encryptedSongLengthMs,
         passphrase_salt: salt,
@@ -98,9 +97,13 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
+              maxLength={255}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
               placeholder="Mapset title"
             />
+            <p className="text-xs text-yellow-500 mt-1">
+              The title will be visible to anyone who sees the invitation link or has database access. It is not encrypted — do not include private information.
+            </p>
           </div>
 
           <div>

@@ -70,14 +70,16 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
 - Audit metadata (`uploaded_by`, `created_at`, `updated_at`)
 
 **Encrypted (server never sees plaintext):**
-- `Mapset`: title, description, song_length_ms
+- `Mapset`: description, song_length_ms
 - `Difficulty`: name
 - `Section`: name, start_time_ms, end_time_ms, sort_order
 - `Post`: content (body)
 - `SectionOsuVersion`: content
 - `DifficultyBaseOsuVersion`: content
 
-> **Performance note:** Because the server cannot read these fields, sorting/filtering by them must happen client-side. The frontend fetches all rows, decrypts, and sorts in memory. This is fine for the expected scale (<100 posts per difficulty, <20 sections per difficulty) but is a hard ceiling on future scalability.
+> **Note:** `Mapset.title` is intentionally **not encrypted** so users can distinguish between multiple mapsets on the dashboard without unlocking each one. The title is visible to anyone who sees the invitation link.
+
+> **Performance note:** Because the server cannot read encrypted fields, sorting/filtering by them must happen client-side. The exception is `Mapset.title`, which is plaintext and can be sorted server-side. For all other fields, the frontend fetches all rows, decrypts, and sorts in memory. This is fine for the expected scale (<100 posts per difficulty, <20 sections per difficulty) but is a hard ceiling on future scalability.
 
 ### Consequences for Agents
 

@@ -27,7 +27,7 @@ vi.mock('../contexts/EncryptionContext', () => ({
 
 const MAPSET: Mapset = {
   id: 'test-mapset-id',
-  encrypted_title: 'encrypted:title',
+  title: 'Test Mapset',
   encrypted_description: null,
   encrypted_song_length_ms: 'encrypted:0',
   passphrase_salt: 'c2FsdA==',
@@ -52,9 +52,9 @@ describe('MapsetCard (locked)', () => {
     mockNavigate.mockReset();
   });
 
-  it('renders locked placeholder text', () => {
+  it('renders the mapset title', () => {
     renderCard();
-    expect(screen.getByText(/🔒 Encrypted Mapset/i)).toBeInTheDocument();
+    expect(screen.getByText(MAPSET.title)).toBeInTheDocument();
   });
 
   it('shows Unlock button when onUnlock prop is provided', () => {
@@ -85,5 +85,10 @@ describe('MapsetCard (unlocked)', () => {
     renderCard(vi.fn());
     await act(async () => {});
     expect(screen.queryByRole('button', { name: /unlock/i })).toBeNull();
+  });
+
+  it('renders the mapset title when unlocked', () => {
+    renderCard();
+    expect(screen.getByText(MAPSET.title)).toBeInTheDocument();
   });
 });
