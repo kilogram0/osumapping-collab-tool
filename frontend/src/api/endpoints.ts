@@ -76,3 +76,32 @@ export async function updateMapset(id: string, payload: UpdateMapsetPayload): Pr
 export async function deleteMapset(id: string): Promise<void> {
   await client.delete(`/mapsets/${id}`);
 }
+
+export interface Difficulty {
+  id: string;
+  mapset_id: string;
+  encrypted_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchDifficulties(mapsetId: string): Promise<Difficulty[]> {
+  const { data } = await client.get<Difficulty[]>(`/mapsets/${mapsetId}/difficulties`);
+  return data;
+}
+
+export interface Section {
+  id: string;
+  difficulty_id: string;
+  encrypted_name: string;
+  encrypted_start_time_ms: string;
+  encrypted_end_time_ms: string;
+  encrypted_sort_order: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchSections(difficultyId: string): Promise<Section[]> {
+  const { data } = await client.get<Section[]>(`/difficulties/${difficultyId}/sections`);
+  return data;
+}

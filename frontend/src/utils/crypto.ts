@@ -45,6 +45,36 @@ export function mapsetVerificationAad(mapsetId: string): string {
   return `mapsets|${mapsetId}|${mapsetId}`;
 }
 
+// NOTE: These AAD helpers are the canonical contract for both encryption (write)
+// and decryption (read). Any producer that encrypts Difficulty or Section fields
+// must reuse these exact helpers — do not re-derive the format.
+export function difficultyFieldAad(difficultyId: string, mapsetId: string, field: string): string {
+  return `difficulties|${difficultyId}|${mapsetId}|${field}`;
+}
+
+export function sectionFieldAad(sectionId: string, mapsetId: string, field: string): string {
+  return `sections|${sectionId}|${mapsetId}|${field}`;
+}
+
+/**
+ * Decode the uniform JSON envelope `{"v":<value>}`.
+ *
+ * Every numeric encrypted field is wrapped in the same envelope shape so
+ * the decrypt path never branches on field type.
+ *
+ * @throws if the text is not valid JSON, lacks `"v"`, or `v` is not a number.
+ */
+export function decodeJsonEnvelope(plaintext: string): number {
+  const parsed = JSON.parse(plaintext);
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'v')) {
+    throw new Error('Missing "v" key in JSON envelope');
+  }
+  if (typeof parsed.v !== 'number') {
+    throw new Error(`JSON envelope value is not a number: ${parsed.v}`);
+  }
+  return parsed.v;
+}
+
 export function generateSalt(): string {
   return toBase64(crypto.getRandomValues(new Uint8Array(SALT_BYTES)));
 }
