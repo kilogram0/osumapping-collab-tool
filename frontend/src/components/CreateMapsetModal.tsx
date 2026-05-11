@@ -8,13 +8,33 @@ interface CreateMapsetModalProps {
   onCancel: () => void;
 }
 
+/** Build an onChange handler that clamps numeric input to [0, max].
+ *  max === undefined means no upper bound (e.g. minutes). */
+function makeClampedOnChange(
+  setter: (v: string) => void,
+  max?: number,
+): (e: React.ChangeEvent<HTMLInputElement>) => void {
+  return (e) => {
+    const raw = e.target.value;
+    if (raw === '') {
+      setter('');
+      return;
+    }
+    let val = parseInt(raw, 10);
+    if (Number.isNaN(val) || val < 0) val = 0;
+    if (max !== undefined && val > max) val = max;
+    setter(String(val));
+  };
+}
+
 export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetModalProps) {
   const { unlockWithKey } = useEncryption();
   const createMapset = useCreateMapset();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [songLengthMs, setSongLengthMs] = useState('');
+  const [minutes, setMinutes] = useState('');
+  const [seconds, setSeconds] = useState('');
   const [passphrase] = useState(() => generatePassphrase());
   const [copied, setCopied] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -48,10 +68,16 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
       const salt = generateSalt();
       const key = await deriveKey(passphrase, salt);
 
+      const totalMs = (Number(minutes) || 0) * 60_000 + (Number(seconds) || 0) * 1_000;
+
+      // Versioned JSON envelope makes the ciphertext self-describing.
+      // Future readers can distinguish v1 ({"v":1,"ms":…}) from older raw strings.
+      const songLengthPayload = JSON.stringify({ v: 1, ms: totalMs });
+
       const [encryptedDescription, encryptedSongLengthMs, encryptedVerification] =
         await Promise.all([
           description ? encrypt(key, description, mapsetFieldAad(id, 'description')) : Promise.resolve(null),
-          encrypt(key, songLengthMs || '0', mapsetFieldAad(id, 'song_length_ms')),
+          encrypt(key, songLengthPayload, mapsetFieldAad(id, 'song_length_ms')),
           encrypt(key, VERIFICATION_CANARY, mapsetVerificationAad(id)),
         ]);
 
@@ -121,18 +147,36 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
           </div>
 
           <div>
-            <label htmlFor="mapset-song-length" className="block text-sm font-medium text-gray-300 mb-1">
-              Song Length (ms)
-            </label>
-            <input
-              id="mapset-song-length"
-              type="number"
-              value={songLengthMs}
-              onChange={(e) => setSongLengthMs(e.target.value)}
-              min={0}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder="e.g. 180000"
-            />
+            <span className="block text-sm font-medium text-gray-300 mb-1">Song Length</span>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label htmlFor="mapset-song-minutes" className="sr-only">Minutes</label>
+                <input
+                  id="mapset-song-minutes"
+                  type="number"
+                  value={minutes}
+                  onChange={makeClampedOnChange(setMinutes)}
+                  min={0}
+                  className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                  placeholder="0"
+                />
+                <span className="text-xs text-gray-400 mt-1 block">Minutes</span>
+              </div>
+              <div className="flex-1">
+                <label htmlFor="mapset-song-seconds" className="sr-only">Seconds</label>
+                <input
+                  id="mapset-song-seconds"
+                  type="number"
+                  value={seconds}
+                  onChange={makeClampedOnChange(setSeconds, 59)}
+                  min={0}
+                  max={59}
+                  className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                  placeholder="0"
+                />
+                <span className="text-xs text-gray-400 mt-1 block">Seconds</span>
+              </div>
+            </div>
           </div>
 
           <div className="bg-gray-900 border border-gray-600 rounded p-4 space-y-3">
