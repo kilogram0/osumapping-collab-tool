@@ -70,9 +70,9 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
 - Audit metadata (`uploaded_by`, `created_at`, `updated_at`)
 
 **Encrypted (server never sees plaintext):**
-- `Mapset`: description, song_length_ms
+- `Mapset`: description, song_length_ms (versioned JSON envelope `{"v":1,"ms":245000}`)
 - `Difficulty`: name
-- `Section`: name, start_time_ms, end_time_ms, sort_order
+- `Section`: name, start_time_ms, end_time_ms, sort_order (JSON envelope `{"v":0}` — versioning reserved for future schema changes)
 - `Post`: content (body)
 - `SectionOsuVersion`: content
 - `DifficultyBaseOsuVersion`: content

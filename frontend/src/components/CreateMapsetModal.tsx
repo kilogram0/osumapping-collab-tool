@@ -20,6 +20,9 @@ function makeClampedOnChange(
       setter('');
       return;
     }
+    // Note: parseInt silently truncates scientific notation ("1e3" → 1).
+    // Native <input type="number"> validation blocks most malformed input,
+    // so this edge case is accepted rather than adding regex overhead.
     let val = parseInt(raw, 10);
     if (Number.isNaN(val) || val < 0) val = 0;
     if (max !== undefined && val > max) val = max;
