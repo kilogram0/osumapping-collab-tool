@@ -62,7 +62,7 @@ export default function MapsetPage() {
         <div className="max-w-md">
           <h2 className="text-lg font-semibold text-gray-200 mb-3">Sections</h2>
           {sectionsLoading && <p className="text-gray-400">Loading sections…</p>}
-          {sections && <SectionList sections={sections} mapsetId={mapsetId} />}
+          {sections && <SectionList sections={sections} mapsetId={mapsetId} difficultyId={selectedDifficultyId} />}
         </div>
       )}
     </div>

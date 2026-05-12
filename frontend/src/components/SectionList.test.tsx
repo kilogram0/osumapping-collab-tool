@@ -1,4 +1,6 @@
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type React from 'react';
 import SectionList from './SectionList';
@@ -7,6 +9,16 @@ import { decrypt } from '../utils/crypto';
 
 const mockIsUnlocked = vi.fn(() => false);
 const mockGetKey = vi.fn(async () => null as CryptoKey | null);
+const mockDownloadSectionOsu = vi.fn(async () => ({
+  id: 'sov1',
+  section_id: 's1',
+  encrypted_content: 'enc:osu content',
+  version: 1,
+  is_active: true,
+  uploaded_by: 'u1',
+  created_at: '',
+  updated_at: '',
+}));
 
 vi.mock('../contexts/EncryptionContext', () => ({
   useEncryption: () => ({
@@ -19,6 +31,14 @@ vi.mock('../contexts/EncryptionContext', () => ({
   }),
 }));
 
+vi.mock('../api/endpoints', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/endpoints')>();
+  return {
+    ...actual,
+    downloadSectionOsu: (...args: any[]) => mockDownloadSectionOsu(...args),
+  };
+});
+
 vi.mock('../utils/crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils/crypto')>();
   return {
@@ -29,6 +49,7 @@ vi.mock('../utils/crypto', async (importOriginal) => {
     }),
     decodeJsonEnvelope: vi.fn((plaintext: string) => Number(plaintext)),
     sectionFieldAad: vi.fn((sectionId: string, mapsetId: string, field: string) => `sections|${sectionId}|${mapsetId}|${field}`),
+    sectionOsuVersionAad: vi.fn((versionId: string, mapsetId: string) => `sov|${versionId}|${mapsetId}`),
   };
 });
 
@@ -56,12 +77,16 @@ const SECTIONS: Section[] = [
 ];
 
 function renderList(props?: Partial<React.ComponentProps<typeof SectionList>>) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <SectionList
-      sections={SECTIONS}
-      mapsetId="ms1"
-      {...props}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <SectionList
+        sections={SECTIONS}
+        mapsetId="ms1"
+        difficultyId="d1"
+        {...props}
+      />
+    </QueryClientProvider>,
   );
 }
 
@@ -69,7 +94,22 @@ describe('SectionList', () => {
   beforeEach(() => {
     mockIsUnlocked.mockReturnValue(false);
     mockGetKey.mockResolvedValue(null);
-    vi.mocked(decrypt).mockClear();
+    vi.mocked(decrypt).mockReset();
+    vi.mocked(decrypt).mockImplementation(async (_key: CryptoKey, ciphertext: string, _aad: string) => {
+      if (ciphertext.startsWith('enc:')) return ciphertext.slice(4);
+      return ciphertext;
+    });
+    vi.mocked(mockDownloadSectionOsu).mockReset();
+    mockDownloadSectionOsu.mockResolvedValue({
+      id: 'sov1',
+      section_id: 's1',
+      encrypted_content: 'enc:osu content',
+      version: 1,
+      is_active: true,
+      uploaded_by: 'u1',
+      created_at: '',
+      updated_at: '',
+    });
   });
 
   it('renders encrypted placeholders when locked', () => {
@@ -171,5 +211,63 @@ describe('SectionList', () => {
     renderList();
     await act(async () => {});
     expect(screen.getAllByText(/Failed to decrypt section/i)).toHaveLength(2);
+  });
+
+  it('shows upload and download buttons when unlocked', async () => {
+    mockIsUnlocked.mockReturnValue(true);
+    mockGetKey.mockResolvedValue({} as CryptoKey);
+    renderList();
+    await act(async () => {});
+    expect(screen.getAllByText('Upload .osu')).toHaveLength(2);
+    expect(screen.getAllByText('Download .osu')).toHaveLength(2);
+  });
+
+  it('hides upload and download buttons when locked', () => {
+    renderList();
+    expect(screen.queryByText('Upload .osu')).not.toBeInTheDocument();
+    expect(screen.queryByText('Download .osu')).not.toBeInTheDocument();
+  });
+
+  it('triggers download flow when Download .osu is clicked', async () => {
+    mockIsUnlocked.mockReturnValue(true);
+    mockGetKey.mockResolvedValue({} as CryptoKey);
+
+    const createObjectURL = vi.fn(() => 'blob:test');
+    const revokeObjectURL = vi.fn();
+    const clickSpy = vi.fn();
+
+    vi.stubGlobal('URL', {
+      createObjectURL,
+      revokeObjectURL,
+    });
+
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      const el = originalCreateElement(tagName);
+      if (tagName === 'a') {
+        el.click = clickSpy;
+      }
+      return el;
+    });
+
+    renderList();
+    await act(async () => {});
+
+    const user = userEvent.setup();
+    const downloadButtons = screen.getAllByRole('button', { name: /Download \.osu/i });
+    await user.click(downloadButtons[0]);
+
+    await waitFor(() => {
+      expect(mockDownloadSectionOsu).toHaveBeenCalledTimes(1);
+    });
+    expect(mockDownloadSectionOsu).toHaveBeenCalledWith('d1', 's1');
+
+    await waitFor(() => {
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+    });
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
+
+    vi.restoreAllMocks();
   });
 });

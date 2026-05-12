@@ -56,6 +56,14 @@ export function sectionFieldAad(sectionId: string, mapsetId: string, field: stri
   return `sections|${sectionId}|${mapsetId}|${field}`;
 }
 
+export function sectionOsuVersionAad(versionId: string, mapsetId: string): string {
+  return `section_osu_versions|${versionId}|${mapsetId}|content`;
+}
+
+export function difficultyBaseOsuVersionAad(versionId: string, mapsetId: string): string {
+  return `difficulty_base_osu_versions|${versionId}|${mapsetId}|content`;
+}
+
 /**
  * Decode the uniform JSON envelope `{"v":<value>}`.
  *

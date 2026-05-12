@@ -1302,3 +1302,79 @@ async def test_upload_section_osu_links_base_to_section_version(
         )
         base = result.scalar_one()
         assert base.source_section_version_id == UUID(osu["id"])
+
+
+# ---------------------------------------------------------------------------
+# GET /difficulties/{did}/base.osu
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_download_base_osu_returns_active_base(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    osu = _osu_payload_with_base(content="encrypted:section", base_content="encrypted:base")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.get(f"/api/difficulties/{difficulty_id}/base.osu")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["encrypted_content"] == "encrypted:base"
+    assert "id" in body
+
+
+@pytest.mark.asyncio
+async def test_download_base_osu_returns_404_when_none_uploaded(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    resp = await client.get(f"/api/difficulties/{difficulty_id}/base.osu")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_base_osu_rejects_unauthenticated(client: AsyncClient):
+    resp = await client.get(f"/api/difficulties/{uuid4()}/base.osu")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_download_base_osu_rejects_non_member(client: AsyncClient):
+    owner = await _seed_user(84001)
+    outsider = await _seed_user(84002)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    sec = _section_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections", json=sec, headers=CSRF_HEADERS
+    )
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=_osu_payload_with_base(),
+        headers=CSRF_HEADERS,
+    )
+
+    client.cookies.set(settings.cookie_name, create_access_token(outsider.id))
+    resp = await client.get(f"/api/difficulties/{diff['id']}/base.osu")
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(outsider.id)

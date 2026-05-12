@@ -24,6 +24,7 @@ from app.models import (
 )
 from app.queries import get_mapset_membership
 from app.schemas import (
+    BaseOsuRead,
     SectionCreate,
     SectionOsuRead,
     SectionOsuUpload,
@@ -366,3 +367,38 @@ async def download_section_osu(
         )
 
     return active_version
+
+
+@router.get(
+    "/difficulties/{difficulty_id}/base.osu",
+    response_model=BaseOsuRead,
+)
+async def download_base_osu(
+    difficulty_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> DifficultyBaseOsuVersion:
+    """Return the currently active base .osu version for a difficulty.
+
+    Returns ``404`` if no base version has been uploaded yet.
+    """
+    difficulty = await _get_difficulty(db, difficulty_id)
+
+    membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
+    if membership is None:
+        raise _forbidden()
+
+    result = await db.execute(
+        select(DifficultyBaseOsuVersion).where(
+            DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
+            DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
+        )
+    )
+    active_base = result.scalar_one_or_none()
+    if active_base is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active base .osu version found",
+        )
+
+    return active_base

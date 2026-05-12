@@ -105,3 +105,55 @@ export async function fetchSections(difficultyId: string): Promise<Section[]> {
   const { data } = await client.get<Section[]>(`/difficulties/${difficultyId}/sections`);
   return data;
 }
+
+export interface SectionOsuVersion {
+  id: string;
+  section_id: string;
+  encrypted_content: string;
+  version: number;
+  is_active: boolean;
+  uploaded_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BaseOsuVersion {
+  id: string;
+  encrypted_content: string;
+}
+
+export interface UploadSectionOsuPayload {
+  id: string;
+  encrypted_content: string;
+  base_version?: {
+    id: string;
+    encrypted_content: string;
+  } | null;
+}
+
+export async function uploadSectionOsu(
+  difficultyId: string,
+  sectionId: string,
+  payload: UploadSectionOsuPayload,
+): Promise<SectionOsuVersion> {
+  const { data } = await client.post<SectionOsuVersion>(
+    `/difficulties/${difficultyId}/sections/${sectionId}/osu`,
+    payload,
+  );
+  return data;
+}
+
+export async function downloadSectionOsu(
+  difficultyId: string,
+  sectionId: string,
+): Promise<SectionOsuVersion> {
+  const { data } = await client.get<SectionOsuVersion>(
+    `/difficulties/${difficultyId}/sections/${sectionId}/osu`,
+  );
+  return data;
+}
+
+export async function downloadBaseOsu(difficultyId: string): Promise<BaseOsuVersion> {
+  const { data } = await client.get<BaseOsuVersion>(`/difficulties/${difficultyId}/base.osu`);
+  return data;
+}

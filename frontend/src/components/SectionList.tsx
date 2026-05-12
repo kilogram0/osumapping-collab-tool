@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { Section } from '../api/endpoints';
+import { downloadSectionOsu } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { decrypt, decodeJsonEnvelope, sectionFieldAad } from '../utils/crypto';
+import { decrypt, decodeJsonEnvelope, sectionFieldAad, sectionOsuVersionAad } from '../utils/crypto';
 import { logger } from '../utils/logger';
+import OsuUploadButton from './OsuUploadButton';
 
 interface SectionListProps {
   sections: Section[];
   mapsetId: string;
+  difficultyId: string;
 }
 
 interface DecryptedSection {
@@ -17,7 +20,7 @@ interface DecryptedSection {
   sortOrder: number;
 }
 
-export default function SectionList({ sections, mapsetId }: SectionListProps) {
+export default function SectionList({ sections, mapsetId, difficultyId }: SectionListProps) {
   const { isUnlocked, getKey } = useEncryption();
   const [decrypted, setDecrypted] = useState<DecryptedSection[]>([]);
   const unlocked = isUnlocked(mapsetId);
@@ -63,6 +66,30 @@ export default function SectionList({ sections, mapsetId }: SectionListProps) {
     decryptAll();
     return () => { cancelled = true; };
   }, [unlocked, sections, mapsetId, getKey]);
+
+  const handleDownload = useCallback(
+    async (sectionId: string, sectionName: string) => {
+      if (!unlocked) return;
+      try {
+        const key = await getKey(mapsetId);
+        if (!key) return;
+        const resp = await downloadSectionOsu(difficultyId, sectionId);
+        const plaintext = await decrypt(key, resp.encrypted_content, sectionOsuVersionAad(resp.id, mapsetId));
+        const blob = new Blob([plaintext], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${sectionName.replace(/[^a-z0-9]/gi, '_')}.osu`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        logger.warn(`Failed to download section ${sectionId}:`, err);
+      }
+    },
+    [difficultyId, mapsetId, unlocked, getKey],
+  );
 
   if (sections.length === 0) {
     return (
@@ -112,12 +139,32 @@ export default function SectionList({ sections, mapsetId }: SectionListProps) {
           key={s.id}
           className="bg-gray-800 border border-gray-700 rounded-lg p-3"
         >
-          <p className="text-white font-medium text-sm">{s.name}</p>
-          {s.startTimeMs !== null && s.endTimeMs !== null && (
-            <p className="text-xs text-gray-400 mt-1">
-              {formatTime(s.startTimeMs)} – {formatTime(s.endTimeMs)}
-            </p>
-          )}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-white font-medium text-sm">{s.name}</p>
+              {s.startTimeMs !== null && s.endTimeMs !== null && (
+                <p className="text-xs text-gray-400 mt-1">
+                  {formatTime(s.startTimeMs)} – {formatTime(s.endTimeMs)}
+                </p>
+              )}
+            </div>
+            {unlocked && (
+              <div className="flex flex-col gap-1 shrink-0">
+                <OsuUploadButton
+                  difficultyId={difficultyId}
+                  sectionId={s.id}
+                  mapsetId={mapsetId}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleDownload(s.id, s.name)}
+                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                >
+                  Download .osu
+                </button>
+              </div>
+            )}
+          </div>
         </li>
       ))}
     </ul>
