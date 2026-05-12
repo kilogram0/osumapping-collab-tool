@@ -177,3 +177,42 @@ class SectionRead(BaseModel):
     encrypted_sort_order: str
     created_at: datetime
     updated_at: datetime
+
+
+# .osu file size cap (frontend validates ≤ 1 MB raw; base64 adds ~33%).
+_OSU_CONTENT_CT_MAX = 1_500_000
+
+
+class BaseVersionUpload(BaseModel):
+    """Optional base template bundled with a section .osu upload."""
+
+    id: UUID
+    encrypted_content: str = Field(min_length=1, max_length=_OSU_CONTENT_CT_MAX)
+
+
+class SectionOsuUpload(BaseModel):
+    """Request body for ``POST /difficulties/{did}/sections/{sid}/osu``.
+
+    The frontend parses the .osu file client-side, computes the candidate base,
+    and optionally includes a new base version.  All IDs are client-generated
+    UUIDs so that AAD can be bound before encryption.
+    """
+
+    id: UUID
+    encrypted_content: str = Field(min_length=1, max_length=_OSU_CONTENT_CT_MAX)
+    base_version: BaseVersionUpload | None = None
+
+
+class SectionOsuRead(BaseModel):
+    """A section .osu version as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    section_id: UUID
+    encrypted_content: str
+    version: int
+    is_active: bool
+    uploaded_by: UUID
+    created_at: datetime
+    updated_at: datetime
