@@ -37,50 +37,58 @@ export function generatePassphrase(): string {
   return result.join('');
 }
 
-export function mapsetFieldAad(mapsetId: string, field: string): string {
-  return `mapsets|${mapsetId}|${field}`;
+// NOTE: These AAD helpers are the canonical contract for both encryption (write)
+// and decryption (read). They match the exact format in SPECIFICATION.md §5.
+// Any producer that encrypts Difficulty or Section fields must reuse these exact
+// helpers — do not re-derive the format.
+export function mapsetFieldAad(mapsetId: string): string {
+  return `Mapset|${mapsetId}|${mapsetId}`;
 }
 
 export function mapsetVerificationAad(mapsetId: string): string {
-  return `mapsets|${mapsetId}|${mapsetId}`;
+  return `Mapset|${mapsetId}|${mapsetId}`;
 }
 
-// NOTE: These AAD helpers are the canonical contract for both encryption (write)
-// and decryption (read). Any producer that encrypts Difficulty or Section fields
-// must reuse these exact helpers — do not re-derive the format.
-export function difficultyFieldAad(difficultyId: string, mapsetId: string, field: string): string {
-  return `difficulties|${difficultyId}|${mapsetId}|${field}`;
+export function difficultyFieldAad(difficultyId: string, mapsetId: string): string {
+  return `Difficulty|${difficultyId}|${mapsetId}`;
 }
 
-export function sectionFieldAad(sectionId: string, mapsetId: string, field: string): string {
-  return `sections|${sectionId}|${mapsetId}|${field}`;
+export function sectionFieldAad(sectionId: string, mapsetId: string): string {
+  return `Section|${sectionId}|${mapsetId}`;
 }
 
 export function sectionOsuVersionAad(versionId: string, mapsetId: string): string {
-  return `section_osu_versions|${versionId}|${mapsetId}|content`;
+  return `SectionOsuVersion|${versionId}|${mapsetId}`;
 }
 
 export function difficultyBaseOsuVersionAad(versionId: string, mapsetId: string): string {
-  return `difficulty_base_osu_versions|${versionId}|${mapsetId}|content`;
+  return `DifficultyBaseOsuVersion|${versionId}|${mapsetId}`;
 }
 
 /**
- * Decode the uniform JSON envelope `{"v":<value>}`.
+ * Decode the uniform JSON envelope `{"v":<version>,"ms":<value>}`.
  *
  * Every numeric encrypted field is wrapped in the same envelope shape so
- * the decrypt path never branches on field type.
+ * the decrypt path never branches on field type.  The `v` field is a schema
+ * version; the actual value lives in `ms`.
  *
- * @throws if the text is not valid JSON, lacks `"v"`, or `v` is not a number.
+ * @throws if the text is not valid JSON, lacks both `"ms"` and `"v"`, or
+ *         the resolved value is not a number.
  */
 export function decodeJsonEnvelope(plaintext: string): number {
   const parsed = JSON.parse(plaintext);
-  if (!Object.prototype.hasOwnProperty.call(parsed, 'v')) {
-    throw new Error('Missing "v" key in JSON envelope');
+  if (Object.prototype.hasOwnProperty.call(parsed, 'ms') && typeof parsed.ms === 'number') {
+    return parsed.ms;
   }
-  if (typeof parsed.v !== 'number') {
-    throw new Error(`JSON envelope value is not a number: ${parsed.v}`);
+  // Fallback to `v` ONLY when `ms` is completely absent.  This prevents a
+  // malformed new-style envelope like {"v":1} from silently returning the
+  // schema version as the value.
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'ms')) {
+    if (Object.prototype.hasOwnProperty.call(parsed, 'v') && typeof parsed.v === 'number') {
+      return parsed.v;
+    }
   }
-  return parsed.v;
+  throw new Error('JSON envelope missing numeric "ms" key');
 }
 
 export function generateSalt(): string {

@@ -79,8 +79,8 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
 
       const [encryptedDescription, encryptedSongLengthMs, encryptedVerification] =
         await Promise.all([
-          description ? encrypt(key, description, mapsetFieldAad(id, 'description')) : Promise.resolve(null),
-          encrypt(key, songLengthPayload, mapsetFieldAad(id, 'song_length_ms')),
+          description ? encrypt(key, description, mapsetFieldAad(id)) : Promise.resolve(null),
+          encrypt(key, songLengthPayload, mapsetFieldAad(id)),
           encrypt(key, VERIFICATION_CANARY, mapsetVerificationAad(id)),
         ]);
 

@@ -18,7 +18,7 @@ const MAPSET_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 
 async function buildVerification(passphrase: string, salt: string, mapsetId: string): Promise<string> {
   const key = await deriveKey(passphrase, salt);
-  return encrypt(key, VERIFICATION_CANARY, `mapsets|${mapsetId}|${mapsetId}`);
+  return encrypt(key, VERIFICATION_CANARY, `Mapset|${mapsetId}|${mapsetId}`);
 }
 
 function wrapper({ children }: { children: React.ReactNode }) {

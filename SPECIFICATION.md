@@ -309,7 +309,7 @@ Activations and rollbacks must run inside a single transaction (deactivate previ
 8. **Session Creation:** Backend generates a JWT containing `sub` (internal `User.id`) and `exp` set to **14 days** from issue. The JWT is set as an **HTTP-only**, **Secure** (prod), **SameSite=Lax** cookie with `Path=/` and `Max-Age` matching the JWT's TTL. The cookie name is `__Host-access_token` in production and `access_token` in dev — same prefix policy as the OAuth-state cookie above. The `__Host-` prefix is browser-enforced hardening: the cookie must be `Secure`, `Path=/`, and have no `Domain` attribute, blocking subdomain or HTTP injection of a forged session cookie. Dev drops the prefix because dev runs over HTTP and the prefix requires `Secure`. We pick 14 days because contests typically run 15+ days — a shorter TTL would force participants to re-auth mid-collab. There is no refresh-token flow; on expiry, the user logs in again. (The 14-day value should live in `config.py` as `ACCESS_TOKEN_TTL_DAYS` so it can be adjusted without a code change elsewhere.)
 9. **Post-callback redirect:** Backend returns a `302` to `${FRONTEND_URL}/dashboard` so the user lands in the app rather than on a JSON endpoint.
 
-   > **Cross-origin caveat:** `SameSite=Lax` works in local dev because both frontend (`localhost:5173`) and backend (`localhost:8000`) share the same site (`localhost`). It also works in production when both are served from the same domain via the nginx reverse proxy (see Section 13). If you ever split the frontend and backend onto different registrable domains (e.g., `app.example.com` vs `api.other.com`), the cookie must be changed to `SameSite=None; Secure`, and CORS must be configured for credentials.
+   > **Cross-origin caveat:** `SameSite=Lax` works in local dev because both frontend (`localhost:5173`) and backend (`localhost:8000`) share the same site (`localhost`). It also works in production when both are served from the same domain via the nginx reverse proxy (see Section 14). If you ever split the frontend and backend onto different registrable domains (e.g., `app.example.com` vs `api.other.com`), the cookie must be changed to `SameSite=None; Secure`, and CORS must be configured for credentials.
 10. **Authenticated Requests:** The browser automatically sends the `access_token` cookie with every request. FastAPI dependency `get_current_user` verifies the JWT signature and expiry, fetches the `User` from the DB by internal `id`, and injects it into the route handler.
 
 ### Are Cookies Dangerous / Legal Issues?
@@ -500,7 +500,58 @@ This is the core of the application. It will be a single-page layout:
 
 ---
 
-## 7. Timestamp & osu:// Link Logic
+## 7. Future UI: osu! Beatmap Discussion Timeline (Post-MVP)
+
+> **Status:** Design target for a future release. The current MVP uses a sidebar list of sections (§6). This section describes the desired end-state UI inspired by the osu! beatmap discussion page.
+
+### Motivation
+The current MVP renders sections as a vertical sidebar list. A horizontal timeline that visually represents the entire song and segments it by section length is more intuitive for mappers and modders, matching the mental model of osu!'s own discussion interface.
+
+### Layout
+
+1. **Horizontal Timeline (Top of Main Area):**
+   - A full-width horizontal bar representing the decrypted `song_length_ms` of the mapset.
+   - The bar is segmented ("cut like a cake") into colored blocks, one per section. Each block's width is proportional to its duration (`end_time_ms − start_time_ms`).
+   - Blocks are ordered left-to-right by `start_time_ms`.
+   - Each block displays the decrypted section name (e.g. "Intro", "Kiai 1") and its duration.
+   - Hovering a block highlights it; clicking it selects the section.
+
+2. **Section Detail Panel (Below Timeline):**
+   - When a section is selected from the timeline, a detail panel appears directly beneath it.
+   - The panel contains:
+     - Section name and time range.
+     - `.osu` upload/download controls (`OsuUploadButton`, `DownloadOsuButton`).
+     - Version history affordance.
+     - **Forum posts** that belong to this section (derived client-side from post timestamps, same as §6).
+   - Only one section's detail panel is visible at a time, reducing visual clutter.
+
+3. **Global Posts View:**
+   - A "Show All Posts" toggle or separate tab allows viewing the full chronological thread for the difficulty, identical to the current §6 forum thread. This is useful for sweeping reviews that span multiple sections.
+
+### Schema Implications
+
+Because sections are strictly sequential and contiguous on the timeline, the `start_time_ms` of every section after the first is **redundant** — it is always the `end_time_ms` of the previous section. This suggests a future schema simplification:
+
+- Drop `encrypted_start_time_ms` from `Section`.
+- Keep only `encrypted_end_time_ms` (or rename it to `encrypted_duration_ms`).
+- The first section implicitly starts at `0`.
+- The frontend derives each section's start time by summing the end times of all preceding sections.
+
+> **Migration note:** This is a breaking schema change and should only be attempted after the MVP is stable. Until then, the frontend can derive the redundant `start_time_ms` from the previous section's `end_time_ms` without touching the DB.
+
+### Interaction Summary
+
+| User Action | Result |
+| :--- | :--- |
+| Click timeline block | Select section; reveal detail panel with upload/download + posts for that section |
+| Hover timeline block | Tooltip with section name, time range, and active `.osu` version number |
+| Click post timestamp in detail panel | osu! editor opens at that timestamp |
+| Create new post in detail panel | Post is attached to the difficulty (DB unchanged); frontend derives its section from timestamp and shows it in the correct panel |
+| Upload `.osu` in detail panel | Same critical/notice ack flow as §9; only the section context is clearer because the user is visually anchored to the correct time range |
+
+---
+
+## 8. Timestamp & osu:// Link Logic
 
 > **Architecture change:** Timestamp extraction happens **entirely in the frontend**. Because post bodies are encrypted (`encrypted_body`), the backend cannot scan them. The frontend extracts timestamps from plaintext before encryption, and re-extracts them from decrypted plaintext for display.
 
@@ -552,7 +603,7 @@ function generateOsuLink(ms: number, combos?: string): string {
 
 ---
 
-## 8. `.osu` File Management & Merging
+## 9. `.osu` File Management & Merging
 
 > **Architecture change:** All `.osu` parsing, base generation, diffing, merging, and the critical/notice ack flow happen **entirely in the frontend** (TypeScript / Web Crypto API). The backend is a dumb encrypted blob store — it stores and serves ciphertext only. The rules below describe the **client-side** algorithm.
 
@@ -659,7 +710,7 @@ As a convenience feature, users can optionally upload a `.osu` file to auto-gene
 
 ---
 
-## 9. Docker & Local Development
+## 10. Docker & Local Development
 
 ### `docker-compose.yml`
 The file will define three services:
@@ -691,11 +742,11 @@ The backend will read these via Pydantic Settings:
 
 ---
 
-## 10. Implementation Order (MVP)
+## 11. Implementation Order (MVP)
 
 A phased approach to keep the project testable and avoid large merge conflicts. Each task below is designed to be small (typically 50–300 lines of code), self-contained, and reviewable. **A sub-agent should receive one task at a time.** After each task, run `docker-compose up --build` to verify nothing is broken.
 
-> **Testing Rule:** Every phase must include tests. Backend changes require passing unit/integration tests. Frontend changes require passing component tests. See Section 13 for test setup requirements.
+> **Testing Rule:** Every phase must include tests. Backend changes require passing unit/integration tests. Frontend changes require passing component tests. See Section 14 for test setup requirements.
 
 ---
 
@@ -820,7 +871,7 @@ A phased approach to keep the project testable and avoid large merge conflicts. 
 |---|------|------------------|------------|
 | 7.1 | Implement bookmark import (stretch) | Parse `[Editor] Bookmarks:` from decrypted `.osu` upload to auto-create sections | Creates sections correctly; write parser unit test |
 | 7.2 | Add loading states & error handling | Spinners, toast notifications | UX feels responsive; write component tests |
-| 7.3 | Run full test suite | All backend and frontend tests | `pytest` and `npm test` pass; coverage reflects "everything that matters" per Section 11, not a numeric threshold |
+| 7.3 | Run full test suite | All backend and frontend tests | `pytest` and `npm test` pass; coverage reflects "everything that matters" per Section 12, not a numeric threshold |
 | 7.4 | Final Docker Compose testing | All services start cleanly | `docker-compose up --build` works end-to-end |
 | 7.5 | Update deployment docs | Reflect any final env vars or config changes | Docs are accurate |
 | 7.6 | Verify E2EE claim | Automated integration test: intercept all API requests/responses and assert that (a) no plaintext content field name appears in JSON payloads (fields that must never be plaintext on the wire: `title`, `description`, `song_length_ms`, `name`, `content`, `body`, `start_time_ms`, `end_time_ms`, `sort_order`); and (b) every `encrypted_*` value is base64-decodable and at least 28 bytes (12-byte IV + 16-byte GCM tag), catching the bug where a developer sent plaintext inside an `encrypted_*` wrapper. Confirm every content field uses the `encrypted_*` prefix. Manual audit: inspect DB directly with `psql` and confirm all `encrypted_*` columns contain base64 ciphertext strings, never human-readable text. | Both automated test and manual audit pass; no plaintext leaks detected |
@@ -829,9 +880,9 @@ A phased approach to keep the project testable and avoid large merge conflicts. 
 
 ---
 
-## 11. Testing Strategy
+## 12. Testing Strategy
 
-Testing is not optional. Every task in Section 10 must include tests. This ensures that sub-agents produce verifiable, correct code and prevents regressions as the codebase grows.
+Testing is not optional. Every task in Section 11 must include tests. This ensures that sub-agents produce verifiable, correct code and prevents regressions as the codebase grows.
 
 ### Backend Tests (pytest)
 
@@ -912,7 +963,7 @@ If any step fails, the task is not complete.
 
 ---
 
-## 12. Deployment Strategy
+## 13. Deployment Strategy
 
 The architecture is designed for maximum flexibility:
 
@@ -921,7 +972,7 @@ The architecture is designed for maximum flexibility:
   - Clone the repo (or just write `docker-compose.prod.yml`) on the server.
   - Create a `.env` file with production secrets.
   - Run `docker-compose -f docker-compose.prod.yml up -d`.
-  - SSL termination is handled by the frontend image's own nginx (see Section 13.5). There is no extra reverse-proxy layer in front of it; certificates are bind-mounted from the host.
+  - SSL termination is handled by the frontend image's own nginx (see Section 14.5). There is no extra reverse-proxy layer in front of it; certificates are bind-mounted from the host.
 - **Split Services:**
   - **Frontend:** Easily deployed to Vercel or Netlify (it's a static SPA).
   - **Backend + DB:** Deployed to Railway, Render, or Fly.io.
@@ -931,7 +982,7 @@ Because everything is in Docker, moving from local to any host is trivial.
 
 ---
 
-## 13. Deployment Guide
+## 14. Deployment Guide
 
 This section provides step-by-step instructions for running the application in both local development and production environments.
 

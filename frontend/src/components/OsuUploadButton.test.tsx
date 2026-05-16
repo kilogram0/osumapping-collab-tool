@@ -48,8 +48,8 @@ vi.mock('../utils/crypto', async (importOriginal) => {
     ...actual,
     encrypt: vi.fn(async (_key: CryptoKey, plaintext: string, _aad: string) => `enc:${plaintext}`),
     decrypt: vi.fn(async (_key: CryptoKey, ciphertext: string, _aad: string) => ciphertext.replace(/^enc:/, '')),
-    sectionOsuVersionAad: vi.fn((versionId: string, mapsetId: string) => `sov|${versionId}|${mapsetId}`),
-    difficultyBaseOsuVersionAad: vi.fn((versionId: string, mapsetId: string) => `dbv|${versionId}|${mapsetId}`),
+    sectionOsuVersionAad: vi.fn((versionId: string, mapsetId: string) => `SectionOsuVersion|${versionId}|${mapsetId}`),
+    difficultyBaseOsuVersionAad: vi.fn((versionId: string, mapsetId: string) => `DifficultyBaseOsuVersion|${versionId}|${mapsetId}`),
   };
 });
 

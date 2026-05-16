@@ -30,7 +30,7 @@ export default function DifficultyTabs({ difficulties, selectedId, onSelect, map
       await Promise.all(
         difficulties.map(async (d) => {
           try {
-            const plaintext = await decrypt(key, d.encrypted_name, difficultyFieldAad(d.id, mapsetId, 'name'));
+            const plaintext = await decrypt(key, d.encrypted_name, difficultyFieldAad(d.id, mapsetId));
             decrypted[d.id] = plaintext;
           } catch (_err) {
             logger.warn(`Failed to decrypt difficulty name for ${d.id}:`, _err);

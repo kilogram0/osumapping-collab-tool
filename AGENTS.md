@@ -262,9 +262,9 @@ If any step fails, the task is NOT complete.
 
 ## `.osu` File Handling Conventions
 
-> **Important:** All `.osu` parsing, base generation, diffing, merging, and validation happens **entirely in the frontend** (TypeScript / Web Crypto API). The backend is a dumb encrypted blob store — it stores and serves ciphertext only. The rules below describe the **client-side** algorithm; they are mirrored here from `SPECIFICATION.md` §8 for agent convenience.
+> **Important:** All `.osu` parsing, base generation, diffing, merging, and validation happens **entirely in the frontend** (TypeScript / Web Crypto API). The backend is a dumb encrypted blob store — it stores and serves ciphertext only. The rules below describe the **client-side** algorithm; they are mirrored here from `SPECIFICATION.md` §9 for agent convenience.
 >
-> **Canonical source:** `SPECIFICATION.md` §8 is the authoritative description. If this summary ever drifts from §8, **§8 wins**. Update §8 first, then mirror here.
+> **Canonical source:** `SPECIFICATION.md` §9 is the authoritative description. If this summary ever drifts from §9, **§9 wins**. Update §9 first, then mirror here.
 
 ### Parser Rules
 1. `.osu` files are parsed as **text**, line-by-line.

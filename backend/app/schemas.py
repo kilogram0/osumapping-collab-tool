@@ -225,3 +225,16 @@ class BaseOsuRead(BaseModel):
 
     id: UUID
     encrypted_content: str
+
+
+class MapsetMemberRead(BaseModel):
+    """A mapset membership row as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    mapset_id: UUID
+    user_id: UUID
+    role: str
+    created_at: datetime
+    updated_at: datetime

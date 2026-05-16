@@ -10,9 +10,11 @@ interface SectionListProps {
   sections: Section[];
   mapsetId: string;
   difficultyId: string;
+  onEdit?: (section: DecryptedSection) => void;
+  onDecrypted?: (sections: DecryptedSection[]) => void;
 }
 
-interface DecryptedSection {
+export interface DecryptedSection {
   id: string;
   name: string;
   startTimeMs: number;
@@ -20,7 +22,7 @@ interface DecryptedSection {
   sortOrder: number;
 }
 
-export default function SectionList({ sections, mapsetId, difficultyId }: SectionListProps) {
+export default function SectionList({ sections, mapsetId, difficultyId, onEdit, onDecrypted }: SectionListProps) {
   const { isUnlocked, getKey } = useEncryption();
   const [decrypted, setDecrypted] = useState<DecryptedSection[]>([]);
   const unlocked = isUnlocked(mapsetId);
@@ -40,10 +42,10 @@ export default function SectionList({ sections, mapsetId, difficultyId }: Sectio
         sections.map(async (s) => {
           try {
             const [name, startRaw, endRaw, sortRaw] = await Promise.all([
-              decrypt(key, s.encrypted_name, sectionFieldAad(s.id, mapsetId, 'name')),
-              decrypt(key, s.encrypted_start_time_ms, sectionFieldAad(s.id, mapsetId, 'start_time_ms')),
-              decrypt(key, s.encrypted_end_time_ms, sectionFieldAad(s.id, mapsetId, 'end_time_ms')),
-              decrypt(key, s.encrypted_sort_order, sectionFieldAad(s.id, mapsetId, 'sort_order')),
+              decrypt(key, s.encrypted_name, sectionFieldAad(s.id, mapsetId)),
+              decrypt(key, s.encrypted_start_time_ms, sectionFieldAad(s.id, mapsetId)),
+              decrypt(key, s.encrypted_end_time_ms, sectionFieldAad(s.id, mapsetId)),
+              decrypt(key, s.encrypted_sort_order, sectionFieldAad(s.id, mapsetId)),
             ]);
             results.push({
               id: s.id,
@@ -58,14 +60,15 @@ export default function SectionList({ sections, mapsetId, difficultyId }: Sectio
         }),
       );
       if (!cancelled) {
-        results.sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
+        results.sort((a, b) => a.startTimeMs - b.startTimeMs || a.id.localeCompare(b.id));
         setDecrypted(results);
+        onDecrypted?.(results);
       }
     }
 
     decryptAll();
     return () => { cancelled = true; };
-  }, [unlocked, sections, mapsetId, getKey]);
+  }, [unlocked, sections, mapsetId, getKey, onDecrypted]);
 
   const handleDownload = useCallback(
     async (sectionId: string, sectionName: string) => {
@@ -102,12 +105,14 @@ export default function SectionList({ sections, mapsetId, difficultyId }: Sectio
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
+    const millis = ms % 1000;
     const mm = minutes.toString().padStart(2, '0');
     const ss = seconds.toString().padStart(2, '0');
+    const mmm = millis.toString().padStart(3, '0');
     if (hours > 0) {
-      return `${hours}:${mm}:${ss}`;
+      return `${hours}:${mm}:${ss}.${mmm}`;
     }
-    return `${mm}:${ss}`;
+    return `${mm}:${ss}.${mmm}`;
   }
 
   if (unlocked && decrypted.length === 0 && sections.length > 0) {
@@ -162,6 +167,18 @@ export default function SectionList({ sections, mapsetId, difficultyId }: Sectio
                 >
                   Download .osu
                 </button>
+                {onEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ds = decrypted.find((d) => d.id === s.id);
+                      if (ds) onEdit(ds);
+                    }}
+                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                  >
+                    Edit
+                  </button>
+                )}
               </div>
             )}
           </div>

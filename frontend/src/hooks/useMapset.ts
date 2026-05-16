@@ -4,6 +4,7 @@ import {
   deleteMapset,
   fetchMapset,
   fetchMapsets,
+  fetchMyMembership,
   updateMapset,
   type CreateMapsetPayload,
   type UpdateMapsetPayload,
@@ -52,5 +53,13 @@ export function useDeleteMapset() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
     },
+  });
+}
+
+export function useMyMembership(mapsetId: string) {
+  return useQuery({
+    queryKey: ['membership', mapsetId],
+    queryFn: () => fetchMyMembership(mapsetId),
+    enabled: !!mapsetId,
   });
 }

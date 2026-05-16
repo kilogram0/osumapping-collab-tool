@@ -38,8 +38,8 @@ vi.mock('../utils/crypto', () => ({
   generateSalt: () => 'mock-salt',
   deriveKey: vi.fn().mockResolvedValue({} as CryptoKey),
   encrypt: vi.fn().mockResolvedValue('encrypted-mock'),
-  mapsetFieldAad: vi.fn().mockReturnValue('aad-mock'),
-  mapsetVerificationAad: vi.fn().mockReturnValue('aad-verification'),
+  mapsetFieldAad: vi.fn().mockReturnValue('Mapset|id|id'),
+  mapsetVerificationAad: vi.fn().mockReturnValue('Mapset|id|id'),
   VERIFICATION_CANARY: 'verified',
 }));
 
@@ -116,8 +116,6 @@ describe('CreateMapsetModal', () => {
     renderModal();
     const minutesInput = screen.getByLabelText(/minutes/i) as HTMLInputElement;
     await userEvent.clear(minutesInput);
-    // Typing a minus sign followed by a digit should result in 0 because
-    // parseInt('-1', 10) is -1, which is < 0 and gets clamped.
     await userEvent.type(minutesInput, '-5');
     expect(minutesInput.value).toBe('0');
   });

@@ -47,9 +47,18 @@ vi.mock('../utils/crypto', async (importOriginal) => {
       if (ciphertext.startsWith('enc:')) return ciphertext.slice(4);
       return ciphertext;
     }),
-    decodeJsonEnvelope: vi.fn((plaintext: string) => Number(plaintext)),
-    sectionFieldAad: vi.fn((sectionId: string, mapsetId: string, field: string) => `sections|${sectionId}|${mapsetId}|${field}`),
-    sectionOsuVersionAad: vi.fn((versionId: string, mapsetId: string) => `sov|${versionId}|${mapsetId}`),
+    decodeJsonEnvelope: vi.fn((plaintext: string) => {
+      try {
+        const parsed = JSON.parse(plaintext);
+        if (typeof parsed.ms === 'number') return parsed.ms;
+        if (typeof parsed.v === 'number') return parsed.v;
+      } catch {
+        return Number(plaintext);
+      }
+      return Number(plaintext);
+    }),
+    sectionFieldAad: vi.fn((sectionId: string, mapsetId: string) => `Section|${sectionId}|${mapsetId}`),
+    sectionOsuVersionAad: vi.fn((versionId: string, mapsetId: string) => `SectionOsuVersion|${versionId}|${mapsetId}`),
   };
 });
 
@@ -58,9 +67,9 @@ const SECTIONS: Section[] = [
     id: 's2',
     difficulty_id: 'd1',
     encrypted_name: 'enc:Kiai 1',
-    encrypted_start_time_ms: 'enc:30000',
-    encrypted_end_time_ms: 'enc:60000',
-    encrypted_sort_order: 'enc:1',
+    encrypted_start_time_ms: 'enc:{"v":0,"ms":30000}',
+    encrypted_end_time_ms: 'enc:{"v":0,"ms":60000}',
+    encrypted_sort_order: 'enc:{"v":0,"ms":1}',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
@@ -68,9 +77,9 @@ const SECTIONS: Section[] = [
     id: 's1',
     difficulty_id: 'd1',
     encrypted_name: 'enc:Intro',
-    encrypted_start_time_ms: 'enc:0',
-    encrypted_end_time_ms: 'enc:30000',
-    encrypted_sort_order: 'enc:0',
+    encrypted_start_time_ms: 'enc:{"v":0,"ms":0}',
+    encrypted_end_time_ms: 'enc:{"v":0,"ms":30000}',
+    encrypted_sort_order: 'enc:{"v":0,"ms":0}',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
@@ -126,11 +135,11 @@ describe('SectionList', () => {
     await act(async () => {});
     expect(screen.getByText('Intro')).toBeInTheDocument();
     expect(screen.getByText('Kiai 1')).toBeInTheDocument();
-    expect(screen.getByText(/00:00 – 00:30/i)).toBeInTheDocument();
-    expect(screen.getByText(/00:30 – 01:00/i)).toBeInTheDocument();
+    expect(screen.getByText(/00:00.000 – 00:30.000/i)).toBeInTheDocument();
+    expect(screen.getByText(/00:30.000 – 01:00.000/i)).toBeInTheDocument();
   });
 
-  it('sorts sections by sort order', async () => {
+  it('sorts sections by start time', async () => {
     mockIsUnlocked.mockReturnValue(true);
     mockGetKey.mockResolvedValue({} as CryptoKey);
     renderList();
@@ -145,7 +154,7 @@ describe('SectionList', () => {
     expect(screen.getByText(/No sections yet/i)).toBeInTheDocument();
   });
 
-  it('invokes decrypt with the correct per-field AAD', async () => {
+  it('invokes decrypt with the correct per-row AAD', async () => {
     mockIsUnlocked.mockReturnValue(true);
     mockGetKey.mockResolvedValue({} as CryptoKey);
     renderList();
@@ -153,34 +162,24 @@ describe('SectionList', () => {
     expect(decrypt).toHaveBeenCalledWith(
       expect.anything(),
       'enc:Intro',
-      'sections|s1|ms1|name',
+      'Section|s1|ms1',
     );
     expect(decrypt).toHaveBeenCalledWith(
       expect.anything(),
-      'enc:0',
-      'sections|s1|ms1|start_time_ms',
-    );
-    expect(decrypt).toHaveBeenCalledWith(
-      expect.anything(),
-      'enc:30000',
-      'sections|s1|ms1|end_time_ms',
-    );
-    expect(decrypt).toHaveBeenCalledWith(
-      expect.anything(),
-      'enc:0',
-      'sections|s1|ms1|sort_order',
+      expect.stringContaining('ms'),
+      'Section|s1|ms1',
     );
   });
 
-  it('falls back to id tiebreaker when sort orders collide', async () => {
+  it('falls back to id tiebreaker when start times collide', async () => {
     const colliding: Section[] = [
       {
         id: 's-b',
         difficulty_id: 'd1',
         encrypted_name: 'enc:Second',
-        encrypted_start_time_ms: 'enc:0',
-        encrypted_end_time_ms: 'enc:1000',
-        encrypted_sort_order: 'enc:5',
+        encrypted_start_time_ms: 'enc:{"v":0,"ms":5000}',
+        encrypted_end_time_ms: 'enc:{"v":0,"ms":10000}',
+        encrypted_sort_order: 'enc:{"v":0,"ms":5}',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
@@ -188,9 +187,9 @@ describe('SectionList', () => {
         id: 's-a',
         difficulty_id: 'd1',
         encrypted_name: 'enc:First',
-        encrypted_start_time_ms: 'enc:0',
-        encrypted_end_time_ms: 'enc:1000',
-        encrypted_sort_order: 'enc:5',
+        encrypted_start_time_ms: 'enc:{"v":0,"ms":5000}',
+        encrypted_end_time_ms: 'enc:{"v":0,"ms":10000}',
+        encrypted_sort_order: 'enc:{"v":0,"ms":5}',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
@@ -220,6 +219,31 @@ describe('SectionList', () => {
     await act(async () => {});
     expect(screen.getAllByText('Upload .osu')).toHaveLength(2);
     expect(screen.getAllByText('Download .osu')).toHaveLength(2);
+  });
+
+  it('shows edit button when unlocked and onEdit is provided', async () => {
+    mockIsUnlocked.mockReturnValue(true);
+    mockGetKey.mockResolvedValue({} as CryptoKey);
+    const onEdit = vi.fn();
+    renderList({ onEdit });
+    await act(async () => {});
+    const editButtons = screen.getAllByRole('button', { name: /Edit/i });
+    expect(editButtons).toHaveLength(2);
+  });
+
+  it('calls onEdit when Edit button is clicked', async () => {
+    mockIsUnlocked.mockReturnValue(true);
+    mockGetKey.mockResolvedValue({} as CryptoKey);
+    const onEdit = vi.fn();
+    renderList({ onEdit });
+    await act(async () => {});
+    const user = userEvent.setup();
+    const editButtons = screen.getAllByRole('button', { name: /Edit/i });
+    await user.click(editButtons[0]);
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 's1', name: 'Intro' }),
+    );
   });
 
   it('hides upload and download buttons when locked', () => {

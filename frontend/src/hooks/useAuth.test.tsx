@@ -47,7 +47,7 @@ describe('useAuth', () => {
 
   it('returns authenticated state when user is fetched', async () => {
     const mockUser: endpoints.User = {
-      id: 1,
+      id: 'user-uuid',
       osu_id: 12345,
       username: 'testuser',
       avatar_url: 'https://a.ppy.sh/12345',
@@ -123,7 +123,7 @@ describe('useAuth', () => {
   describe('logout', () => {
     it('clears encryption state, calls logout endpoint, and sets user to null', async () => {
       const mockUser: endpoints.User = {
-        id: 1,
+        id: 'user-uuid',
         osu_id: 12345,
         username: 'testuser',
         avatar_url: 'https://a.ppy.sh/12345',

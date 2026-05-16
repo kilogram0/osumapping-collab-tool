@@ -17,7 +17,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Mapset, MapsetMember, MapsetRole, User
 from app.queries import get_mapset_membership
-from app.schemas import MapsetCreate, MapsetRead, MapsetUpdate
+from app.schemas import MapsetCreate, MapsetMemberRead, MapsetRead, MapsetUpdate
 
 router = APIRouter(prefix="/mapsets", tags=["mapsets"])
 
@@ -185,3 +185,26 @@ async def delete_mapset(
     # violates the NOT NULL constraint on MapsetMember.mapset_id.
     await db.execute(sa_delete(Mapset).where(Mapset.id == mapset_id))
     await db.commit()
+
+
+@router.get("/{mapset_id}/members/me", response_model=MapsetMemberRead)
+async def get_my_membership(
+    mapset_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MapsetMember:
+    """Return the current user's membership in a mapset.
+
+    Returns ``404`` if the mapset does not exist, ``403`` if the current user
+    is not a member.  The ``role`` field lets the frontend gate UI actions
+    (create/edit difficulties and sections) without fetching the full roster.
+    """
+    mapset = await db.get(Mapset, mapset_id)
+    if mapset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
+
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
+    if membership is None:
+        raise _forbidden()
+
+    return membership

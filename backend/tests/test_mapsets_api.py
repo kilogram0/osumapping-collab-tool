@@ -627,3 +627,50 @@ async def test_delete_mapset_rejects_unauthenticated(client: AsyncClient):
         f"/api/mapsets/{uuid4()}", headers=CSRF_HEADERS
     )
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /mapsets/{id}/members/me
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_my_membership_returns_role(
+    client: AsyncClient, authed_user: User
+):
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+
+    response = await client.get(f"/api/mapsets/{payload['id']}/members/me")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mapset_id"] == payload["id"]
+    assert body["user_id"] == str(authed_user.id)
+    assert body["role"] == "owner"
+
+
+@pytest.mark.asyncio
+async def test_get_my_membership_returns_403_for_non_member(client: AsyncClient):
+    owner = await _seed_user(60017)
+    other = await _seed_user(60018)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+
+    client.cookies.set(settings.cookie_name, create_access_token(other.id))
+    response = await client.get(f"/api/mapsets/{payload['id']}/members/me")
+    assert response.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(other.id)
+
+
+@pytest.mark.asyncio
+async def test_get_my_membership_returns_404_for_unknown_mapset(
+    client: AsyncClient, authed_user: User
+):
+    response = await client.get(f"/api/mapsets/{uuid4()}/members/me")
+    assert response.status_code == 404
