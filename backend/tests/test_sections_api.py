@@ -1378,3 +1378,721 @@ async def test_download_base_osu_rejects_non_member(client: AsyncClient):
 
     await _delete_user_and_mapsets(owner.id)
     await _delete_user_and_mapsets(outsider.id)
+
+
+# ---------------------------------------------------------------------------
+# GET /difficulties/{did}/sections/{sid}/osu/versions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_section_osu_versions_returns_all_versions(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Uploading twice produces two versions; list returns both ordered newest first."""
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    first = _osu_payload(content="encrypted:v1")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=first,
+        headers=CSRF_HEADERS,
+    )
+
+    second = _osu_payload(content="encrypted:v2")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=second,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.get(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu/versions"
+    )
+    assert resp.status_code == 200, resp.text
+    versions = resp.json()
+    assert len(versions) == 2
+    # Newest first
+    assert versions[0]["version"] == 2
+    assert versions[0]["is_active"] is True
+    assert versions[1]["version"] == 1
+    assert versions[1]["is_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_section_osu_versions_rejects_non_member(client: AsyncClient):
+    owner = await _seed_user(85001)
+    outsider = await _seed_user(85002)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    sec = _section_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections", json=sec, headers=CSRF_HEADERS
+    )
+
+    client.cookies.set(settings.cookie_name, create_access_token(outsider.id))
+    resp = await client.get(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu/versions"
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(outsider.id)
+
+
+@pytest.mark.asyncio
+async def test_list_section_osu_versions_rejects_unauthenticated(client: AsyncClient):
+    resp = await client.get(
+        f"/api/difficulties/{uuid4()}/sections/{uuid4()}/osu/versions"
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_section_osu_versions_returns_404_for_wrong_difficulty(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Section exists but URL uses a different difficulty_id → 404."""
+    user, mapset_id, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    other_diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties",
+        json=other_diff,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.get(
+        f"/api/difficulties/{other_diff['id']}/sections/{section['id']}/osu/versions"
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /difficulties/{did}/sections/{sid}/osu/versions/{vid}/activate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_activate_section_osu_version_succeeds(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Rolling back to v1 makes it active and deactivates v2."""
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    first = _osu_payload(content="encrypted:v1")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=first,
+        headers=CSRF_HEADERS,
+    )
+
+    second = _osu_payload(content="encrypted:v2")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=second,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu/versions/{first['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == first["id"]
+    assert body["is_active"] is True
+    assert body["version"] == 1
+
+    # Verify in DB that v2 is now inactive
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        result = await session.execute(
+            select(SectionOsuVersion).where(SectionOsuVersion.id == second["id"])
+        )
+        old = result.scalar_one()
+        assert old.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_activate_section_osu_version_noop_when_already_active(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Activating the already-active version is a no-op (200)."""
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    osu = _osu_payload(content="encrypted:v1")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu/versions/{osu['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_activate_section_osu_version_rejects_modder(client: AsyncClient):
+    owner = await _seed_user(86001)
+    modder = await _seed_user(86002)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    sec = _section_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections", json=sec, headers=CSRF_HEADERS
+    )
+    osu = _osu_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=modder.id,
+                role=MapsetRole.modder,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(modder.id))
+    resp = await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu/versions/{osu['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(modder.id)
+
+
+@pytest.mark.asyncio
+async def test_activate_section_osu_version_mapper_can_activate(client: AsyncClient):
+    """A mapper (non-owner) can roll back a section version."""
+    owner = await _seed_user(86101)
+    mapper_user = await _seed_user(86102)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    sec = _section_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections", json=sec, headers=CSRF_HEADERS
+    )
+    first = _osu_payload(content="encrypted:v1")
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=first,
+        headers=CSRF_HEADERS,
+    )
+    second = _osu_payload(content="encrypted:v2")
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=second,
+        headers=CSRF_HEADERS,
+    )
+
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    resp = await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu/versions/{first['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == first["id"]
+    assert body["is_active"] is True
+    assert body["version"] == 1
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_activate_section_osu_version_returns_404_for_unknown_version(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu/versions/{uuid4()}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_activate_section_osu_version_returns_404_for_wrong_difficulty(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Section exists but URL uses a different difficulty_id → 404."""
+    user, mapset_id, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+    osu = _osu_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    other_diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties",
+        json=other_diff,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{other_diff['id']}/sections/{section['id']}/osu/versions/{osu['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_activate_section_osu_version_rejects_missing_csrf(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+    osu = _osu_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu/versions/{osu['id']}/activate",
+        headers={"Origin": settings.FRONTEND_URL},
+    )
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# GET /difficulties/{did}/base/versions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_base_osu_versions_returns_all_versions(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Uploading twice with base produces two base versions; list returns both newest first."""
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    first = _osu_payload_with_base(content="v1", base_content="base-v1")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=first,
+        headers=CSRF_HEADERS,
+    )
+
+    second = _osu_payload_with_base(content="v2", base_content="base-v2")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=second,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.get(f"/api/difficulties/{difficulty_id}/base/versions")
+    assert resp.status_code == 200, resp.text
+    versions = resp.json()
+    assert len(versions) == 2
+    # Newest first
+    assert versions[0]["version"] == 2
+    assert versions[0]["is_active"] is True
+    assert versions[0]["source_section_version_id"] == second["id"]
+    assert versions[1]["version"] == 1
+    assert versions[1]["is_active"] is False
+    assert versions[1]["source_section_version_id"] == first["id"]
+
+
+@pytest.mark.asyncio
+async def test_list_base_osu_versions_rejects_non_member(client: AsyncClient):
+    owner = await _seed_user(87001)
+    outsider = await _seed_user(87002)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    sec = _section_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections", json=sec, headers=CSRF_HEADERS
+    )
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=_osu_payload_with_base(),
+        headers=CSRF_HEADERS,
+    )
+
+    client.cookies.set(settings.cookie_name, create_access_token(outsider.id))
+    resp = await client.get(f"/api/difficulties/{diff['id']}/base/versions")
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(outsider.id)
+
+
+@pytest.mark.asyncio
+async def test_list_base_osu_versions_rejects_unauthenticated(client: AsyncClient):
+    resp = await client.get(f"/api/difficulties/{uuid4()}/base/versions")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_base_osu_versions_returns_empty_when_none_uploaded(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    resp = await client.get(f"/api/difficulties/{difficulty_id}/base/versions")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# ---------------------------------------------------------------------------
+# POST /difficulties/{did}/base/versions/{vid}/activate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_activate_base_osu_version_succeeds(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Rolling back to base v1 makes it active and deactivates base v2."""
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    first = _osu_payload_with_base(content="v1", base_content="base-v1")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=first,
+        headers=CSRF_HEADERS,
+    )
+
+    second = _osu_payload_with_base(content="v2", base_content="base-v2")
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=second,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/base/versions/{first['base_version']['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == first["base_version"]["id"]
+    assert body["is_active"] is True
+    assert body["version"] == 1
+
+    # Verify in DB that base v2 is now inactive
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        result = await session.execute(
+            select(DifficultyBaseOsuVersion).where(
+                DifficultyBaseOsuVersion.id == second["base_version"]["id"]
+            )
+        )
+        old = result.scalar_one()
+        assert old.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_activate_base_osu_version_noop_when_already_active(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Activating the already-active base version is a no-op (200)."""
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    osu = _osu_payload_with_base()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/base/versions/{osu['base_version']['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_activate_base_osu_version_rejects_modder(client: AsyncClient):
+    owner = await _seed_user(88001)
+    modder = await _seed_user(88002)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    sec = _section_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections", json=sec, headers=CSRF_HEADERS
+    )
+    osu = _osu_payload_with_base()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=modder.id,
+                role=MapsetRole.modder,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(modder.id))
+    resp = await client.post(
+        f"/api/difficulties/{diff['id']}/base/versions/{osu['base_version']['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(modder.id)
+
+
+@pytest.mark.asyncio
+async def test_activate_base_osu_version_mapper_can_activate(client: AsyncClient):
+    """A mapper (non-owner) can roll back a base version."""
+    owner = await _seed_user(88101)
+    mapper_user = await _seed_user(88102)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    sec = _section_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections", json=sec, headers=CSRF_HEADERS
+    )
+    first = _osu_payload_with_base(content="v1", base_content="base-v1")
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=first,
+        headers=CSRF_HEADERS,
+    )
+    second = _osu_payload_with_base(content="v2", base_content="base-v2")
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=second,
+        headers=CSRF_HEADERS,
+    )
+
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    resp = await client.post(
+        f"/api/difficulties/{diff['id']}/base/versions/{first['base_version']['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == first["base_version"]["id"]
+    assert body["is_active"] is True
+    assert body["version"] == 1
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_activate_base_osu_version_returns_404_for_unknown_version(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/base/versions/{uuid4()}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_activate_base_osu_version_returns_404_for_wrong_difficulty(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Base version exists but URL uses a different difficulty_id → 404."""
+    user, mapset_id, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+    osu = _osu_payload_with_base()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    other_diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties",
+        json=other_diff,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{other_diff['id']}/base/versions/{osu['base_version']['id']}/activate",
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_activate_base_osu_version_rejects_missing_csrf(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+    osu = _osu_payload_with_base()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=osu,
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/base/versions/{osu['base_version']['id']}/activate",
+        headers={"Origin": settings.FRONTEND_URL},
+    )
+    assert resp.status_code == 403

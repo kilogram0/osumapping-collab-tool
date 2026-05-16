@@ -224,7 +224,37 @@ class BaseOsuRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    difficulty_id: UUID
     encrypted_content: str
+    version: int
+    is_active: bool
+    source_section_version_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SectionOsuVersionListItem(BaseModel):
+    """A section .osu version entry in the version history list."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    version: int
+    is_active: bool
+    uploaded_by: UUID
+    created_at: datetime
+
+
+class BaseOsuVersionListItem(BaseModel):
+    """A base .osu version entry in the version history list."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    version: int
+    is_active: bool
+    source_section_version_id: UUID | None
+    created_at: datetime
 
 
 class MapsetMemberRead(BaseModel):

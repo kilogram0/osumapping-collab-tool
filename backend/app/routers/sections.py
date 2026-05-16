@@ -25,9 +25,11 @@ from app.models import (
 from app.queries import get_mapset_membership
 from app.schemas import (
     BaseOsuRead,
+    BaseOsuVersionListItem,
     SectionCreate,
     SectionOsuRead,
     SectionOsuUpload,
+    SectionOsuVersionListItem,
     SectionRead,
     SectionUpdate,
 )
@@ -402,3 +404,215 @@ async def download_base_osu(
         )
 
     return active_base
+
+
+# ---------------------------------------------------------------------------
+# Section version history
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/difficulties/{difficulty_id}/sections/{section_id}/osu/versions",
+    response_model=list[SectionOsuVersionListItem],
+)
+async def list_section_osu_versions(
+    difficulty_id: UUID,
+    section_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[SectionOsuVersion]:
+    """List all .osu versions for a section, newest first.
+
+    Returns ``404`` if the section does not exist or does not belong to the
+    given difficulty.  Returns ``403`` if the user is not a mapset member.
+
+    .. note::
+       This endpoint is currently unbounded. For sections with many uploads
+       (hundreds of versions), consider adding ``limit``/``offset``
+       parameters in a future release.
+    """
+    _, mapset_id = await _get_section(db, difficulty_id, section_id)
+
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
+    if membership is None:
+        raise _forbidden()
+
+    result = await db.execute(
+        select(SectionOsuVersion)
+        .where(SectionOsuVersion.section_id == section_id)
+        .order_by(SectionOsuVersion.version.desc())
+        .limit(500)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/difficulties/{difficulty_id}/sections/{section_id}/osu/versions/{version_id}/activate",
+    response_model=SectionOsuRead,
+    dependencies=[Depends(require_csrf_protection)],
+)
+async def activate_section_osu_version(
+    difficulty_id: UUID,
+    section_id: UUID,
+    version_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> SectionOsuVersion:
+    """Roll back to a previous section .osu version.
+
+    Deactivates the currently active version and activates the target version
+    in a single transaction.  Permitted for ``owner`` and ``mapper`` roles
+    only.  Returns ``404`` if the version does not exist or does not belong to
+    the given section.  Returns ``409`` if a concurrent activation wins the
+    race for the partial unique index.
+    """
+    _, mapset_id = await _get_section(db, difficulty_id, section_id)
+
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
+    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+        raise _forbidden()
+
+    # Verify the target version exists and belongs to this section.
+    target = (
+        await db.execute(
+            select(SectionOsuVersion).where(
+                SectionOsuVersion.id == version_id,
+                SectionOsuVersion.section_id == section_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Version not found",
+        )
+
+    # No-op if already active.
+    if target.is_active:
+        return target
+
+    try:
+        await db.execute(
+            sa_update(SectionOsuVersion)
+            .where(
+                SectionOsuVersion.section_id == section_id,
+                SectionOsuVersion.is_active == True,  # noqa: E712
+            )
+            .values(is_active=False)
+        )
+        target.is_active = True
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Concurrent activation conflict — please retry",
+        ) from exc
+
+    await db.refresh(target)
+    return target
+
+
+# ---------------------------------------------------------------------------
+# Base version history
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/difficulties/{difficulty_id}/base/versions",
+    response_model=list[BaseOsuVersionListItem],
+)
+async def list_base_osu_versions(
+    difficulty_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[DifficultyBaseOsuVersion]:
+    """List all base versions for a difficulty, newest first.
+
+    Returns ``404`` if the difficulty does not exist.  Returns ``403`` if the
+    user is not a mapset member.
+
+    .. note::
+       This endpoint is currently unbounded. For difficulties with many
+       uploads (hundreds of versions), consider adding ``limit``/``offset``
+       parameters in a future release.
+    """
+    difficulty = await _get_difficulty(db, difficulty_id)
+
+    membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
+    if membership is None:
+        raise _forbidden()
+
+    result = await db.execute(
+        select(DifficultyBaseOsuVersion)
+        .where(DifficultyBaseOsuVersion.difficulty_id == difficulty_id)
+        .order_by(DifficultyBaseOsuVersion.version.desc())
+        .limit(500)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/difficulties/{difficulty_id}/base/versions/{version_id}/activate",
+    response_model=BaseOsuRead,
+    dependencies=[Depends(require_csrf_protection)],
+)
+async def activate_base_osu_version(
+    difficulty_id: UUID,
+    version_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> DifficultyBaseOsuVersion:
+    """Roll back to a previous base .osu version.
+
+    Deactivates the currently active base and activates the target base in a
+    single transaction.  Permitted for ``owner`` and ``mapper`` roles only.
+    Returns ``404`` if the version does not exist or does not belong to the
+    given difficulty.  Returns ``409`` if a concurrent activation wins the race
+    for the partial unique index.
+    """
+    difficulty = await _get_difficulty(db, difficulty_id)
+
+    membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
+    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+        raise _forbidden()
+
+    # Verify the target version exists and belongs to this difficulty.
+    target = (
+        await db.execute(
+            select(DifficultyBaseOsuVersion).where(
+                DifficultyBaseOsuVersion.id == version_id,
+                DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Version not found",
+        )
+
+    # No-op if already active.
+    if target.is_active:
+        return target
+
+    try:
+        await db.execute(
+            sa_update(DifficultyBaseOsuVersion)
+            .where(
+                DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
+                DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
+            )
+            .values(is_active=False)
+        )
+        target.is_active = True
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Concurrent activation conflict — please retry",
+        ) from exc
+
+    await db.refresh(target)
+    return target
