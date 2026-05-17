@@ -87,11 +87,11 @@ describe('OsuVersionHistory', () => {
     });
   });
 
-  it('shows settings-changed badge when version created a base', () => {
+  it('shows base-created badge when version created a base', () => {
     mockBaseFetch.mockReturnValue({
       data: [{ id: 'b1', version: 1, is_active: false, source_section_version_id: 'v2', created_at: '' }],
     });
     renderComponent();
-    expect(screen.getByTitle(/Base v1 created/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/Originally created Base v1 on upload/i)).toBeInTheDocument();
   });
 });

@@ -79,8 +79,8 @@ export default function OsuVersionHistory({ difficultyId, sectionId, onClose }: 
                     <span className="ml-2 text-xs text-blue-400 font-semibold">ACTIVE</span>
                   )}
                   {sourceBaseMap.has(v.id) && (
-                    <span className="ml-2 text-xs text-yellow-400 font-semibold" title={`Base v${sourceBaseMap.get(v.id)} created`}>
-                      ⚠️ Settings changed
+                    <span className="ml-2 text-xs text-yellow-400 font-semibold" title={`Originally created Base v${sourceBaseMap.get(v.id)} on upload`}>
+                      ⚠️ Created base v{sourceBaseMap.get(v.id)}
                     </span>
                   )}
                 </p>
