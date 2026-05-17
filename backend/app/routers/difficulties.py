@@ -12,12 +12,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Difficulty, Mapset, MapsetRole, User
 from app.queries import get_mapset_membership
-from app.schemas import DifficultyCreate, DifficultyRead, DifficultyUpdate
+from app.schemas import (
+    DifficultyCreate,
+    DifficultyDetailRead,
+    DifficultyRead,
+    DifficultyUpdate,
+)
 
 router = APIRouter(tags=["difficulties"])
 
@@ -95,18 +101,28 @@ async def list_difficulties(
     return list(result.scalars().all())
 
 
-@router.get("/difficulties/{difficulty_id}", response_model=DifficultyRead)
+@router.get("/difficulties/{difficulty_id}", response_model=DifficultyDetailRead)
 async def get_difficulty(
     difficulty_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Difficulty:
-    """Return a single difficulty.
+    """Return a single difficulty with all its sections and posts.
 
     Returns ``403`` if the current user is not a member of the parent mapset,
     and ``404`` if the difficulty does not exist.
+
+    Posts are ordered chronologically by ``created_at`` ascending.
     """
-    difficulty = await db.get(Difficulty, difficulty_id)
+    result = await db.execute(
+        select(Difficulty)
+        .where(Difficulty.id == difficulty_id)
+        .options(
+            selectinload(Difficulty.sections),
+            selectinload(Difficulty.posts),
+        )
+    )
+    difficulty = result.scalar_one_or_none()
     if difficulty is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
 

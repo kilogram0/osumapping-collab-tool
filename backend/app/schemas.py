@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models import PostTag
+
 
 class UserRead(BaseModel):
     """Public user profile returned by /auth/me and member lists."""
@@ -268,3 +270,54 @@ class MapsetMemberRead(BaseModel):
     role: str
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Posts
+# ---------------------------------------------------------------------------
+
+_BODY_CT_MAX = 65_536  # ciphertext char limit (~47 KiB of plaintext after b64 + GCM overhead)
+
+
+class PostCreate(BaseModel):
+    """Request body for ``POST /difficulties/{did}/posts``."""
+
+    id: UUID
+    tag: PostTag
+    encrypted_body: str = Field(min_length=1, max_length=_BODY_CT_MAX)
+    parent_id: UUID | None = None
+
+
+class PostUpdate(BaseModel):
+    """Request body for ``PUT /difficulties/{did}/posts/{pid}``."""
+
+    encrypted_body: str = Field(min_length=1, max_length=_BODY_CT_MAX)
+
+
+class PostRead(BaseModel):
+    """Post row as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    difficulty_id: UUID
+    author_id: UUID
+    parent_id: UUID | None
+    tag: str
+    encrypted_body: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DifficultyDetailRead(BaseModel):
+    """Single difficulty with its sections and posts."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    mapset_id: UUID
+    encrypted_name: str
+    created_at: datetime
+    updated_at: datetime
+    sections: list[SectionRead]
+    posts: list[PostRead]

@@ -649,3 +649,62 @@ async def test_patch_difficulty_rejects_null_name(
         headers=CSRF_HEADERS,
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# GET /difficulties/{id} with sections and posts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_difficulty_includes_sections_and_posts(
+    client: AsyncClient, authed_user_with_mapset
+):
+    _, mapset_id = authed_user_with_mapset
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+
+    # Create a section
+    section_payload = {
+        "id": str(uuid4()),
+        "encrypted_name": "encrypted:section",
+        "encrypted_start_time_ms": "encrypted:0",
+        "encrypted_end_time_ms": "encrypted:10000",
+        "encrypted_sort_order": "encrypted:1",
+    }
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections",
+        json=section_payload,
+        headers=CSRF_HEADERS,
+    )
+
+    # Create two posts
+    post1 = {
+        "id": str(uuid4()),
+        "tag": "general",
+        "encrypted_body": "encrypted:first",
+    }
+    post2 = {
+        "id": str(uuid4()),
+        "tag": "suggestion",
+        "encrypted_body": "encrypted:second",
+    }
+    await client.post(
+        f"/api/difficulties/{diff['id']}/posts", json=post1, headers=CSRF_HEADERS
+    )
+    await client.post(
+        f"/api/difficulties/{diff['id']}/posts", json=post2, headers=CSRF_HEADERS
+    )
+
+    resp = await client.get(f"/api/difficulties/{diff['id']}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == diff["id"]
+    assert len(body["sections"]) == 1
+    assert body["sections"][0]["id"] == section_payload["id"]
+    assert len(body["posts"]) == 2
+    # Posts should be ordered chronologically by created_at ascending
+    post_ids = [p["id"] for p in body["posts"]]
+    assert post_ids == [post1["id"], post2["id"]]

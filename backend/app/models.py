@@ -30,6 +30,15 @@ class MapsetRole(str, PyEnum):
     modder = "modder"
 
 
+class PostTag(str, PyEnum):
+    """Tags for modding posts."""
+
+    general = "general"
+    suggestion = "suggestion"
+    problem = "problem"
+    praise = "praise"
+
+
 class User(SQLModel, table=True):
     """A user authenticated via osu! OAuth."""
 
@@ -66,6 +75,10 @@ class User(SQLModel, table=True):
     )
     section_uploads: list["SectionOsuVersion"] = Relationship(
         back_populates="uploader"
+    )
+    posts: list["Post"] = Relationship(
+        back_populates="author",
+        sa_relationship_kwargs={"foreign_keys": "Post.author_id"},
     )
 
 
@@ -202,6 +215,10 @@ class Difficulty(SQLModel, table=True):
     # Relationships
     mapset: Mapset = Relationship(back_populates="difficulties")
     sections: list["Section"] = Relationship(back_populates="difficulty")
+    posts: list["Post"] = Relationship(
+        back_populates="difficulty",
+        sa_relationship_kwargs={"order_by": "Post.created_at.asc()"},
+    )
     base_versions: list["DifficultyBaseOsuVersion"] = Relationship(
         back_populates="difficulty"
     )
@@ -390,4 +407,73 @@ class DifficultyBaseOsuVersion(SQLModel, table=True):
     difficulty: Difficulty = Relationship(back_populates="base_versions")
     source_section_version: SectionOsuVersion | None = Relationship(
         back_populates="base_versions"
+    )
+
+
+class Post(SQLModel, table=True):
+    """A modding post within a difficulty."""
+
+    __tablename__ = "post"
+
+    __table_args__ = (
+        sa.Index("ix_post_difficulty_id", "difficulty_id"),
+        sa.Index("ix_post_author_id", "author_id"),
+        sa.Index("ix_post_parent_id", "parent_id"),
+    )
+
+    id: UUID = Field(primary_key=True)
+    difficulty_id: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("difficulty.id", ondelete="CASCADE"), nullable=False
+        )
+    )
+    author_id: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
+        )
+    )
+    parent_id: UUID | None = Field(
+        default=None,
+        sa_column=sa.Column(
+            sa.ForeignKey("post.id", ondelete="CASCADE"), nullable=True
+        ),
+    )
+    tag: PostTag = Field(
+        sa_column=sa.Column(sa.Enum(PostTag), nullable=False)
+    )
+    encrypted_body: str = Field(
+        sa_column=sa.Column(sa.Text, nullable=False)
+    )
+    created_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+        },
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+            "onupdate": func.clock_timestamp(),
+        },
+    )
+
+    # Relationships
+    difficulty: Difficulty = Relationship(back_populates="posts")
+    author: User = Relationship(
+        back_populates="posts",
+        sa_relationship_kwargs={"foreign_keys": "Post.author_id"},
+    )
+    parent: "Post" = Relationship(
+        back_populates="replies",
+        sa_relationship_kwargs={
+            "remote_side": "Post.id",
+            "foreign_keys": "Post.parent_id",
+        },
+    )
+    replies: list["Post"] = Relationship(
+        back_populates="parent",
+        sa_relationship_kwargs={"foreign_keys": "Post.parent_id"},
     )
