@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  activateBaseOsuVersion,
+  activateSectionOsuVersion,
   createDifficulty,
   createSection,
+  fetchBaseOsuVersions,
   fetchDifficulties,
+  fetchSectionOsuVersions,
   fetchSections,
   updateSection,
 } from '../api/endpoints';
@@ -57,6 +61,44 @@ export function useUpdateSection(difficultyId: string) {
     }) => updateSection(difficultyId, sectionId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+    },
+  });
+}
+
+export function useSectionOsuVersions(difficultyId: string, sectionId: string | null) {
+  return useQuery({
+    queryKey: ['section-osu-versions', difficultyId, sectionId],
+    queryFn: () => fetchSectionOsuVersions(difficultyId, sectionId!),
+    enabled: !!difficultyId && !!sectionId,
+  });
+}
+
+export function useActivateSectionOsuVersion(difficultyId: string, sectionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (versionId: string) => activateSectionOsuVersion(difficultyId, sectionId, versionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['section-osu-versions', difficultyId, sectionId] });
+      queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+    },
+  });
+}
+
+export function useBaseOsuVersions(difficultyId: string) {
+  return useQuery({
+    queryKey: ['base-osu-versions', difficultyId],
+    queryFn: () => fetchBaseOsuVersions(difficultyId),
+    enabled: !!difficultyId,
+  });
+}
+
+export function useActivateBaseOsuVersion(difficultyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (versionId: string) => activateBaseOsuVersion(difficultyId, versionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['base-osu-versions', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['difficulties', difficultyId] });
     },
   });
 }

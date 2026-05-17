@@ -223,3 +223,57 @@ export async function downloadBaseOsu(difficultyId: string): Promise<BaseOsuVers
   const { data } = await client.get<BaseOsuVersion>(`/difficulties/${difficultyId}/base.osu`);
   return data;
 }
+
+export interface SectionOsuVersionListItem {
+  id: string;
+  version: number;
+  is_active: boolean;
+  uploaded_by: string;
+  created_at: string;
+}
+
+export interface BaseOsuVersionListItem {
+  id: string;
+  version: number;
+  is_active: boolean;
+  source_section_version_id: string | null;
+  created_at: string;
+}
+
+export async function fetchSectionOsuVersions(
+  difficultyId: string,
+  sectionId: string,
+): Promise<SectionOsuVersionListItem[]> {
+  const { data } = await client.get<SectionOsuVersionListItem[]>(
+    `/difficulties/${difficultyId}/sections/${sectionId}/osu/versions`,
+  );
+  return data;
+}
+
+export async function activateSectionOsuVersion(
+  difficultyId: string,
+  sectionId: string,
+  versionId: string,
+): Promise<SectionOsuVersion> {
+  const { data } = await client.post<SectionOsuVersion>(
+    `/difficulties/${difficultyId}/sections/${sectionId}/osu/versions/${versionId}/activate`,
+    {},
+  );
+  return data;
+}
+
+export async function fetchBaseOsuVersions(difficultyId: string): Promise<BaseOsuVersionListItem[]> {
+  const { data } = await client.get<BaseOsuVersionListItem[]>(`/difficulties/${difficultyId}/base/versions`);
+  return data;
+}
+
+export async function activateBaseOsuVersion(
+  difficultyId: string,
+  versionId: string,
+): Promise<BaseOsuVersion> {
+  const { data } = await client.post<BaseOsuVersion>(
+    `/difficulties/${difficultyId}/base/versions/${versionId}/activate`,
+    {},
+  );
+  return data;
+}

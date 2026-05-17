@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import BaseVersionHistory from '../components/BaseVersionHistory';
 import CreateDifficultyModal from '../components/CreateDifficultyModal';
 import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyTabs from '../components/DifficultyTabs';
@@ -29,6 +30,7 @@ export default function MapsetPage() {
   const [showCreateDifficulty, setShowCreateDifficulty] = useState(false);
   const [showCreateSection, setShowCreateSection] = useState(false);
   const [showEditSection, setShowEditSection] = useState(false);
+  const [showBaseHistory, setShowBaseHistory] = useState(false);
   const [editingSection, setEditingSection] = useState<DecryptedSection | null>(null);
   const [decryptedSections, setDecryptedSections] = useState<DecryptedSection[]>([]);
   const [decryptedDescription, setDecryptedDescription] = useState<string | null>(null);
@@ -158,15 +160,24 @@ export default function MapsetPage() {
           <div className="max-w-md">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-gray-200">Sections</h2>
-              {canEditStructure && (
+              <div className="flex gap-2">
+                {canEditStructure && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateSection(true)}
+                    className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
+                  >
+                    Add Section
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setShowCreateSection(true)}
-                  className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
+                  onClick={() => setShowBaseHistory(true)}
+                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
                 >
-                  Add Section
+                  Base History
                 </button>
-              )}
+              </div>
             </div>
             {sectionsLoading && <p className="text-gray-400">Loading sections…</p>}
             {sections && (
@@ -174,6 +185,7 @@ export default function MapsetPage() {
                 sections={sections}
                 mapsetId={mapsetId}
                 difficultyId={selectedDifficultyId}
+                role={myMembership?.role}
                 onEdit={(s) => {
                   setEditingSection(s);
                   setShowEditSection(true);
@@ -222,6 +234,13 @@ export default function MapsetPage() {
             setShowEditSection(false);
             setEditingSection(null);
           }}
+        />
+      )}
+
+      {showBaseHistory && selectedDifficultyId && (
+        <BaseVersionHistory
+          difficultyId={selectedDifficultyId}
+          onClose={() => setShowBaseHistory(false)}
         />
       )}
     </div>
