@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
 import { formatTimestamp } from '../utils/extractTimestamp';
@@ -12,25 +12,23 @@ interface TimelineProps {
   onJumpToPost?: (postId: string) => void;
 }
 
-const SECTION_COLORS = [
-  'bg-blue-600',
-  'bg-emerald-600',
-  'bg-amber-600',
-  'bg-rose-600',
-  'bg-violet-600',
-  'bg-cyan-600',
-  'bg-orange-600',
-  'bg-pink-600',
+// Static class strings so Tailwind's JIT can detect them at build time.
+// Each entry pairs the base bg with its hover: variant — never reuse the
+// lighter shade as the base, since both classes are emitted together and
+// the lighter one would win under Tailwind source ordering.
+const SECTION_COLORS: { base: string; hover: string }[] = [
+  { base: 'bg-blue-600', hover: 'hover:bg-blue-500' },
+  { base: 'bg-emerald-600', hover: 'hover:bg-emerald-500' },
+  { base: 'bg-amber-600', hover: 'hover:bg-amber-500' },
+  { base: 'bg-rose-600', hover: 'hover:bg-rose-500' },
+  { base: 'bg-violet-600', hover: 'hover:bg-violet-500' },
+  { base: 'bg-cyan-600', hover: 'hover:bg-cyan-500' },
+  { base: 'bg-orange-600', hover: 'hover:bg-orange-500' },
+  { base: 'bg-pink-600', hover: 'hover:bg-pink-500' },
 ];
 
-function getSectionColor(index: number): string {
+function getSectionColors(index: number): { base: string; hover: string } {
   return SECTION_COLORS[index % SECTION_COLORS.length];
-}
-
-function getSectionHoverColor(index: number): string {
-  // Map bg-*-600 to hover:bg-*-500
-  const base = getSectionColor(index);
-  return base.replace('600', '500');
 }
 
 export default function Timeline({
@@ -41,7 +39,6 @@ export default function Timeline({
   onSelectSection,
   onJumpToPost,
 }: TimelineProps) {
-  const [hoveredSection, setHoveredSection] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{
     x: number;
     y: number;
@@ -53,8 +50,10 @@ export default function Timeline({
   }, [sections]);
 
   const markerPosts = useMemo(() => {
-    return posts.filter((p) => p.extractedMs !== null);
-  }, [posts]);
+    return posts.filter(
+      (p) => p.extractedMs !== null && p.extractedMs >= 0 && p.extractedMs <= songLengthMs,
+    );
+  }, [posts, songLengthMs]);
 
   if (songLengthMs <= 0) {
     return (
@@ -72,7 +71,7 @@ export default function Timeline({
     <div className="w-full">
       {/* Timeline bar */}
       <div
-        className="relative w-full h-16 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden flex"
+        className="relative w-full h-16 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden"
         data-testid="timeline-bar"
       >
         {sortedSections.map((section, index) => {
@@ -80,8 +79,7 @@ export default function Timeline({
           const widthPercent = (duration / songLengthMs) * 100;
           const leftPercent = (section.startTimeMs / songLengthMs) * 100;
           const isSelected = selectedSectionId === section.id;
-          const colorClass = getSectionColor(index);
-          const hoverClass = getSectionHoverColor(index);
+          const { base: colorClass, hover: hoverClass } = getSectionColors(index);
 
           return (
             <button
@@ -89,7 +87,7 @@ export default function Timeline({
               type="button"
               data-testid={`timeline-section-${section.id}`}
               className={`absolute top-0 bottom-0 ${colorClass} ${hoverClass} transition-colors
-                ${isSelected ? 'ring-2 ring-white z-10' : 'hover:brightness-110'}
+                ${isSelected ? 'ring-2 ring-white z-10' : ''}
                 flex items-center justify-center text-white text-xs font-medium px-1
                 overflow-hidden whitespace-nowrap text-ellipsis`}
               style={{
@@ -98,7 +96,6 @@ export default function Timeline({
               }}
               onClick={() => onSelectSection(section.id)}
               onMouseEnter={(e) => {
-                setHoveredSection(section.id);
                 setTooltip({
                   x: e.clientX,
                   y: e.clientY,
@@ -120,7 +117,6 @@ export default function Timeline({
                 );
               }}
               onMouseLeave={() => {
-                setHoveredSection(null);
                 setTooltip(null);
               }}
             >

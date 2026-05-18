@@ -21,7 +21,7 @@ import {
   useUpdatePost,
 } from '../hooks/useDifficulty';
 import { useMapset, useMyMembership } from '../hooks/useMapset';
-import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad } from '../utils/crypto';
+import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad } from '../utils/crypto';
 import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
 import { downloadBaseOsu } from '../api/endpoints';
@@ -146,16 +146,19 @@ export default function MapsetPage() {
         await Promise.all(
           ddSections.map(async (s) => {
             try {
-              const [name, startRaw, endRaw, sortRaw] = await Promise.all([
-                decrypt(key, s.encrypted_name, `Section|${s.id}|${mapsetId}`),
-                decrypt(key, s.encrypted_start_time_ms, `Section|${s.id}|${mapsetId}`),
-                decrypt(key, s.encrypted_end_time_ms, `Section|${s.id}|${mapsetId}`),
-                decrypt(key, s.encrypted_sort_order, `Section|${s.id}|${mapsetId}`),
+              const aad = sectionFieldAad(s.id, mapsetId);
+              // start_time_ms is intentionally not decrypted: section start
+              // times are derived below from the running total of end times
+              // so the timeline stays contiguous when end times are edited.
+              const [name, endRaw, sortRaw] = await Promise.all([
+                decrypt(key, s.encrypted_name, aad),
+                decrypt(key, s.encrypted_end_time_ms, aad),
+                decrypt(key, s.encrypted_sort_order, aad),
               ]);
               results.push({
                 id: s.id,
                 name,
-                startTimeMs: decodeJsonEnvelope(startRaw),
+                startTimeMs: 0,
                 endTimeMs: decodeJsonEnvelope(endRaw),
                 sortOrder: decodeJsonEnvelope(sortRaw),
               });
@@ -547,6 +550,12 @@ export default function MapsetPage() {
             {!showAllPosts && selectedSection && (
               <SectionDetailPanel
                 section={selectedSection}
+                isLastSection={(() => {
+                  const sorted = [...decryptedSections].sort(
+                    (a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id),
+                  );
+                  return sorted[sorted.length - 1]?.id === selectedSection.id;
+                })()}
                 posts={decryptedPosts}
                 mapsetId={mapsetId}
                 difficultyId={selectedDifficultyId}

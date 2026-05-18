@@ -13,6 +13,10 @@ import { logger } from '../utils/logger';
 
 interface SectionDetailPanelProps {
   section: DecryptedSection;
+  /** True when this is the last section in the difficulty; the upper-bound
+   *  check is inclusive so a post landing exactly on the song's final ms
+   *  isn't excluded from every section. */
+  isLastSection?: boolean;
   posts: DecryptedPost[];
   mapsetId: string;
   difficultyId: string;
@@ -53,6 +57,7 @@ function formatTime(ms: number): string {
 
 export default function SectionDetailPanel({
   section,
+  isLastSection = false,
   posts,
   mapsetId,
   difficultyId,
@@ -74,13 +79,15 @@ export default function SectionDetailPanel({
   const [showCreateForm, setShowCreateForm] = useState(false);
 
   const sectionPosts = useMemo(() => {
-    return posts.filter(
-      (p) =>
-        p.extractedMs !== null &&
-        p.extractedMs >= section.startTimeMs &&
-        p.extractedMs <= section.endTimeMs,
-    );
-  }, [posts, section]);
+    return posts.filter((p) => {
+      if (p.extractedMs === null) return false;
+      if (p.extractedMs < section.startTimeMs) return false;
+      // Half-open [start, end) so a post on a section boundary belongs only
+      // to the later section. The final section keeps an inclusive upper
+      // bound so posts at the song's last ms still appear somewhere.
+      return isLastSection ? p.extractedMs <= section.endTimeMs : p.extractedMs < section.endTimeMs;
+    });
+  }, [posts, section, isLastSection]);
 
   // Build reply trees for section posts
   const postTree = useMemo(() => {

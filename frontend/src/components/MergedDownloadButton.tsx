@@ -7,6 +7,8 @@ import {
 import { useEncryption } from '../contexts/EncryptionContext';
 import {
   decrypt,
+  decodeJsonEnvelope,
+  sectionFieldAad,
   sectionOsuVersionAad,
   difficultyBaseOsuVersionAad,
 } from '../utils/crypto';
@@ -56,16 +58,12 @@ export default function MergedDownloadButton({
             resp.encrypted_content,
             sectionOsuVersionAad(resp.id, mapsetId),
           );
-          // sort_order is encrypted, we need to decrypt it. For the merge we only need
-          // the numeric sortOrder. Since this component doesn't have decrypted sections,
-          // we'll use the section list order as a fallback, or we can parse the encrypted
-          // sort_order if we have the key. Actually we DO have the key here.
           const sortOrderRaw = await decrypt(
             key,
             section.encrypted_sort_order,
-            `Section|${section.id}|${mapsetId}`,
+            sectionFieldAad(section.id, mapsetId),
           );
-          const sortOrder = JSON.parse(sortOrderRaw).v ?? JSON.parse(sortOrderRaw).ms ?? 0;
+          const sortOrder = decodeJsonEnvelope(sortOrderRaw);
           sectionInputs.push({ content: plaintext, sortOrder, sectionId: section.id });
         } catch (err) {
           logger.warn(`Failed to fetch section ${section.id} for merge:`, err);
