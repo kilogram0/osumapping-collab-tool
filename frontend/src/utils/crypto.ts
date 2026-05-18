@@ -65,6 +65,10 @@ export function difficultyBaseOsuVersionAad(versionId: string, mapsetId: string)
   return `DifficultyBaseOsuVersion|${versionId}|${mapsetId}`;
 }
 
+export function postFieldAad(postId: string, mapsetId: string): string {
+  return `Post|${postId}|${mapsetId}`;
+}
+
 /**
  * Decode the uniform JSON envelope `{"v":<version>,"ms":<value>}`.
  *

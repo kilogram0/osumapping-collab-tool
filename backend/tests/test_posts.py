@@ -244,6 +244,22 @@ async def test_create_post_rejects_parent_from_other_difficulty(
 
 
 @pytest.mark.asyncio
+async def test_create_post_rejects_self_parent(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    post_id = uuid4()
+    payload = _post_payload(post_id=post_id, parent_id=post_id)
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/posts",
+        json=payload,
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 404
+    assert "Parent post not found" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_create_post_rejects_invalid_tag(
     client: AsyncClient, authed_user_with_difficulty
 ):

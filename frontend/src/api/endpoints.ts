@@ -77,6 +77,70 @@ export async function deleteMapset(id: string): Promise<void> {
   await client.delete(`/mapsets/${id}`);
 }
 
+// ---------------------------------------------------------------------------
+// Posts
+// ---------------------------------------------------------------------------
+
+export type PostTag = 'general' | 'suggestion' | 'problem' | 'praise';
+
+export interface Post {
+  id: string;
+  difficulty_id: string;
+  author_id: string;
+  parent_id: string | null;
+  tag: PostTag;
+  encrypted_body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DifficultyDetail {
+  id: string;
+  mapset_id: string;
+  encrypted_name: string;
+  created_at: string;
+  updated_at: string;
+  sections: Section[];
+  posts: Post[];
+}
+
+export interface CreatePostPayload {
+  id: string;
+  tag: PostTag;
+  encrypted_body: string;
+  parent_id?: string | null;
+}
+
+export interface UpdatePostPayload {
+  encrypted_body: string;
+}
+
+export async function fetchDifficultyDetail(difficultyId: string): Promise<DifficultyDetail> {
+  const { data } = await client.get<DifficultyDetail>(`/difficulties/${difficultyId}`);
+  return data;
+}
+
+export async function createPost(
+  difficultyId: string,
+  payload: CreatePostPayload,
+): Promise<Post> {
+  const { data } = await client.post<Post>(`/difficulties/${difficultyId}/posts`, payload);
+  return data;
+}
+
+export async function updatePost(
+  difficultyId: string,
+  postId: string,
+  payload: UpdatePostPayload,
+): Promise<Post> {
+  const { data } = await client.put<Post>(`/difficulties/${difficultyId}/posts/${postId}`, payload);
+  return data;
+}
+
+export async function deletePost(difficultyId: string, postId: string): Promise<void> {
+  await client.delete(`/difficulties/${difficultyId}/posts/${postId}`);
+}
+
 export interface MapsetMember {
   id: string;
   mapset_id: string;

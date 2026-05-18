@@ -3,11 +3,14 @@ import {
   activateBaseOsuVersion,
   activateSectionOsuVersion,
   createDifficulty,
+  createPost,
   createSection,
+  deletePost,
   fetchBaseOsuVersions,
   fetchDifficulties,
+  fetchDifficultyDetail,
   fetchSectionOsuVersions,
-  fetchSections,
+  updatePost,
   updateSection,
 } from '../api/endpoints';
 
@@ -27,14 +30,6 @@ export function useCreateDifficulty(mapsetId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
     },
-  });
-}
-
-export function useSections(difficultyId: string | null) {
-  return useQuery({
-    queryKey: ['sections', difficultyId],
-    queryFn: () => fetchSections(difficultyId!),
-    enabled: !!difficultyId,
   });
 }
 
@@ -99,6 +94,45 @@ export function useActivateBaseOsuVersion(difficultyId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['base-osu-versions', difficultyId] });
       queryClient.invalidateQueries({ queryKey: ['difficulties', difficultyId] });
+    },
+  });
+}
+
+export function useDifficultyDetail(difficultyId: string | null) {
+  return useQuery({
+    queryKey: ['difficulty-detail', difficultyId],
+    queryFn: () => fetchDifficultyDetail(difficultyId!),
+    enabled: !!difficultyId,
+  });
+}
+
+export function useCreatePost(difficultyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: Parameters<typeof createPost>[1]) => createPost(difficultyId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+    },
+  });
+}
+
+export function useUpdatePost(difficultyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ postId, payload }: { postId: string; payload: Parameters<typeof updatePost>[2] }) =>
+      updatePost(difficultyId, postId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+    },
+  });
+}
+
+export function useDeletePost(difficultyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (postId: string) => deletePost(difficultyId, postId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
     },
   });
 }

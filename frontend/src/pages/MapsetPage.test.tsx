@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -42,6 +42,7 @@ vi.mock('../utils/crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils/crypto')>();
   return {
     ...actual,
+    encrypt: vi.fn(async (_key: CryptoKey, plaintext: string, _aad: string) => `enc:${plaintext}`),
     decrypt: vi.fn(async (_key: CryptoKey, ciphertext: string, _aad: string) => {
       if (ciphertext.startsWith('enc:')) return ciphertext.slice(4);
       return ciphertext;
@@ -59,6 +60,7 @@ vi.mock('../utils/crypto', async (importOriginal) => {
     mapsetFieldAad: vi.fn((mapsetId: string) => `Mapset|${mapsetId}|${mapsetId}`),
     difficultyFieldAad: vi.fn((id: string, mapsetId: string) => `Difficulty|${id}|${mapsetId}`),
     sectionFieldAad: vi.fn((id: string, mapsetId: string) => `Section|${id}|${mapsetId}`),
+    postFieldAad: vi.fn((postId: string, mapsetId: string) => `Post|${postId}|${mapsetId}`),
   };
 });
 
@@ -101,6 +103,39 @@ const MOCK_SECTIONS = [
   },
 ];
 
+const MOCK_POSTS = [
+  {
+    id: 'p1',
+    difficulty_id: 'd1',
+    author_id: 'current-user-uuid',
+    parent_id: null,
+    tag: 'suggestion',
+    encrypted_body: 'enc:00:46:140 (2,3,4) - these are too close',
+    created_at: '2024-01-01T12:00:00Z',
+    updated_at: '2024-01-01T12:00:00Z',
+  },
+  {
+    id: 'p2',
+    difficulty_id: 'd1',
+    author_id: 'other-user-uuid',
+    parent_id: null,
+    tag: 'general',
+    encrypted_body: 'enc:Nice map overall',
+    created_at: '2024-01-01T13:00:00Z',
+    updated_at: '2024-01-01T13:00:00Z',
+  },
+];
+
+const MOCK_DIFFICULTY_DETAIL = {
+  id: 'd1',
+  mapset_id: 'ms1',
+  encrypted_name: 'enc:Hard',
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
+  sections: MOCK_SECTIONS,
+  posts: MOCK_POSTS,
+};
+
 const mockUseMyMembership = vi.fn(() => ({
   data: {
     id: 'member-1',
@@ -112,6 +147,10 @@ const mockUseMyMembership = vi.fn(() => ({
   },
   isLoading: false,
 }));
+
+const mockCreatePost = vi.fn().mockResolvedValue({});
+const mockUpdatePost = vi.fn().mockResolvedValue({});
+const mockDeletePost = vi.fn().mockResolvedValue({});
 
 vi.mock('../hooks/useMapset', () => ({
   useMapset: () => ({
@@ -132,8 +171,8 @@ vi.mock('../hooks/useDifficulty', () => ({
     data: MOCK_DIFFICULTIES,
     isLoading: false,
   }),
-  useSections: () => ({
-    data: MOCK_SECTIONS,
+  useDifficultyDetail: () => ({
+    data: MOCK_DIFFICULTY_DETAIL,
     isLoading: false,
   }),
   useCreateDifficulty: () => ({
@@ -144,6 +183,15 @@ vi.mock('../hooks/useDifficulty', () => ({
   }),
   useUpdateSection: () => ({
     mutateAsync: vi.fn(),
+  }),
+  useCreatePost: () => ({
+    mutateAsync: mockCreatePost,
+  }),
+  useUpdatePost: () => ({
+    mutateAsync: mockUpdatePost,
+  }),
+  useDeletePost: () => ({
+    mutateAsync: mockDeletePost,
   }),
 }));
 
@@ -165,6 +213,20 @@ describe('MapsetPage', () => {
     vi.clearAllMocks();
     mockIsUnlocked.mockReturnValue(true);
     mockGetKey.mockResolvedValue({ key: 'mock-key' } as unknown as CryptoKey);
+    mockCreatePost.mockClear();
+    mockUpdatePost.mockClear();
+    mockDeletePost.mockClear();
+    mockUseMyMembership.mockReturnValue({
+      data: {
+        id: 'member-1',
+        mapset_id: 'ms1',
+        user_id: 'current-user-uuid',
+        role: 'owner',
+        created_at: '',
+        updated_at: '',
+      },
+      isLoading: false,
+    });
   });
 
   it('renders mapset title and decrypted metadata', async () => {
@@ -208,9 +270,10 @@ describe('MapsetPage', () => {
     renderPage();
     const user = userEvent.setup();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Edit/i })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /Edit/i }).length).toBeGreaterThanOrEqual(1);
     });
-    await user.click(screen.getByRole('button', { name: /Edit/i }));
+    const editButtons = screen.getAllByRole('button', { name: /Edit/i });
+    await user.click(editButtons[0]);
     expect(screen.getByRole('heading', { name: /Edit Section/i })).toBeInTheDocument();
   });
 
@@ -251,5 +314,155 @@ describe('MapsetPage', () => {
     });
     expect(screen.queryByRole('button', { name: /Add Difficulty/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Add Section/i })).not.toBeInTheDocument();
+  });
+
+  it('renders decrypted posts in the forum thread', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('Forum')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+  });
+
+  it('sorts posts by extracted timestamp then created_at', async () => {
+    const originalPosts = MOCK_DIFFICULTY_DETAIL.posts;
+    MOCK_DIFFICULTY_DETAIL.posts = [
+      {
+        id: 'p-later',
+        difficulty_id: 'd1',
+        author_id: 'other-user-uuid',
+        parent_id: null,
+        tag: 'general',
+        encrypted_body: 'enc:01:30:000 - later timestamp',
+        created_at: '2024-01-01T14:00:00Z',
+        updated_at: '2024-01-01T14:00:00Z',
+      },
+      {
+        id: 'p-earlier',
+        difficulty_id: 'd1',
+        author_id: 'other-user-uuid',
+        parent_id: null,
+        tag: 'general',
+        encrypted_body: 'enc:00:15:000 - earlier timestamp',
+        created_at: '2024-01-01T15:00:00Z',
+        updated_at: '2024-01-01T15:00:00Z',
+      },
+      {
+        id: 'p-none',
+        difficulty_id: 'd1',
+        author_id: 'other-user-uuid',
+        parent_id: null,
+        tag: 'general',
+        encrypted_body: 'enc:no timestamp here',
+        created_at: '2024-01-01T13:00:00Z',
+        updated_at: '2024-01-01T13:00:00Z',
+      },
+    ];
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/earlier timestamp/i)).toBeInTheDocument();
+    });
+
+    const postCards = screen.getAllByTestId('post-card');
+    expect(postCards[0].textContent).toMatch(/earlier timestamp/);
+    expect(postCards[1].textContent).toMatch(/later timestamp/);
+    expect(postCards[2].textContent).toMatch(/no timestamp here/);
+
+    MOCK_DIFFICULTY_DETAIL.posts = originalPosts;
+  });
+
+  it('shows New Post button and opens create form', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /New Post/i })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /New Post/i }));
+    expect(screen.getByLabelText(/New post/i)).toBeInTheDocument();
+  });
+
+  it('creates a new post through the form', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /New Post/i })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /New Post/i }));
+
+    const textarea = screen.getByLabelText(/New post/i);
+    await user.type(textarea, '01:00:000 - great rhythm');
+
+    // Use exact text match to avoid matching collapse buttons with aria-label "Collapse post"
+    await user.click(screen.getByRole('button', { name: /^Post$/i }));
+
+    await waitFor(() => {
+      expect(mockCreatePost).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = mockCreatePost.mock.calls[0][0];
+    expect(payload.tag).toBe('general');
+    expect(payload.encrypted_body).toBe('enc:01:00:000 - great rhythm');
+  });
+
+  it('shows edit and delete buttons on own posts', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+    });
+    const postCards = screen.getAllByTestId('post-card');
+    const ownPost = postCards.find((card) => within(card).queryByText(/these are too close/i));
+    expect(ownPost).toBeDefined();
+    const withinOwnPost = within(ownPost!);
+    expect(withinOwnPost.getByRole('button', { name: /Edit/i })).toBeInTheDocument();
+    expect(withinOwnPost.getByRole('button', { name: /Delete/i })).toBeInTheDocument();
+  });
+
+  it('deletes a post when Delete is clicked', async () => {
+    window.confirm = vi.fn(() => true);
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    const deleteButtons = screen.getAllByRole('button', { name: /Delete/i });
+    await user.click(deleteButtons[0]);
+
+    await waitFor(() => {
+      expect(mockDeletePost).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('opens reply form when Reply is clicked', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    const replyButtons = screen.getAllByRole('button', { name: /Reply/i });
+    await user.click(replyButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Reply/i)).toBeInTheDocument();
+    });
+  });
+
+  it('opens edit form when Edit is clicked', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    const postCards = screen.getAllByTestId('post-card');
+    const ownPost = postCards.find((card) => within(card).queryByText(/these are too close/i));
+    expect(ownPost).toBeDefined();
+    const editButton = within(ownPost!).getByRole('button', { name: /Edit/i });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Edit post/i)).toBeInTheDocument();
+    });
   });
 });
