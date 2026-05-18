@@ -13,7 +13,8 @@
       "Read(//tmp/**)",
       "Bash(npx tsc *)",
       "Bash(docker exec *)",
-      "Bash(grep -n \" |$\\\\|encrypted_title\" SPECIFICATION.md)"
+      "Bash(grep -n \" |$\\\\|encrypted_title\" SPECIFICATION.md)",
+      "Bash(python -m pytest tests/test_mapsets_members_api.py -x -q)"
     ],
     "additionalDirectories": [
       "/tmp"

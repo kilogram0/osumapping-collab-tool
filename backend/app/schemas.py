@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import PostTag
+from app.models import MapsetRole, PostTag
 
 
 class UserRead(BaseModel):
@@ -267,7 +267,7 @@ class MapsetMemberRead(BaseModel):
     id: UUID
     mapset_id: UUID
     user_id: UUID
-    role: str
+    role: MapsetRole
     created_at: datetime
     updated_at: datetime
 
@@ -307,6 +307,32 @@ class PostRead(BaseModel):
     encrypted_body: str
     created_at: datetime
     updated_at: datetime
+
+
+class MemberInviteRequest(BaseModel):
+    """Request body for ``POST /mapsets/{id}/members``."""
+
+    username: str = Field(min_length=1, max_length=255)
+
+
+class MemberRoleUpdate(BaseModel):
+    """Request body for ``PUT /mapsets/{id}/members/{user_id}``."""
+
+    role: MapsetRole
+
+
+class MemberWithUserRead(BaseModel):
+    """MapsetMember row joined with User info, as returned by the members list endpoint."""
+
+    id: UUID
+    mapset_id: UUID
+    user_id: UUID
+    role: MapsetRole
+    created_at: datetime
+    updated_at: datetime
+    username: str
+    avatar_url: str
+    osu_id: int
 
 
 class DifficultyDetailRead(BaseModel):
