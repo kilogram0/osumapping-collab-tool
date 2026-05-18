@@ -409,7 +409,7 @@ Because the server cannot read encrypted fields, certain operations that would n
 - `/mapsets/:id`: The main Mapset View page. If the user does not have the decryption key for this mapset, a `PassphraseModal` is shown and no content renders.
 
 ### Mapset View Layout
-This is the core of the application. It will be a single-page layout:
+This is the core of the application. It will be a single-page layout inspired by the osu! beatmap discussion page:
 
 1. **Header Bar:**
    - Mapset name (plaintext `title`) and description (decrypted from `encrypted_description` if key is available).
@@ -424,29 +424,32 @@ This is the core of the application. It will be a single-page layout:
    - Selecting a difficulty loads its specific sections and posts.
    - "Add Difficulty" button (for Owner/Mapper).
 
-3. **Section Sidebar (Left):**
-   - List of sections for the **currently selected difficulty**.
-   - Clicking a section filters the forum posts.
-   - "Add Section" and "Edit Section" controls (for Owner/Mapper).
-   - Each section row shows the **active version number** (e.g., "v3") next to the section name. This provides a cheap at-a-glance rollback-detection affordance — collaborators can notice "we were on v7 yesterday, why is it v5?" without opening the history modal.
-   - Each section row shows a small **uploader indicator** for the active `.osu` version: the uploader's avatar (or a fallback icon if no `.osu` has been uploaded yet) with a tooltip on hover that reads `Last upload: <username> · <relative time>`. This is the at-a-glance "whose version is current?" affordance — full history is still available via Version History.
-   - **Per-section `.osu` controls** (for Owner/Mapper):
-     - "Upload .osu" button (file picker).
-     - "Download .osu" button (downloads the exact uploaded file for editing).
-     - "Version History" button (lists past uploads, allows rollback).
-
-4. **Timeline Scrubber (Top of Main Area):**
-   - A horizontal bar representing the full decrypted `song_length_ms` of the mapset.
-   - Visual markers/dots indicate where posts with extracted timestamps exist **for the current difficulty**. The frontend decrypts all posts, extracts timestamps, and computes marker positions.
-   - Clicking anywhere on the bar sets a "Current Time" state.
+3. **Horizontal Timeline (Top of Main Area):**
+   - A full-width horizontal bar representing the decrypted `song_length_ms` of the mapset.
+   - The bar is segmented into colored blocks, one per section. Each block's width is proportional to its duration (`end_time_ms − start_time_ms`).
+   - Blocks are ordered left-to-right by `start_time_ms`.
+   - Each block displays the decrypted section name and duration.
+   - Hovering a block highlights it; clicking it selects the section.
+   - Visual markers/dots on top of the bar indicate where posts with extracted timestamps exist **for the current difficulty**. The frontend decrypts all posts, extracts timestamps, and computes marker positions.
    - Zooming/panning is **not** required for the MVP; a simple linear scale is sufficient.
 
-5. **Forum Thread (Main Area):**
-   - Chronological list of `PostCard` components for the selected difficulty. Replies are indented or visually grouped beneath their parent post.
-   - "New Post" input box at the top or bottom.
-   - **No pagination.** osu!'s own forums don't paginate modding threads, and a typical difficulty rarely exceeds ~100 posts. The full list is fetched and rendered.
-   - **Collapsible posts.** Each `PostCard` has a collapse/expand affordance (chevron in the header). Collapsed state shows only the header (avatar, username, tag badge, primary timestamp link, post date) and hides the body and actions, so users can scroll past threads they've already addressed without losing them. Collapse state is per-user, per-post, persisted to `localStorage` keyed on `(user_id, post_id)` — it's a UI preference, not server state. A "Collapse all" / "Expand all" button in the thread header toggles every post in the current view.
-   - **Replies.** Each `PostCard` displays a "Reply" action. Clicking it opens the `CreatePostForm` in reply mode, pre-filling the `parent_id` and showing a snippet of the parent post for context.
+4. **Section Detail Panel (Below Timeline, when a section is selected):**
+   - Only one section's detail panel is visible at a time, reducing visual clutter.
+   - The panel contains:
+     - Section name and time range.
+     - `.osu` upload/download controls (`OsuUploadButton`, `DownloadOsuButton`).
+     - Version history affordance.
+     - **Forum posts** that belong to this section (derived client-side from post timestamps).
+   - Posts are displayed as a chronological list of `PostCard` components with reply/edit/delete actions.
+   - "New Post" input box at the top of the panel.
+   - Replies are indented or visually grouped beneath their parent post.
+   - **Collapsible posts** and **Replies** behave identically to the old flat forum thread (see `PostCard` below).
+
+5. **Global Posts View (Toggle/Tab):**
+   - A "Show All Posts" toggle or separate tab allows viewing the full chronological thread for the difficulty, identical to the old flat forum thread layout. This is useful for sweeping reviews that span multiple sections.
+   - When active, the Section Detail Panel is hidden and the full flat thread is shown instead.
+
+> **Note:** The old "Section Sidebar (Left)" from early MVP iterations has been replaced by the timeline + detail-panel layout above. Section names, time ranges, and `.osu` controls now live inside the per-section detail panel.
 
 ### Key Components
 
@@ -500,9 +503,9 @@ This is the core of the application. It will be a single-page layout:
 
 ---
 
-## 7. Future UI: osu! Beatmap Discussion Timeline (Post-MVP)
+## 7. osu! Beatmap Discussion Timeline
 
-> **Status:** Design target for a future release. The current MVP uses a sidebar list of sections (§6). This section describes the desired end-state UI inspired by the osu! beatmap discussion page.
+> **Status:** Implemented in Phase 5. The sidebar list of sections from early MVP iterations has been replaced by the timeline + detail-panel layout described below.
 
 ### Motivation
 The current MVP renders sections as a vertical sidebar list. A horizontal timeline that visually represents the entire song and segments it by section length is more intuitive for mappers and modders, matching the mental model of osu!'s own discussion interface.
@@ -834,19 +837,25 @@ A phased approach to keep the project testable and avoid large merge conflicts. 
 
 ---
 
-### Phase 5: Timestamps, Timeline, & Merged Download (Frontend-Only)
+### Phase 5: osu! Beatmap Discussion Timeline & Merged Download (Frontend-Only)
+
+> **Scope change:** This phase now implements the full timeline UI described in §7 (previously "Post-MVP"). The sidebar list of sections is replaced by a horizontal osu!-style timeline with segmented section blocks and a detail-panel layout.
 
 | # | Task | What It Produces | Verification |
 |---|------|------------------|------------|
 | 5.1 | Implement client-side timestamp extraction | `src/utils/extractTimestamp.ts` | Regex extracts first timestamp + combos from plaintext; write unit test |
 | 5.2 | Integrate extraction into `CreatePostForm` | Frontend extracts timestamp before encrypting body | Timestamp available in memory for `osu://` link generation; write component test |
-| 5.3 | Update `PostCard` with `osu://` links | `generateOsuLink` function, clickable primary timestamp | Link opens osu! client; write component test |
+| 5.3 | Update `PostCard` with `osu://` links | `generateOsuLink` function, clickable primary timestamp + linkify body | Link opens osu! client; write component test |
 | 5.4 | Linkify all timestamps in post content | Frontend regex to find additional timestamps in decrypted body | All timestamps in body are clickable; write component test |
-| 5.5 | Add timeline scrubber markers | Dots on timeline for posts with timestamps | Frontend computes markers from decrypted post timestamps; write component test |
-| 5.6 | Implement merged `.osu` download (frontend) | `src/utils/osuMerge.ts` + download handler | Fetches active base + all active section ciphertexts, decrypts, merges, creates Blob, triggers download; write integration test with sample .osu files |
-| 5.7 | Add merged download UI | "Download Full Difficulty" button in header | Assembles valid .osu file in browser; write component test |
+| 5.5 | Build segmented Timeline component | `Timeline.tsx`: full-width horizontal bar representing `song_length_ms`, segmented into colored blocks per section (width ∝ duration), ordered by `start_time_ms`; hover tooltips; click selects section | Write component test |
+| 5.6 | Add post markers to Timeline | Dots on timeline for posts with extracted timestamps, positioned by `ms / song_length_ms`; click scrolls to post | Write component test |
+| 5.7 | Build SectionDetailPanel | `SectionDetailPanel.tsx`: section name + time range, `.osu` upload/download controls (`OsuUploadButton`, `DownloadOsuButton`), version history affordance, forum posts belonging to this section (derived from timestamps), reply/edit/delete inline | Write component test |
+| 5.8 | Add Global Posts view | "Show All Posts" toggle/tab; when active, renders full chronological forum thread (replies indented) identical to old §6 layout | Write component test |
+| 5.9 | Refactor MapsetPage layout | Replace Section Sidebar with Timeline + SectionDetailPanel; integrate Global Posts toggle; header bar retains merged-download button | Write integration test |
+| 5.10 | Implement merged `.osu` download (frontend) | `DownloadOsuButton.tsx` or inline handler: fetches active base + all active section ciphertexts, decrypts, merges via `osuMerge.ts`, creates Blob, triggers download | Write integration test with sample .osu files |
+| 5.11 | Add merged download UI | "Download Full Difficulty (.osu)" button in mapset/difficulty header | Write component test |
 
-**Deliverable:** Clicking a timestamp opens the osu! editor. Users can download a fully merged difficulty assembled in the browser. All tests pass.
+**Deliverable:** osu!-style beatmap discussion timeline. Sections as colored blocks, posts as dots. Click section → see detail panel with uploads and posts. Toggle to see all posts. Merged `.osu` download works. All tests pass.
 
 ---
 

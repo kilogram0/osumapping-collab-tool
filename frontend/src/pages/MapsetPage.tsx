@@ -6,9 +6,11 @@ import CreatePostForm from '../components/CreatePostForm';
 import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyTabs from '../components/DifficultyTabs';
 import EditSectionModal from '../components/EditSectionModal';
+import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
 import PostCard from '../components/PostCard';
-import SectionList, { type DecryptedSection } from '../components/SectionList';
+import SectionDetailPanel from '../components/SectionDetailPanel';
+import Timeline from '../components/Timeline';
 import { useAuth } from '../hooks/useAuth';
 import { useEncryption } from '../contexts/EncryptionContext';
 import {
@@ -22,15 +24,14 @@ import { useMapset, useMyMembership } from '../hooks/useMapset';
 import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad } from '../utils/crypto';
 import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
+import { downloadBaseOsu } from '../api/endpoints';
+import { difficultyBaseOsuVersionAad } from '../utils/crypto';
 import type { Post, Section } from '../api/endpoints';
+import type { DecryptedSection } from '../components/SectionList';
+import type { DecryptedPost } from '../types';
 
-/** Stable empty array reference to avoid new-array churn in SectionList deps. */
+/** Stable empty array reference to avoid new-array churn in deps. */
 const EMPTY_SECTIONS: Section[] = [];
-
-export interface DecryptedPost extends Post {
-  decryptedBody: string;
-  extractedMs: number | null;
-}
 
 export default function MapsetPage() {
   const { id } = useParams<{ id: string }>();
@@ -62,6 +63,8 @@ export default function MapsetPage() {
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editingPostBody, setEditingPostBody] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showAllPosts, setShowAllPosts] = useState(false);
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
 
   const isOwner = myMembership?.role === 'owner';
   const canEditStructure = isOwner || myMembership?.role === 'mapper';
@@ -72,13 +75,14 @@ export default function MapsetPage() {
     }
   }, [difficulties, selectedDifficultyId]);
 
-  // Clear transient forum states when switching difficulties to prevent stale
-  // reply/edit forms referencing posts from the previous difficulty.
+  // Clear transient forum states when switching difficulties
   useEffect(() => {
     setReplyingTo(null);
     setEditingPost(null);
     setShowCreateForm(false);
     setEditingPostBody('');
+    setShowAllPosts(false);
+    setSelectedSectionId(null);
   }, [selectedDifficultyId]);
 
   useEffect(() => {
@@ -90,16 +94,17 @@ export default function MapsetPage() {
 
     let cancelled = false;
 
+    const m = mapset!;
     async function decryptMetadata() {
       try {
         const key = await getKey(mapsetId);
         if (!key || cancelled) return;
 
         const results = await Promise.allSettled([
-          mapset.encrypted_description
-            ? decrypt(key, mapset.encrypted_description, mapsetFieldAad(mapsetId))
+          m.encrypted_description
+            ? decrypt(key, m.encrypted_description, mapsetFieldAad(mapsetId))
             : Promise.resolve(null),
-          decrypt(key, mapset.encrypted_song_length_ms, mapsetFieldAad(mapsetId)),
+          decrypt(key, m.encrypted_song_length_ms, mapsetFieldAad(mapsetId)),
         ]);
 
         if (cancelled) return;
@@ -122,6 +127,70 @@ export default function MapsetPage() {
     return () => { cancelled = true; };
   }, [unlocked, mapset, mapsetId, getKey]);
 
+  // Decrypt sections whenever difficulty detail changes
+  useEffect(() => {
+    if (!unlocked || !difficultyDetail?.sections) {
+      setDecryptedSections([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const ddSections = difficultyDetail!.sections;
+    async function decryptSections() {
+      try {
+        const key = await getKey(mapsetId);
+        if (!key || cancelled) return;
+
+        const results: DecryptedSection[] = [];
+        await Promise.all(
+          ddSections.map(async (s) => {
+            try {
+              const [name, startRaw, endRaw, sortRaw] = await Promise.all([
+                decrypt(key, s.encrypted_name, `Section|${s.id}|${mapsetId}`),
+                decrypt(key, s.encrypted_start_time_ms, `Section|${s.id}|${mapsetId}`),
+                decrypt(key, s.encrypted_end_time_ms, `Section|${s.id}|${mapsetId}`),
+                decrypt(key, s.encrypted_sort_order, `Section|${s.id}|${mapsetId}`),
+              ]);
+              results.push({
+                id: s.id,
+                name,
+                startTimeMs: decodeJsonEnvelope(startRaw),
+                endTimeMs: decodeJsonEnvelope(endRaw),
+                sortOrder: decodeJsonEnvelope(sortRaw),
+              });
+            } catch (_err) {
+              logger.warn(`Failed to decrypt section ${s.id}:`, _err);
+            }
+          }),
+        );
+
+        if (!cancelled) {
+          // Sort by the legacy sortOrder so we can derive contiguous start times.
+          results.sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
+
+          // Derive start times locally: first section starts at 0, every
+          // subsequent section starts where the previous one ended.  This
+          // guarantees the timeline stays contiguous even when a user edits
+          // a section's end time — the next section shifts automatically.
+          let runningStart = 0;
+          const derived = results.map((s) => {
+            const section = { ...s, startTimeMs: runningStart };
+            runningStart = s.endTimeMs;
+            return section;
+          });
+
+          setDecryptedSections(derived);
+        }
+      } catch (err) {
+        logger.warn('Failed to decrypt sections:', err);
+      }
+    }
+
+    decryptSections();
+    return () => { cancelled = true; };
+  }, [unlocked, difficultyDetail, mapsetId, getKey]);
+
   // Decrypt posts whenever the difficulty detail changes
   useEffect(() => {
     if (!unlocked || !difficultyDetail?.posts) {
@@ -131,13 +200,14 @@ export default function MapsetPage() {
 
     let cancelled = false;
 
+    const ddPosts = difficultyDetail!.posts;
     async function decryptPosts() {
       try {
         const key = await getKey(mapsetId);
         if (!key || cancelled) return;
 
         const results: DecryptedPost[] = await Promise.all(
-          difficultyDetail.posts.map(async (post): Promise<DecryptedPost> => {
+          ddPosts.map(async (post): Promise<DecryptedPost> => {
             try {
               const plaintext = await decrypt(key, post.encrypted_body, postFieldAad(post.id, mapsetId));
               const extracted = extractFirstTimestamp(plaintext);
@@ -178,8 +248,8 @@ export default function MapsetPage() {
     return () => { cancelled = true; };
   }, [unlocked, difficultyDetail, mapsetId, getKey]);
 
-  // Build reply trees: top-level posts + their replies
-  const postTree = useMemo(() => {
+  // Build reply trees for global posts view
+  const globalPostTree = useMemo(() => {
     const topLevel: DecryptedPost[] = [];
     const replyMap = new Map<string, DecryptedPost[]>();
 
@@ -196,10 +266,10 @@ export default function MapsetPage() {
     return { topLevel, replyMap };
   }, [decryptedPosts]);
 
-  function renderPostNode(post: DecryptedPost, depth: number): JSX.Element | null {
+  function renderGlobalPostNode(post: DecryptedPost, depth: number): JSX.Element | null {
     const MAX_REPLY_DEPTH = 10;
     if (depth > MAX_REPLY_DEPTH) return null;
-    const replies = postTree.replyMap.get(post.id) ?? [];
+    const replies = globalPostTree.replyMap.get(post.id) ?? [];
     const isReplyingToThis = replyingTo?.id === post.id;
     const isEditingThis = editingPost?.id === post.id;
     return (
@@ -254,7 +324,7 @@ export default function MapsetPage() {
           </div>
         )}
 
-        {replies.map((reply) => renderPostNode(reply, depth + 1))}
+        {replies.map((reply) => renderGlobalPostNode(reply, depth + 1))}
       </div>
     );
   }
@@ -293,6 +363,27 @@ export default function MapsetPage() {
     await deletePostMutation.mutateAsync(postId);
   }
 
+  async function handleDownloadBase() {
+    if (!unlocked || !selectedDifficultyId) return;
+    try {
+      const key = await getKey(mapsetId);
+      if (!key) return;
+      const resp = await downloadBaseOsu(selectedDifficultyId);
+      const plaintext = await decrypt(key, resp.encrypted_content, difficultyBaseOsuVersionAad(resp.id, mapsetId));
+      const blob = new Blob([plaintext], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'base.osu';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      logger.warn('Failed to download base:', err);
+    }
+  }
+
   if (!id) return null;
   if (mapsetLoading) return <div className="min-h-screen bg-gray-900 text-white p-8">Loading…</div>;
   if (mapsetError || !mapset) {
@@ -312,10 +403,12 @@ export default function MapsetPage() {
   }
 
   const sections = difficultyDetail?.sections ?? EMPTY_SECTIONS;
+  const selectedSection = decryptedSections.find((s) => s.id === selectedSectionId) ?? null;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-6xl mx-auto">
+        {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-blue-400">{mapset.title}</h1>
           {decryptedDescription && (
@@ -324,8 +417,31 @@ export default function MapsetPage() {
           {songLengthMs !== null && (
             <p className="text-sm text-gray-400 mt-1">{formatDuration(songLengthMs)}</p>
           )}
+          <div className="flex items-center gap-3 mt-3">
+            <button
+              type="button"
+              onClick={handleDownloadBase}
+              disabled={!selectedDifficultyId}
+              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white text-sm font-medium rounded transition-colors"
+            >
+              Download Base Template
+            </button>
+            <MergedDownloadButton
+              difficultyId={selectedDifficultyId ?? ''}
+              mapsetId={mapsetId}
+              sections={sections}
+            />
+            <button
+              type="button"
+              onClick={() => setShowBaseHistory(true)}
+              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
+            >
+              Base History
+            </button>
+          </div>
         </div>
 
+        {/* Difficulties */}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-200">Difficulties</h2>
           {canEditStructure && (
@@ -357,85 +473,144 @@ export default function MapsetPage() {
         )}
 
         {selectedDifficultyId && (
-          <div className="flex flex-col lg:flex-row gap-6">
-            {/* Sections Sidebar */}
-            <div className="lg:w-80 shrink-0">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-gray-200">Sections</h2>
-                <div className="flex gap-2">
-                  {canEditStructure && (
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateSection(true)}
-                      className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
-                    >
-                      Add Section
-                    </button>
-                  )}
+          <div className="space-y-6">
+            {/* Timeline */}
+            {songLengthMs !== null && decryptedSections.length > 0 && (
+              <Timeline
+                sections={decryptedSections}
+                posts={decryptedPosts}
+                songLengthMs={songLengthMs}
+                selectedSectionId={selectedSectionId}
+                onSelectSection={(sectionId) => {
+                  if (showAllPosts) {
+                    // Switch from All Posts to Section View
+                    setShowAllPosts(false);
+                    setSelectedSectionId(sectionId);
+                  } else if (selectedSectionId === sectionId) {
+                    // Clicking already-selected section toggles to All Posts
+                    setShowAllPosts(true);
+                    setSelectedSectionId(null);
+                  } else {
+                    // Select a different section
+                    setSelectedSectionId(sectionId);
+                  }
+                }}
+              />
+            )}
+
+            {/* View toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {canEditStructure && (
                   <button
                     type="button"
-                    onClick={() => setShowBaseHistory(true)}
-                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
+                    onClick={() => setShowCreateSection(true)}
+                    className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
                   >
-                    Base History
+                    Add Section
                   </button>
-                </div>
+                )}
               </div>
-              {detailLoading && <p className="text-gray-400">Loading sections…</p>}
-              <SectionList
-                sections={sections}
-                mapsetId={mapsetId}
-                difficultyId={selectedDifficultyId}
-                role={myMembership?.role}
-                onEdit={(s) => {
-                  setEditingSection(s);
-                  setShowEditSection(true);
-                }}
-                onDecrypted={setDecryptedSections}
-              />
-              {sections.length === 0 && !detailLoading && (
-                <p className="text-gray-400 italic">No sections yet.</p>
-              )}
-            </div>
-
-            {/* Forum Thread */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-200">Forum</h2>
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    setReplyingTo(null);
-                    setEditingPost(null);
-                    setShowCreateForm((prev) => !prev);
+                    setShowAllPosts(false);
+                    setSelectedSectionId(null);
                   }}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
+                  className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                    !showAllPosts
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
                 >
-                  {showCreateForm ? 'Hide Form' : 'New Post'}
+                  Section View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAllPosts(true);
+                    setSelectedSectionId(null);
+                  }}
+                  className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                    showAllPosts
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Show All Posts
                 </button>
               </div>
-
-              {showCreateForm && !replyingTo && !editingPost && (
-                <div className="mb-6">
-                  <CreatePostForm
-                    mapsetId={mapsetId}
-                    difficultyId={selectedDifficultyId}
-                    onSubmit={handleCreatePost}
-                    onCancel={() => setShowCreateForm(false)}
-                  />
-                </div>
-              )}
-
-              {detailLoading && <p className="text-gray-400">Loading posts…</p>}
-
-              <div className="space-y-4">
-                {postTree.topLevel.map((post) => renderPostNode(post, 0))}
-              </div>
-
-              {decryptedPosts.length === 0 && !detailLoading && (
-                <p className="text-gray-400 italic">No posts yet. Be the first to post!</p>
-              )}
             </div>
+
+            {/* Content */}
+            {!showAllPosts && selectedSection && (
+              <SectionDetailPanel
+                section={selectedSection}
+                posts={decryptedPosts}
+                mapsetId={mapsetId}
+                difficultyId={selectedDifficultyId}
+                currentUserId={user?.id ?? ''}
+                isOwner={isOwner}
+                role={myMembership?.role}
+                canEditStructure={canEditStructure}
+                onCreatePost={handleCreatePost}
+                onUpdatePost={handleUpdatePost}
+                onDeletePost={handleDeletePost}
+                onEditSection={(s) => {
+                  setEditingSection(s);
+                  setShowEditSection(true);
+                }}
+              />
+            )}
+
+            {!showAllPosts && !selectedSection && decryptedSections.length > 0 && (
+              <p className="text-gray-400 italic">Select a section from the timeline above to view its details and posts.</p>
+            )}
+
+            {!showAllPosts && decryptedSections.length === 0 && !detailLoading && (
+              <p className="text-gray-400 italic">No sections yet.</p>
+            )}
+
+            {showAllPosts && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-200">All Posts</h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReplyingTo(null);
+                      setEditingPost(null);
+                      setShowCreateForm((prev) => !prev);
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
+                  >
+                    {showCreateForm ? 'Hide Form' : 'New Post'}
+                  </button>
+                </div>
+
+                {showCreateForm && !replyingTo && !editingPost && (
+                  <div className="mb-6">
+                    <CreatePostForm
+                      mapsetId={mapsetId}
+                      difficultyId={selectedDifficultyId}
+                      onSubmit={handleCreatePost}
+                      onCancel={() => setShowCreateForm(false)}
+                    />
+                  </div>
+                )}
+
+                {detailLoading && <p className="text-gray-400">Loading posts…</p>}
+
+                <div className="space-y-4">
+                  {globalPostTree.topLevel.map((post) => renderGlobalPostNode(post, 0))}
+                </div>
+
+                {decryptedPosts.length === 0 && !detailLoading && (
+                  <p className="text-gray-400 italic">No posts yet. Be the first to post!</p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -453,12 +628,19 @@ export default function MapsetPage() {
           difficultyId={selectedDifficultyId}
           mapsetId={mapsetId}
           previousSections={decryptedSections}
+          songLengthMs={songLengthMs}
           onSuccess={() => setShowCreateSection(false)}
           onCancel={() => setShowCreateSection(false)}
         />
       )}
 
-      {showEditSection && editingSection && selectedDifficultyId && (
+      {showEditSection && editingSection && selectedDifficultyId && (() => {
+        const sortedForEdit = [...decryptedSections].sort(
+          (a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id),
+        );
+        const idx = sortedForEdit.findIndex((s) => s.id === editingSection.id);
+        const next = idx >= 0 ? sortedForEdit[idx + 1] : undefined;
+        return (
         <EditSectionModal
           difficultyId={selectedDifficultyId}
           mapsetId={mapsetId}
@@ -466,6 +648,8 @@ export default function MapsetPage() {
           initialName={editingSection.name}
           initialStartTimeMs={editingSection.startTimeMs}
           initialEndTimeMs={editingSection.endTimeMs}
+          nextSectionEndTimeMs={next?.endTimeMs ?? null}
+          songLengthMs={songLengthMs}
           onSuccess={() => {
             setShowEditSection(false);
             setEditingSection(null);
@@ -475,7 +659,8 @@ export default function MapsetPage() {
             setEditingSection(null);
           }}
         />
-      )}
+        );
+      })()}
 
       {showBaseHistory && selectedDifficultyId && (
         <BaseVersionHistory

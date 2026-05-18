@@ -71,3 +71,23 @@ export function formatTimestamp(ms: number): string {
   const milliseconds = ms % 1000;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(milliseconds).padStart(3, '0')}`;
 }
+
+const STRICT_TIMESTAMP_REGEX = /^(\d{2}):(\d{2}):(\d{3})$/;
+
+/**
+ * Parse a strict `MM:SS:MMM` timestamp string into milliseconds.
+ * Returns `null` if the format is invalid.
+ */
+export function parseTimestampString(input: string): { ms: number } | null {
+  const match = input.trim().match(STRICT_TIMESTAMP_REGEX);
+  if (!match) return null;
+
+  const [, minutes, seconds, milliseconds] = match;
+  const min = parseInt(minutes, 10);
+  const sec = parseInt(seconds, 10);
+  const ms = parseInt(milliseconds, 10);
+
+  if (sec > 59) return null;
+
+  return { ms: min * 60_000 + sec * 1_000 + ms };
+}

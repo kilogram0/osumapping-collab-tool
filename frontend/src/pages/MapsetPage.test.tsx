@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -61,11 +61,16 @@ vi.mock('../utils/crypto', async (importOriginal) => {
     difficultyFieldAad: vi.fn((id: string, mapsetId: string) => `Difficulty|${id}|${mapsetId}`),
     sectionFieldAad: vi.fn((id: string, mapsetId: string) => `Section|${id}|${mapsetId}`),
     postFieldAad: vi.fn((postId: string, mapsetId: string) => `Post|${postId}|${mapsetId}`),
+    difficultyBaseOsuVersionAad: vi.fn((id: string, mapsetId: string) => `DifficultyBaseOsuVersion|${id}|${mapsetId}`),
   };
 });
 
 vi.mock('../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn() },
+}));
+
+vi.mock('../components/MergedDownloadButton', () => ({
+  default: () => <button type="button">Download Full Difficulty (.osu)</button>,
 }));
 
 const MOCK_MAPSET = {
@@ -98,6 +103,16 @@ const MOCK_SECTIONS = [
     encrypted_start_time_ms: 'enc:{"v":0,"ms":0}',
     encrypted_end_time_ms: 'enc:{"v":0,"ms":30000}',
     encrypted_sort_order: 'enc:{"v":0,"ms":0}',
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+  },
+  {
+    id: 's2',
+    difficulty_id: 'd1',
+    encrypted_name: 'enc:Kiai 1',
+    encrypted_start_time_ms: 'enc:{"v":0,"ms":30000}',
+    encrypted_end_time_ms: 'enc:{"v":0,"ms":60000}',
+    encrypted_sort_order: 'enc:{"v":0,"ms":1}',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
@@ -248,12 +263,11 @@ describe('MapsetPage', () => {
     expect(screen.getByText('04:05')).toBeInTheDocument();
   });
 
-  it('shows Add Difficulty and Add Section buttons for owner', async () => {
+  it('shows Add Difficulty button for owner', async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Add Difficulty/i })).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /Add Section/i })).toBeInTheDocument();
   });
 
   it('opens create difficulty modal when Add Difficulty is clicked', async () => {
@@ -266,6 +280,22 @@ describe('MapsetPage', () => {
     expect(screen.getByRole('heading', { name: /Add Difficulty/i })).toBeInTheDocument();
   });
 
+  it('shows timeline with section blocks', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-bar')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument();
+    expect(screen.getByTestId('timeline-section-s2')).toBeInTheDocument();
+  });
+
+  it('shows Add Section button for owner', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Add Section/i })).toBeInTheDocument();
+    });
+  });
+
   it('opens create section modal when Add Section is clicked', async () => {
     renderPage();
     const user = userEvent.setup();
@@ -274,17 +304,6 @@ describe('MapsetPage', () => {
     });
     await user.click(screen.getByRole('button', { name: /Add Section/i }));
     expect(screen.getByRole('heading', { name: /Add Section/i })).toBeInTheDocument();
-  });
-
-  it('opens edit section modal when Edit is clicked', async () => {
-    renderPage();
-    const user = userEvent.setup();
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /Edit/i }).length).toBeGreaterThanOrEqual(1);
-    });
-    const editButtons = screen.getAllByRole('button', { name: /Edit/i });
-    await user.click(editButtons[0]);
-    expect(screen.getByRole('heading', { name: /Edit Section/i })).toBeInTheDocument();
   });
 
   it('shows Add buttons for mapper role', async () => {
@@ -326,86 +345,56 @@ describe('MapsetPage', () => {
     expect(screen.queryByRole('button', { name: /Add Section/i })).not.toBeInTheDocument();
   });
 
-  it('renders decrypted posts in the forum thread', async () => {
+  it('shows Section View and Show All Posts toggles', async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText('Forum')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Section View/i })).toBeInTheDocument();
     });
-    await waitFor(() => {
-      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
-    });
-    expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
   });
 
-  it('sorts posts by extracted timestamp then created_at', async () => {
-    const originalPosts = MOCK_DIFFICULTY_DETAIL.posts;
-    MOCK_DIFFICULTY_DETAIL.posts = [
-      {
-        id: 'p-later',
-        difficulty_id: 'd1',
-        author_id: 'other-user-uuid',
-        parent_id: null,
-        tag: 'general',
-        encrypted_body: 'enc:01:30:000 - later timestamp',
-        created_at: '2024-01-01T14:00:00Z',
-        updated_at: '2024-01-01T14:00:00Z',
-      },
-      {
-        id: 'p-earlier',
-        difficulty_id: 'd1',
-        author_id: 'other-user-uuid',
-        parent_id: null,
-        tag: 'general',
-        encrypted_body: 'enc:00:15:000 - earlier timestamp',
-        created_at: '2024-01-01T15:00:00Z',
-        updated_at: '2024-01-01T15:00:00Z',
-      },
-      {
-        id: 'p-none',
-        difficulty_id: 'd1',
-        author_id: 'other-user-uuid',
-        parent_id: null,
-        tag: 'general',
-        encrypted_body: 'enc:no timestamp here',
-        created_at: '2024-01-01T13:00:00Z',
-        updated_at: '2024-01-01T13:00:00Z',
-      },
-    ];
+  it('shows section detail panel when a timeline section is clicked', async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/earlier timestamp/i)).toBeInTheDocument();
+      expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument();
     });
-
-    const postCards = screen.getAllByTestId('post-card');
-    expect(postCards[0].textContent).toMatch(/earlier timestamp/);
-    expect(postCards[1].textContent).toMatch(/later timestamp/);
-    expect(postCards[2].textContent).toMatch(/no timestamp here/);
-
-    MOCK_DIFFICULTY_DETAIL.posts = originalPosts;
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('timeline-section-s1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument();
+    });
+    const panel = screen.getByTestId('section-detail-panel');
+    expect(within(panel).getByRole('heading', { name: 'Intro' })).toBeInTheDocument();
   });
 
-  it('shows New Post button and opens create form', async () => {
+  it('shows all posts view when Show All Posts is clicked', async () => {
     renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+  });
+
+  it('creates a new post through the global all-posts form', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /New Post/i })).toBeInTheDocument();
     });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /New Post/i }));
-    expect(screen.getByLabelText(/New post/i)).toBeInTheDocument();
-  });
-
-  it('creates a new post through the form', async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /New Post/i })).toBeInTheDocument();
-    });
-    const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /New Post/i }));
 
     const textarea = screen.getByLabelText(/New post/i);
     await user.type(textarea, '01:00:000 - great rhythm');
 
-    // Use exact text match to avoid matching collapse buttons with aria-label "Collapse post"
     await user.click(screen.getByRole('button', { name: /^Post$/i }));
 
     await waitFor(() => {
@@ -417,8 +406,13 @@ describe('MapsetPage', () => {
     expect(payload.encrypted_body).toBe('enc:01:00:000 - great rhythm');
   });
 
-  it('shows edit and delete buttons on own posts', async () => {
+  it('shows edit and delete buttons on own posts in all-posts view', async () => {
     renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
     await waitFor(() => {
       expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
     });
@@ -430,13 +424,17 @@ describe('MapsetPage', () => {
     expect(withinOwnPost.getByRole('button', { name: /Delete/i })).toBeInTheDocument();
   });
 
-  it('deletes a post when Delete is clicked', async () => {
+  it('deletes a post when Delete is clicked in all-posts view', async () => {
     window.confirm = vi.fn(() => true);
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
     });
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+    });
     const deleteButtons = screen.getAllByRole('button', { name: /Delete/i });
     await user.click(deleteButtons[0]);
 
@@ -445,12 +443,16 @@ describe('MapsetPage', () => {
     });
   });
 
-  it('opens reply form when Reply is clicked', async () => {
+  it('opens reply form when Reply is clicked in all-posts view', async () => {
     renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
     await waitFor(() => {
       expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
     });
-    const user = userEvent.setup();
     const replyButtons = screen.getAllByRole('button', { name: /Reply/i });
     await user.click(replyButtons[0]);
 
@@ -459,12 +461,16 @@ describe('MapsetPage', () => {
     });
   });
 
-  it('opens edit form when Edit is clicked', async () => {
+  it('opens edit form when Edit is clicked in all-posts view', async () => {
     renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
     await waitFor(() => {
       expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
     });
-    const user = userEvent.setup();
     const postCards = screen.getAllByTestId('post-card');
     const ownPost = postCards.find((card) => within(card).queryByText(/these are too close/i));
     expect(ownPost).toBeDefined();
@@ -476,8 +482,13 @@ describe('MapsetPage', () => {
     });
   });
 
-  it('hides Reply button on reply posts', async () => {
+  it('hides Reply button on reply posts in all-posts view', async () => {
     renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
     await waitFor(() => {
       expect(screen.getByText(/Thanks for the feedback/i)).toBeInTheDocument();
     });
@@ -485,38 +496,5 @@ describe('MapsetPage', () => {
     const replyPost = postCards.find((card) => within(card).queryByText(/Thanks for the feedback/i));
     expect(replyPost).toBeDefined();
     expect(within(replyPost!).queryByRole('button', { name: /Reply/i })).not.toBeInTheDocument();
-  });
-
-  it('shows Reply button on top-level posts', async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
-    });
-    const postCards = screen.getAllByTestId('post-card');
-    const topLevelPost = postCards.find((card) => within(card).queryByText(/Nice map overall/i));
-    expect(topLevelPost).toBeDefined();
-    expect(within(topLevelPost!).getByRole('button', { name: /Reply/i })).toBeInTheDocument();
-  });
-
-  it('opens reply form inline below the post being replied to', async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
-    });
-    const user = userEvent.setup();
-    const postCards = screen.getAllByTestId('post-card');
-    const topLevelPost = postCards.find((card) => within(card).queryByText(/Nice map overall/i));
-    expect(topLevelPost).toBeDefined();
-    const replyButton = within(topLevelPost!).getByRole('button', { name: /Reply/i });
-    await user.click(replyButton);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText(/Reply/i)).toBeInTheDocument();
-    });
-
-    // The reply form should appear immediately after the post card in the DOM
-    const replyForm = screen.getByLabelText(/Reply/i).closest('form');
-    expect(replyForm).toBeTruthy();
-    expect(topLevelPost!.compareDocumentPosition(replyForm!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

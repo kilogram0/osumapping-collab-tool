@@ -157,9 +157,11 @@ export default function PostCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-gray-200">{authorLabel}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full text-white ${TAG_COLORS[post.tag]}`}>
-              {TAG_LABELS[post.tag]}
-            </span>
+            {!post.parent_id && (
+              <span className={`text-xs px-2 py-0.5 rounded-full text-white ${TAG_COLORS[post.tag]}`}>
+                {TAG_LABELS[post.tag]}
+              </span>
+            )}
             {primaryTimestamp && (
               <a
                 href={generateOsuLink(primaryTimestamp.ms, primaryTimestamp.combos)}

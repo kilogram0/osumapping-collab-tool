@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, sectionFieldAad } from '../utils/crypto';
 import { useUpdateSection } from '../hooks/useDifficulty';
-import { msToParts } from '../utils/timeInput';
-import TimeInput from './TimeInput';
+import { formatTimestamp, parseTimestampString } from '../utils/extractTimestamp';
 
 interface EditSectionModalProps {
   difficultyId: string;
@@ -12,9 +11,16 @@ interface EditSectionModalProps {
   initialName: string;
   initialStartTimeMs: number;
   initialEndTimeMs: number;
+  /** End time of the section that follows this one, if any. Used to keep the
+   *  next section at least MIN_SECTION_MS long. */
+  nextSectionEndTimeMs?: number | null;
+  /** Total song length in ms; the section's end time may not exceed this. */
+  songLengthMs?: number | null;
   onSuccess: () => void;
   onCancel: () => void;
 }
+
+const MIN_SECTION_MS = 1000;
 
 export default function EditSectionModal({
   difficultyId,
@@ -23,36 +29,23 @@ export default function EditSectionModal({
   initialName,
   initialStartTimeMs,
   initialEndTimeMs,
+  nextSectionEndTimeMs,
+  songLengthMs,
   onSuccess,
   onCancel,
 }: EditSectionModalProps) {
   const { getKey } = useEncryption();
   const updateSection = useUpdateSection(difficultyId);
 
-  const startParts = msToParts(initialStartTimeMs);
-  const endParts = msToParts(initialEndTimeMs);
-
   const [name, setName] = useState(initialName);
-  const [startMinutes, setStartMinutes] = useState(startParts.minutes);
-  const [startSeconds, setStartSeconds] = useState(startParts.seconds);
-  const [startMillis, setStartMillis] = useState(startParts.millis);
-  const [endMinutes, setEndMinutes] = useState(endParts.minutes);
-  const [endSeconds, setEndSeconds] = useState(endParts.seconds);
-  const [endMillis, setEndMillis] = useState(endParts.millis);
+  const [endTimeInput, setEndTimeInput] = useState(formatTimestamp(initialEndTimeMs));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const s = msToParts(initialStartTimeMs);
-    const e = msToParts(initialEndTimeMs);
     setName(initialName);
-    setStartMinutes(s.minutes);
-    setStartSeconds(s.seconds);
-    setStartMillis(s.millis);
-    setEndMinutes(e.minutes);
-    setEndSeconds(e.seconds);
-    setEndMillis(e.millis);
-  }, [initialName, initialStartTimeMs, initialEndTimeMs]);
+    setEndTimeInput(formatTimestamp(initialEndTimeMs));
+  }, [initialName, initialEndTimeMs]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -68,17 +61,39 @@ export default function EditSectionModal({
         return;
       }
 
-      const startMs =
-        (Number(startMinutes) || 0) * 60_000 +
-        (Number(startSeconds) || 0) * 1_000 +
-        (Number(startMillis) || 0);
-      const endMs =
-        (Number(endMinutes) || 0) * 60_000 +
-        (Number(endSeconds) || 0) * 1_000 +
-        (Number(endMillis) || 0);
+      const parsed = parseTimestampString(endTimeInput);
+      if (!parsed) {
+        setError('Invalid end time format. Use MM:SS:MMM (e.g. 00:30:000).');
+        setSubmitting(false);
+        return;
+      }
 
-      if (endMs <= startMs) {
-        setError('End time must be after start time.');
+      const endMs = parsed.ms;
+
+      if (endMs < initialStartTimeMs + MIN_SECTION_MS) {
+        setError(
+          `End time must be at least 1 second after the section start time (${formatTimestamp(initialStartTimeMs)}).`,
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      if (
+        nextSectionEndTimeMs !== null &&
+        nextSectionEndTimeMs !== undefined &&
+        endMs > nextSectionEndTimeMs - MIN_SECTION_MS
+      ) {
+        setError(
+          `End time must be at least 1 second before the next section's end time (${formatTimestamp(nextSectionEndTimeMs)}). Editing past it would shrink the next section below 1 second.`,
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      if (songLengthMs !== null && songLengthMs !== undefined && endMs > songLengthMs) {
+        setError(
+          `End time may not exceed the song length (${formatTimestamp(songLengthMs)}).`,
+        );
         setSubmitting(false);
         return;
       }
@@ -86,11 +101,6 @@ export default function EditSectionModal({
       const payload: Parameters<typeof updateSection.mutate>[0]['payload'] = {};
 
       payload.encrypted_name = await encrypt(key, name.trim(), sectionFieldAad(sectionId, mapsetId));
-      payload.encrypted_start_time_ms = await encrypt(
-        key,
-        JSON.stringify({ v: 0, ms: startMs }),
-        sectionFieldAad(sectionId, mapsetId),
-      );
       payload.encrypted_end_time_ms = await encrypt(
         key,
         JSON.stringify({ v: 0, ms: endMs }),
@@ -139,31 +149,28 @@ export default function EditSectionModal({
             />
           </div>
 
-          <TimeInput
-            label="Start Time"
-            minutesId="edit-start-min"
-            secondsId="edit-start-sec"
-            millisId="edit-start-ms"
-            minutes={startMinutes}
-            seconds={startSeconds}
-            millis={startMillis}
-            onChangeMinutes={setStartMinutes}
-            onChangeSeconds={setStartSeconds}
-            onChangeMillis={setStartMillis}
-          />
+          <div>
+            <span className="block text-sm font-medium text-gray-300 mb-1">Start Time</span>
+            <p className="text-sm text-gray-400">
+              {formatTimestamp(initialStartTimeMs)} <span className="text-xs text-gray-500">(computed from previous section)</span>
+            </p>
+          </div>
 
-          <TimeInput
-            label="End Time"
-            minutesId="edit-end-min"
-            secondsId="edit-end-sec"
-            millisId="edit-end-ms"
-            minutes={endMinutes}
-            seconds={endSeconds}
-            millis={endMillis}
-            onChangeMinutes={setEndMinutes}
-            onChangeSeconds={setEndSeconds}
-            onChangeMillis={setEndMillis}
-          />
+          <div>
+            <label htmlFor="edit-section-end-time" className="block text-sm font-medium text-gray-300 mb-1">
+              End Time <span className="text-red-400">*</span>
+            </label>
+            <input
+              id="edit-section-end-time"
+              type="text"
+              value={endTimeInput}
+              onChange={(e) => setEndTimeInput(e.target.value)}
+              required
+              placeholder="00:30:000"
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 font-mono"
+            />
+            <p className="text-xs text-gray-500 mt-1">Format: MM:SS:MMM (e.g. 01:15:250)</p>
+          </div>
 
           {error && (
             <p role="alert" className="text-red-400 text-sm">

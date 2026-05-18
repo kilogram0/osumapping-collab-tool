@@ -40,6 +40,7 @@ export function useCreateSection(difficultyId: string) {
       createSection(difficultyId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
     },
   });
 }
@@ -56,6 +57,7 @@ export function useUpdateSection(difficultyId: string) {
     }) => updateSection(difficultyId, sectionId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
     },
   });
 }

@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, sectionFieldAad } from '../utils/crypto';
 import { useCreateSection } from '../hooks/useDifficulty';
-import { msToParts } from '../utils/timeInput';
-import TimeInput from './TimeInput';
+import { formatTimestamp, parseTimestampString } from '../utils/extractTimestamp';
 
 interface PreviousSection {
   id: string;
@@ -14,6 +13,7 @@ interface CreateSectionModalProps {
   difficultyId: string;
   mapsetId: string;
   previousSections?: PreviousSection[];
+  songLengthMs?: number | null;
   onSuccess: () => void;
   onCancel: () => void;
 }
@@ -22,33 +22,22 @@ export default function CreateSectionModal({
   difficultyId,
   mapsetId,
   previousSections = [],
+  songLengthMs,
   onSuccess,
   onCancel,
 }: CreateSectionModalProps) {
   const { getKey } = useEncryption();
   const createSection = useCreateSection(difficultyId);
 
-  const maxEndTime = previousSections.length > 0
-    ? Math.max(...previousSections.map((s) => s.endTimeMs))
-    : 0;
-  const defaultStart = msToParts(maxEndTime);
+  const startMs = useMemo(() => {
+    if (previousSections.length === 0) return 0;
+    return Math.max(...previousSections.map((s) => s.endTimeMs));
+  }, [previousSections]);
 
   const [name, setName] = useState('');
-  const [startMinutes, setStartMinutes] = useState(defaultStart.minutes);
-  const [startSeconds, setStartSeconds] = useState(defaultStart.seconds);
-  const [startMillis, setStartMillis] = useState(defaultStart.millis);
-  const [endMinutes, setEndMinutes] = useState('');
-  const [endSeconds, setEndSeconds] = useState('');
-  const [endMillis, setEndMillis] = useState('');
+  const [endTimeInput, setEndTimeInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    const start = msToParts(maxEndTime);
-    setStartMinutes(start.minutes);
-    setStartSeconds(start.seconds);
-    setStartMillis(start.millis);
-  }, [maxEndTime]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -64,27 +53,32 @@ export default function CreateSectionModal({
         return;
       }
 
-      const startMs =
-        (Number(startMinutes) || 0) * 60_000 +
-        (Number(startSeconds) || 0) * 1_000 +
-        (Number(startMillis) || 0);
-      const endMs =
-        (Number(endMinutes) || 0) * 60_000 +
-        (Number(endSeconds) || 0) * 1_000 +
-        (Number(endMillis) || 0);
+      const parsed = parseTimestampString(endTimeInput);
+      if (!parsed) {
+        setError('Invalid end time format. Use MM:SS:MMM (e.g. 00:30:000).');
+        setSubmitting(false);
+        return;
+      }
 
-      if (endMs <= startMs) {
-        setError('End time must be after start time.');
+      const endMs = parsed.ms;
+
+      if (endMs < startMs + 1000) {
+        setError(
+          `End time must be at least 1 second after the automatically computed start time (${formatTimestamp(startMs)}).`,
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      if (songLengthMs !== null && songLengthMs !== undefined && endMs > songLengthMs) {
+        setError(
+          `End time may not exceed the song length (${formatTimestamp(songLengthMs)}).`,
+        );
         setSubmitting(false);
         return;
       }
 
       const id = crypto.randomUUID();
-
-      // NOTE: encrypted_sort_order is legacy.  The frontend now sorts sections
-      // by start_time_ms, so sort_order is always 0.  We still encrypt and
-      // send it because the DB column is NOT NULL; a future migration can
-      // drop the column and remove this field.
       const order = 0;
 
       const [encryptedName, encryptedStart, encryptedEnd, encryptedSort] = await Promise.all([
@@ -143,31 +137,28 @@ export default function CreateSectionModal({
             />
           </div>
 
-          <TimeInput
-            label="Start Time"
-            minutesId="section-start-min"
-            secondsId="section-start-sec"
-            millisId="section-start-ms"
-            minutes={startMinutes}
-            seconds={startSeconds}
-            millis={startMillis}
-            onChangeMinutes={setStartMinutes}
-            onChangeSeconds={setStartSeconds}
-            onChangeMillis={setStartMillis}
-          />
+          <div>
+            <span className="block text-sm font-medium text-gray-300 mb-1">Start Time</span>
+            <p className="text-sm text-gray-400">
+              {formatTimestamp(startMs)} <span className="text-xs text-gray-500">(computed automatically from previous section)</span>
+            </p>
+          </div>
 
-          <TimeInput
-            label="End Time"
-            minutesId="section-end-min"
-            secondsId="section-end-sec"
-            millisId="section-end-ms"
-            minutes={endMinutes}
-            seconds={endSeconds}
-            millis={endMillis}
-            onChangeMinutes={setEndMinutes}
-            onChangeSeconds={setEndSeconds}
-            onChangeMillis={setEndMillis}
-          />
+          <div>
+            <label htmlFor="section-end-time" className="block text-sm font-medium text-gray-300 mb-1">
+              End Time <span className="text-red-400">*</span>
+            </label>
+            <input
+              id="section-end-time"
+              type="text"
+              value={endTimeInput}
+              onChange={(e) => setEndTimeInput(e.target.value)}
+              required
+              placeholder="00:30:000"
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 font-mono"
+            />
+            <p className="text-xs text-gray-500 mt-1">Format: MM:SS:MMM (e.g. 01:15:250)</p>
+          </div>
 
           {error && (
             <p role="alert" className="text-red-400 text-sm">

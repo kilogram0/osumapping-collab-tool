@@ -59,17 +59,14 @@ describe('CreateSectionModal', () => {
     mockGetKey.mockResolvedValue({ key: 'mock-key' } as unknown as CryptoKey);
   });
 
-  it('renders modal with all inputs', () => {
+  it('renders modal with name and end time inputs only', () => {
     renderModal();
     expect(screen.getByRole('heading', { name: /Add Section/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/Name/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Start Time Minutes/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Start Time Seconds/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Start Time Milliseconds/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/End Time Minutes/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/End Time Seconds/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/End Time Milliseconds/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Sort Order/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/End Time/i)).toBeInTheDocument();
+    // Start time is read-only computed text
+    expect(screen.getByText(/00:00:000/)).toBeInTheDocument();
+    expect(screen.getByText(/computed automatically/)).toBeInTheDocument();
   });
 
   it('calls onCancel when Cancel is clicked', async () => {
@@ -80,18 +77,13 @@ describe('CreateSectionModal', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('submits encrypted section with correct time values', async () => {
+  it('submits encrypted section with correct end time', async () => {
     const onSuccess = vi.fn();
     renderModal({ onSuccess });
     const user = userEvent.setup();
 
     await user.type(screen.getByLabelText(/Name/i), 'Kiai 1');
-    await user.type(screen.getByLabelText(/Start Time Minutes/i), '0');
-    await user.type(screen.getByLabelText(/Start Time Seconds/i), '30');
-    await user.type(screen.getByLabelText(/Start Time Milliseconds/i), '500');
-    await user.type(screen.getByLabelText(/End Time Minutes/i), '1');
-    await user.type(screen.getByLabelText(/End Time Seconds/i), '15');
-    await user.type(screen.getByLabelText(/End Time Milliseconds/i), '250');
+    await user.type(screen.getByLabelText(/End Time/i), '00:01:250');
     await user.click(screen.getByRole('button', { name: /Add Section/i }));
 
     await waitFor(() => {
@@ -106,52 +98,65 @@ describe('CreateSectionModal', () => {
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 
-  it('shows error when encryption key is missing', async () => {
-    mockGetKey.mockResolvedValue(null);
+  it('shows error for invalid end time format', async () => {
     renderModal();
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText(/Name/i), 'Intro');
+    await user.type(screen.getByLabelText(/Name/i), 'Bad');
+    await user.type(screen.getByLabelText(/End Time/i), 'not-a-time');
     await user.click(screen.getByRole('button', { name: /Add Section/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/key not found/i);
+      expect(screen.getByRole('alert')).toHaveTextContent(/Invalid end time format/i);
     });
     expect(mockCreateSection).not.toHaveBeenCalled();
   });
 
-  it('auto-fills start time from previous sections', () => {
+  it('shows error for end time before computed start time', async () => {
+    renderModal({
+      previousSections: [
+        { id: 's-prev', endTimeMs: 125000 },
+      ],
+    });
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/Name/i), 'Bad');
+    await user.type(screen.getByLabelText(/End Time/i), '00:01:000');
+    await user.click(screen.getByRole('button', { name: /Add Section/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/after the automatically computed start time/i);
+    });
+    expect(mockCreateSection).not.toHaveBeenCalled();
+  });
+
+  it('computes start time from previous sections', () => {
     renderModal({
       previousSections: [
         { id: 's-prev', endTimeMs: 125000 },
       ],
     });
 
-    expect(screen.getByLabelText(/Start Time Minutes/i)).toHaveValue(2);
-    expect(screen.getByLabelText(/Start Time Seconds/i)).toHaveValue(5);
-    expect(screen.getByLabelText(/Start Time Milliseconds/i)).toHaveValue(0);
+    expect(screen.getByText(/02:05:000/)).toBeInTheDocument();
+    expect(screen.getByText(/computed automatically/)).toBeInTheDocument();
   });
 
   it('defaults start time to 0 when no previous sections exist', () => {
     renderModal({ previousSections: [] });
-
-    expect(screen.getByLabelText(/Start Time Minutes/i)).toHaveValue(0);
-    expect(screen.getByLabelText(/Start Time Seconds/i)).toHaveValue(0);
-    expect(screen.getByLabelText(/Start Time Milliseconds/i)).toHaveValue(0);
+    expect(screen.getByText(/00:00:000/)).toBeInTheDocument();
   });
 
-  it('rejects end time before start time', async () => {
+  it('shows error when encryption key is missing', async () => {
+    mockGetKey.mockResolvedValue(null);
     renderModal();
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText(/Name/i), 'Bad');
-    await user.type(screen.getByLabelText(/End Time Minutes/i), '0');
-    await user.type(screen.getByLabelText(/End Time Seconds/i), '0');
-    await user.type(screen.getByLabelText(/End Time Milliseconds/i), '0');
+    await user.type(screen.getByLabelText(/Name/i), 'Intro');
+    await user.type(screen.getByLabelText(/End Time/i), '00:00:500');
     await user.click(screen.getByRole('button', { name: /Add Section/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/after start time/i);
+      expect(screen.getByRole('alert')).toHaveTextContent(/key not found/i);
     });
     expect(mockCreateSection).not.toHaveBeenCalled();
   });

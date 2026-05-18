@@ -95,7 +95,7 @@ export default function CreatePostForm({
 
   return (
     <form onSubmit={handleSubmit} className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-      {!isEdit && (
+      {!isEdit && !isReply && (
         <div className="mb-3">
           <label htmlFor="post-tag" className="block text-sm font-medium text-gray-300 mb-1">
             Tag
