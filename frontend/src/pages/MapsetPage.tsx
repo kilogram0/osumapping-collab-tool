@@ -6,6 +6,7 @@ import CreatePostForm from '../components/CreatePostForm';
 import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyTabs from '../components/DifficultyTabs';
 import EditSectionModal from '../components/EditSectionModal';
+import ManageMembersModal from '../components/ManageMembersModal';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
 import PostCard from '../components/PostCard';
@@ -20,13 +21,13 @@ import {
   useDifficulties,
   useUpdatePost,
 } from '../hooks/useDifficulty';
-import { useMapset, useMyMembership } from '../hooks/useMapset';
+import { useMapset, useMembers, useMyMembership } from '../hooks/useMapset';
 import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad } from '../utils/crypto';
 import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
 import { downloadBaseOsu } from '../api/endpoints';
 import { difficultyBaseOsuVersionAad } from '../utils/crypto';
-import type { Post, Section } from '../api/endpoints';
+import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
 
@@ -38,6 +39,12 @@ export default function MapsetPage() {
   const mapsetId = id ?? '';
   const { data: mapset, isLoading: mapsetLoading, isError: mapsetError } = useMapset(mapsetId);
   const { data: myMembership } = useMyMembership(mapsetId);
+  const { data: members } = useMembers(mapsetId, !!myMembership);
+  const membersById = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof members>[number]>();
+    for (const m of members ?? []) map.set(m.user_id, m);
+    return map;
+  }, [members]);
   const { data: difficulties, isLoading: difficultiesLoading } = useDifficulties(mapsetId);
   const [selectedDifficultyId, setSelectedDifficultyId] = useState<string | null>(null);
   const { data: difficultyDetail, isLoading: detailLoading } = useDifficultyDetail(selectedDifficultyId);
@@ -54,6 +61,7 @@ export default function MapsetPage() {
   const [showCreateSection, setShowCreateSection] = useState(false);
   const [showEditSection, setShowEditSection] = useState(false);
   const [showBaseHistory, setShowBaseHistory] = useState(false);
+  const [showManageMembers, setShowManageMembers] = useState(false);
   const [editingSection, setEditingSection] = useState<DecryptedSection | null>(null);
   const [decryptedSections, setDecryptedSections] = useState<DecryptedSection[]>([]);
   const [decryptedDescription, setDecryptedDescription] = useState<string | null>(null);
@@ -65,9 +73,25 @@ export default function MapsetPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showAllPosts, setShowAllPosts] = useState(false);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
+  // Owner-only role emulation: lets the owner preview the page as a mapper or
+  // modder. Stored in component state — resets when leaving the page. Only the
+  // owner's UI is affected; nothing is sent to the server.
+  const [emulatedRole, setEmulatedRole] = useState<MapsetRole | null>(null);
 
-  const isOwner = myMembership?.role === 'owner';
-  const canEditStructure = isOwner || myMembership?.role === 'mapper';
+  const actualRole = myMembership?.role ?? null;
+  const actualIsOwner = actualRole === 'owner';
+  const effectiveRole = actualIsOwner && emulatedRole ? emulatedRole : actualRole;
+  const isOwner = effectiveRole === 'owner';
+  const canEditStructure = isOwner || effectiveRole === 'mapper';
+
+  // If the user loses ownership mid-session (e.g. transferred it to another
+  // member), drop any active preview so it can't silently reactivate on a
+  // future re-promotion.
+  useEffect(() => {
+    if (!actualIsOwner && emulatedRole !== null) {
+      setEmulatedRole(null);
+    }
+  }, [actualIsOwner, emulatedRole]);
 
   useEffect(() => {
     if (difficulties && difficulties.length > 0 && selectedDifficultyId === null) {
@@ -283,6 +307,7 @@ export default function MapsetPage() {
           currentUserId={user?.id ?? ''}
           isOwner={isOwner}
           decryptedBody={post.decryptedBody}
+          author={membersById.get(post.author_id) ?? null}
           showReplyButton={depth === 0}
           onReply={(p) => {
             setEditingPost(null);
@@ -411,6 +436,25 @@ export default function MapsetPage() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-6xl mx-auto">
+        {actualIsOwner && emulatedRole && (
+          <div
+            role="status"
+            className="mb-4 bg-yellow-900/40 border border-yellow-700 rounded p-3 flex items-center justify-between gap-3"
+          >
+            <p className="text-sm text-yellow-200">
+              Previewing this mapset as <strong>{emulatedRole}</strong>. UI gating only —
+              the server still treats you as owner, and any post you write is still authored
+              by you.
+            </p>
+            <button
+              type="button"
+              onClick={() => setEmulatedRole(null)}
+              className="shrink-0 px-3 py-1 bg-yellow-700 hover:bg-yellow-600 text-white text-xs font-medium rounded"
+            >
+              Exit preview
+            </button>
+          </div>
+        )}
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-blue-400">{mapset.title}</h1>
@@ -441,6 +485,15 @@ export default function MapsetPage() {
             >
               Base History
             </button>
+            {myMembership && (
+              <button
+                type="button"
+                onClick={() => setShowManageMembers(true)}
+                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
+              >
+                {actualIsOwner ? 'Manage Members' : 'View Members'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -561,8 +614,9 @@ export default function MapsetPage() {
                 difficultyId={selectedDifficultyId}
                 currentUserId={user?.id ?? ''}
                 isOwner={isOwner}
-                role={myMembership?.role}
+                role={effectiveRole}
                 canEditStructure={canEditStructure}
+                membersById={membersById}
                 onCreatePost={handleCreatePost}
                 onUpdatePost={handleUpdatePost}
                 onDeletePost={handleDeletePost}
@@ -675,6 +729,17 @@ export default function MapsetPage() {
         <BaseVersionHistory
           difficultyId={selectedDifficultyId}
           onClose={() => setShowBaseHistory(false)}
+        />
+      )}
+
+      {showManageMembers && (
+        <ManageMembersModal
+          mapsetId={mapsetId}
+          currentUserId={user?.id ?? ''}
+          isOwner={actualIsOwner}
+          emulatedRole={emulatedRole}
+          onEmulateRole={setEmulatedRole}
+          onClose={() => setShowManageMembers(false)}
         />
       )}
     </div>

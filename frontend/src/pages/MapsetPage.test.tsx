@@ -189,6 +189,11 @@ vi.mock('../hooks/useMapset', () => ({
     isError: false,
   }),
   useMyMembership: (_mapsetId: string) => mockUseMyMembership(),
+  useMembers: (_mapsetId: string, _enabled?: boolean) => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+  }),
 }));
 
 vi.mock('../hooks/useDifficulty', () => ({

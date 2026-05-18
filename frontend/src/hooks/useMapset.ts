@@ -4,9 +4,14 @@ import {
   deleteMapset,
   fetchMapset,
   fetchMapsets,
+  fetchMembers,
   fetchMyMembership,
+  inviteMember,
+  removeMember,
   updateMapset,
+  updateMemberRole,
   type CreateMapsetPayload,
+  type MapsetRole,
   type UpdateMapsetPayload,
 } from '../api/endpoints';
 
@@ -61,5 +66,46 @@ export function useMyMembership(mapsetId: string) {
     queryKey: ['membership', mapsetId],
     queryFn: () => fetchMyMembership(mapsetId),
     enabled: !!mapsetId,
+  });
+}
+
+export function useMembers(mapsetId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['members', mapsetId],
+    queryFn: () => fetchMembers(mapsetId),
+    enabled: !!mapsetId && enabled,
+  });
+}
+
+export function useInviteMember(mapsetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (username: string) => inviteMember(mapsetId, username),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['members', mapsetId] });
+    },
+  });
+}
+
+export function useUpdateMemberRole(mapsetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: MapsetRole }) =>
+      updateMemberRole(mapsetId, userId, role),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['members', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['membership', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['mapsets', mapsetId] });
+    },
+  });
+}
+
+export function useRemoveMember(mapsetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => removeMember(mapsetId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['members', mapsetId] });
+    },
   });
 }

@@ -15,8 +15,12 @@ interface EncryptionContextValue {
   // Bypasses canary verification — caller must guarantee the key is correct
   // (e.g. it was just derived from a passphrase the caller produced themselves).
   // Do NOT use this as an entry-point for user-supplied passphrases; use unlockMapset instead.
-  unlockWithKey: (mapsetId: string, key: CryptoKey) => Promise<void>;
+  unlockWithKey: (mapsetId: string, key: CryptoKey, passphrase?: string) => Promise<void>;
   getKey: (mapsetId: string) => Promise<CryptoKey | null>;
+  // Returns the passphrase only if it was cached in memory during this session
+  // (entered via unlockMapset or supplied to unlockWithKey). Never persisted —
+  // a page reload drops it.
+  getPassphrase: (mapsetId: string) => string | null;
   lockMapset: (mapsetId: string) => Promise<void>;
   clearAll: () => Promise<void>;
   isUnlocked: (mapsetId: string) => boolean;
@@ -30,6 +34,7 @@ function storageKey(mapsetId: string): string {
 
 export function EncryptionProvider({ children }: { children: React.ReactNode }) {
   const keyCache = useRef<Map<string, CryptoKey>>(new Map());
+  const passphraseCache = useRef<Map<string, string>>(new Map());
   const [unlockedIds, setUnlockedIds] = useState<Set<string>>(() => {
     const ids = new Set<string>();
     for (let i = 0; i < sessionStorage.length; i++) {
@@ -60,6 +65,7 @@ export function EncryptionProvider({ children }: { children: React.ReactNode }) 
 
   const lockMapset = useCallback(async (mapsetId: string): Promise<void> => {
     keyCache.current.delete(mapsetId);
+    passphraseCache.current.delete(mapsetId);
     await idbDelete(mapsetId);
     sessionStorage.removeItem(storageKey(mapsetId));
     setUnlockedIds((prev) => {
@@ -70,9 +76,10 @@ export function EncryptionProvider({ children }: { children: React.ReactNode }) 
     });
   }, []);
 
-  const unlockWithKey = useCallback(async (mapsetId: string, key: CryptoKey) => {
+  const unlockWithKey = useCallback(async (mapsetId: string, key: CryptoKey, passphrase?: string) => {
     await idbSet(mapsetId, key);
     keyCache.current.set(mapsetId, key);
+    if (passphrase) passphraseCache.current.set(mapsetId, passphrase);
     markUnlocked(mapsetId);
   }, [markUnlocked]);
 
@@ -83,9 +90,14 @@ export function EncryptionProvider({ children }: { children: React.ReactNode }) 
       if (plaintext !== VERIFICATION_CANARY) {
         throw new Error('Verification canary mismatch');
       }
-      await unlockWithKey(mapsetId, key);
+      await unlockWithKey(mapsetId, key, passphrase);
     },
     [unlockWithKey],
+  );
+
+  const getPassphrase = useCallback(
+    (mapsetId: string): string | null => passphraseCache.current.get(mapsetId) ?? null,
+    [],
   );
 
   const getKey = useCallback(async (mapsetId: string): Promise<CryptoKey | null> => {
@@ -107,6 +119,7 @@ export function EncryptionProvider({ children }: { children: React.ReactNode }) 
 
   const clearAll = useCallback(async (): Promise<void> => {
     keyCache.current.clear();
+    passphraseCache.current.clear();
     await idbClear();
     for (let i = sessionStorage.length - 1; i >= 0; i--) {
       const k = sessionStorage.key(i);
@@ -118,8 +131,8 @@ export function EncryptionProvider({ children }: { children: React.ReactNode }) 
   const isUnlocked = useCallback((mapsetId: string) => unlockedIds.has(mapsetId), [unlockedIds]);
 
   const value = useMemo<EncryptionContextValue>(
-    () => ({ unlockMapset, unlockWithKey, getKey, lockMapset, clearAll, isUnlocked }),
-    [unlockMapset, unlockWithKey, getKey, lockMapset, clearAll, isUnlocked],
+    () => ({ unlockMapset, unlockWithKey, getKey, getPassphrase, lockMapset, clearAll, isUnlocked }),
+    [unlockMapset, unlockWithKey, getKey, getPassphrase, lockMapset, clearAll, isUnlocked],
   );
 
   return <EncryptionContext.Provider value={value}>{children}</EncryptionContext.Provider>;

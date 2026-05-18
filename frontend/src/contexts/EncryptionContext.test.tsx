@@ -155,6 +155,42 @@ describe('EncryptionContext', () => {
     expect(await result.current.getKey(MAPSET_ID)).toBeNull();
   });
 
+  it('caches the passphrase during unlockMapset and clears it on lock/clearAll', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    expect(result.current.getPassphrase(MAPSET_ID)).toBeNull();
+
+    await act(async () => {
+      await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification);
+    });
+    expect(result.current.getPassphrase(MAPSET_ID)).toBe(PASSPHRASE);
+
+    await act(async () => { await result.current.lockMapset(MAPSET_ID); });
+    expect(result.current.getPassphrase(MAPSET_ID)).toBeNull();
+
+    await act(async () => {
+      await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification);
+    });
+    expect(result.current.getPassphrase(MAPSET_ID)).toBe(PASSPHRASE);
+
+    await act(async () => { await result.current.clearAll(); });
+    expect(result.current.getPassphrase(MAPSET_ID)).toBeNull();
+  });
+
+  it('unlockWithKey only caches a passphrase when explicitly supplied', async () => {
+    const salt = generateSalt();
+    const key = await deriveKey(PASSPHRASE, salt);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    await act(async () => { await result.current.unlockWithKey(MAPSET_ID, key); });
+    expect(result.current.getPassphrase(MAPSET_ID)).toBeNull();
+
+    await act(async () => { await result.current.unlockWithKey(MAPSET_ID, key, 'pass-via-key'); });
+    expect(result.current.getPassphrase(MAPSET_ID)).toBe('pass-via-key');
+  });
+
   it('unlockWithKey stores the provided key directly without running PBKDF2', async () => {
     const salt = generateSalt();
     const key = await deriveKey(PASSPHRASE, salt);

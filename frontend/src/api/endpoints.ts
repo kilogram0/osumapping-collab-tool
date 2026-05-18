@@ -141,13 +141,21 @@ export async function deletePost(difficultyId: string, postId: string): Promise<
   await client.delete(`/difficulties/${difficultyId}/posts/${postId}`);
 }
 
+export type MapsetRole = 'owner' | 'mapper' | 'modder';
+
 export interface MapsetMember {
   id: string;
   mapset_id: string;
   user_id: string;
-  role: 'owner' | 'mapper' | 'modder';
+  role: MapsetRole;
   created_at: string;
   updated_at: string;
+}
+
+export interface MemberWithUser extends MapsetMember {
+  username: string;
+  avatar_url: string;
+  osu_id: number;
 }
 
 export async function fetchMyMembership(mapsetId: string): Promise<MapsetMember | null> {
@@ -160,6 +168,29 @@ export async function fetchMyMembership(mapsetId: string): Promise<MapsetMember 
     }
     throw error;
   }
+}
+
+export async function fetchMembers(mapsetId: string): Promise<MemberWithUser[]> {
+  const { data } = await client.get<MemberWithUser[]>(`/mapsets/${mapsetId}/members`);
+  return data;
+}
+
+export async function inviteMember(mapsetId: string, username: string): Promise<MemberWithUser> {
+  const { data } = await client.post<MemberWithUser>(`/mapsets/${mapsetId}/members`, { username });
+  return data;
+}
+
+export async function updateMemberRole(
+  mapsetId: string,
+  userId: string,
+  role: MapsetRole,
+): Promise<MemberWithUser> {
+  const { data } = await client.put<MemberWithUser>(`/mapsets/${mapsetId}/members/${userId}`, { role });
+  return data;
+}
+
+export async function removeMember(mapsetId: string, userId: string): Promise<void> {
+  await client.delete(`/mapsets/${mapsetId}/members/${userId}`);
 }
 
 export interface Difficulty {

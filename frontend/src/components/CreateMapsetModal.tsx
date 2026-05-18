@@ -94,7 +94,8 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
       });
 
       // Re-use the already-derived key — avoids a second 600k-iteration PBKDF2 run.
-      await unlockWithKey(id, key);
+      // Cache the passphrase in memory so the owner can re-view it from the Manage Members modal.
+      await unlockWithKey(id, key, passphrase);
       onSuccess();
     } catch {
       setError('Failed to create mapset. Please try again.');

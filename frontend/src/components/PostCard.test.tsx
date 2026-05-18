@@ -83,10 +83,16 @@ describe('PostCard', () => {
     expect(screen.getByText(/User author-/i)).toBeInTheDocument();
   });
 
-  it('shows "You" when current user is the author', async () => {
+  it('marks the current user as "(you)"', async () => {
     renderCard({ post: { ...BASE_POST, author_id: 'current-user-uuid' } });
     await act(async () => {});
-    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByText(/\(you\)/i)).toBeInTheDocument();
+  });
+
+  it('uses author profile when supplied', async () => {
+    renderCard({ author: { username: 'mapper42', avatar_url: 'https://example.com/a.png' } });
+    await act(async () => {});
+    expect(screen.getByText('mapper42')).toBeInTheDocument();
   });
 
   it('decrypts and displays body with linkified timestamps', async () => {

@@ -12,6 +12,9 @@ interface PostCardProps {
   isOwner: boolean;
   /** When provided, decryption is skipped and this plaintext is used directly. */
   decryptedBody?: string | null;
+  /** Author profile (username + avatar) resolved from the mapset members list.
+   *  When omitted, falls back to a generic placeholder. */
+  author?: { username: string; avatar_url: string } | null;
   /** If false, the Reply button is hidden even when onReply is provided. */
   showReplyButton?: boolean;
   onReply?: (post: Post) => void;
@@ -43,6 +46,7 @@ export default function PostCard({
   currentUserId,
   isOwner,
   decryptedBody: propDecryptedBody,
+  author,
   showReplyButton = true,
   onReply,
   onEdit,
@@ -142,7 +146,8 @@ export default function PostCard({
     return <p className="text-gray-200 whitespace-pre-wrap">{parts}</p>;
   }
 
-  const authorLabel = isAuthor ? 'You' : `User ${post.author_id.slice(0, 8)}`;
+  const resolvedName = author?.username ?? `User ${post.author_id.slice(0, 8)}`;
+  const authorLabel = isAuthor ? `${resolvedName} (you)` : resolvedName;
 
   const isEdited = post.created_at !== post.updated_at;
 
@@ -150,9 +155,17 @@ export default function PostCard({
     <div data-testid="post-card" className="bg-gray-800 border border-gray-700 rounded-lg p-4">
       <div className="flex items-start gap-3">
         <div className="shrink-0">
-          <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-xs font-bold text-gray-300">
-            {authorLabel[0]}
-          </div>
+          {author?.avatar_url ? (
+            <img
+              src={author.avatar_url}
+              alt=""
+              className="w-8 h-8 rounded-full bg-gray-600 object-cover"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-xs font-bold text-gray-300">
+              {resolvedName[0]}
+            </div>
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">

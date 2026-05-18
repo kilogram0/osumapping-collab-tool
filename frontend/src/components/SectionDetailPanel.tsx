@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { Post } from '../api/endpoints';
+import type { Post, MemberWithUser } from '../api/endpoints';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
 import PostCard from './PostCard';
@@ -24,6 +24,8 @@ interface SectionDetailPanelProps {
   isOwner: boolean;
   role?: 'owner' | 'mapper' | 'modder' | null;
   canEditStructure: boolean;
+  /** Lookup from user_id → member profile for resolving post author display. */
+  membersById?: Map<string, MemberWithUser>;
   onCreatePost: (payload: {
     id: string;
     tag: Post['tag'];
@@ -65,6 +67,7 @@ export default function SectionDetailPanel({
   isOwner,
   role,
   canEditStructure,
+  membersById,
   onCreatePost,
   onUpdatePost,
   onDeletePost,
@@ -164,6 +167,7 @@ export default function SectionDetailPanel({
           currentUserId={currentUserId}
           isOwner={isOwner}
           decryptedBody={post.decryptedBody}
+          author={membersById?.get(post.author_id) ?? null}
           showReplyButton={depth === 0}
           onReply={(p) => {
             setEditingPost(null);
