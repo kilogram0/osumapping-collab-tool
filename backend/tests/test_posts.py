@@ -260,6 +260,41 @@ async def test_create_post_rejects_self_parent(
 
 
 @pytest.mark.asyncio
+async def test_create_post_rejects_reply_to_reply(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+
+    # Create top-level post
+    top_payload = _post_payload()
+    top_resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/posts",
+        json=top_payload,
+        headers=CSRF_HEADERS,
+    )
+    assert top_resp.status_code == 201
+
+    # Create reply to top-level post
+    reply_payload = _post_payload(parent_id=UUID(top_payload["id"]))
+    reply_resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/posts",
+        json=reply_payload,
+        headers=CSRF_HEADERS,
+    )
+    assert reply_resp.status_code == 201
+
+    # Attempt reply-to-reply (should fail)
+    nested_payload = _post_payload(parent_id=UUID(reply_payload["id"]))
+    nested_resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/posts",
+        json=nested_payload,
+        headers=CSRF_HEADERS,
+    )
+    assert nested_resp.status_code == 400
+    assert "Cannot reply to a reply" in nested_resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_create_post_rejects_invalid_tag(
     client: AsyncClient, authed_user_with_difficulty
 ):

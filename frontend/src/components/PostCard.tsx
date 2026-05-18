@@ -12,6 +12,8 @@ interface PostCardProps {
   isOwner: boolean;
   /** When provided, decryption is skipped and this plaintext is used directly. */
   decryptedBody?: string | null;
+  /** If false, the Reply button is hidden even when onReply is provided. */
+  showReplyButton?: boolean;
   onReply?: (post: Post) => void;
   onEdit?: (post: Post) => void;
   onDelete?: (postId: string) => void;
@@ -41,6 +43,7 @@ export default function PostCard({
   currentUserId,
   isOwner,
   decryptedBody: propDecryptedBody,
+  showReplyButton = true,
   onReply,
   onEdit,
   onDelete,
@@ -185,7 +188,7 @@ export default function PostCard({
 
           {!isCollapsed && (
             <div className="mt-3 flex items-center gap-3">
-              {onReply && (
+              {showReplyButton && onReply && (
                 <button
                   type="button"
                   onClick={() => onReply(post)}

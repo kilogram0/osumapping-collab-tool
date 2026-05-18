@@ -81,12 +81,19 @@ async def create_post(
         raise _forbidden()
 
     # Verify parent exists and belongs to the same difficulty.
+    # Also enforce single-level threading: a reply may not be parented to
+    # another reply (parent.parent_id must be null).
     if payload.parent_id is not None:
         parent = await db.get(Post, payload.parent_id)
         if parent is None or parent.difficulty_id != difficulty_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Parent post not found",
+            )
+        if parent.parent_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot reply to a reply — only top-level posts may have replies",
             )
 
     post = Post(

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Post, PostTag } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, postFieldAad } from '../utils/crypto';
+import { logger } from '../utils/logger';
 
 const TAG_OPTIONS: { value: PostTag; label: string }[] = [
   { value: 'general', label: 'General' },

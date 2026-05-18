@@ -124,6 +124,16 @@ const MOCK_POSTS = [
     created_at: '2024-01-01T13:00:00Z',
     updated_at: '2024-01-01T13:00:00Z',
   },
+  {
+    id: 'p3',
+    difficulty_id: 'd1',
+    author_id: 'other-user-uuid',
+    parent_id: 'p2',
+    tag: 'general',
+    encrypted_body: 'enc:Thanks for the feedback',
+    created_at: '2024-01-01T14:00:00Z',
+    updated_at: '2024-01-01T14:00:00Z',
+  },
 ];
 
 const MOCK_DIFFICULTY_DETAIL = {
@@ -464,5 +474,49 @@ describe('MapsetPage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText(/Edit post/i)).toBeInTheDocument();
     });
+  });
+
+  it('hides Reply button on reply posts', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Thanks for the feedback/i)).toBeInTheDocument();
+    });
+    const postCards = screen.getAllByTestId('post-card');
+    const replyPost = postCards.find((card) => within(card).queryByText(/Thanks for the feedback/i));
+    expect(replyPost).toBeDefined();
+    expect(within(replyPost!).queryByRole('button', { name: /Reply/i })).not.toBeInTheDocument();
+  });
+
+  it('shows Reply button on top-level posts', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+    });
+    const postCards = screen.getAllByTestId('post-card');
+    const topLevelPost = postCards.find((card) => within(card).queryByText(/Nice map overall/i));
+    expect(topLevelPost).toBeDefined();
+    expect(within(topLevelPost!).getByRole('button', { name: /Reply/i })).toBeInTheDocument();
+  });
+
+  it('opens reply form inline below the post being replied to', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    const postCards = screen.getAllByTestId('post-card');
+    const topLevelPost = postCards.find((card) => within(card).queryByText(/Nice map overall/i));
+    expect(topLevelPost).toBeDefined();
+    const replyButton = within(topLevelPost!).getByRole('button', { name: /Reply/i });
+    await user.click(replyButton);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Reply/i)).toBeInTheDocument();
+    });
+
+    // The reply form should appear immediately after the post card in the DOM
+    const replyForm = screen.getByLabelText(/Reply/i).closest('form');
+    expect(replyForm).toBeTruthy();
+    expect(topLevelPost!.compareDocumentPosition(replyForm!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

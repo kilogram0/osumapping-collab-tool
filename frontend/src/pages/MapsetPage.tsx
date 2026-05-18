@@ -22,7 +22,10 @@ import { useMapset, useMyMembership } from '../hooks/useMapset';
 import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad } from '../utils/crypto';
 import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
-import type { Post } from '../api/endpoints';
+import type { Post, Section } from '../api/endpoints';
+
+/** Stable empty array reference to avoid new-array churn in SectionList deps. */
+const EMPTY_SECTIONS: Section[] = [];
 
 export interface DecryptedPost extends Post {
   decryptedBody: string;
@@ -68,6 +71,15 @@ export default function MapsetPage() {
       setSelectedDifficultyId(difficulties[0].id);
     }
   }, [difficulties, selectedDifficultyId]);
+
+  // Clear transient forum states when switching difficulties to prevent stale
+  // reply/edit forms referencing posts from the previous difficulty.
+  useEffect(() => {
+    setReplyingTo(null);
+    setEditingPost(null);
+    setShowCreateForm(false);
+    setEditingPostBody('');
+  }, [selectedDifficultyId]);
 
   useEffect(() => {
     if (!unlocked || !mapset) {
@@ -188,6 +200,8 @@ export default function MapsetPage() {
     const MAX_REPLY_DEPTH = 10;
     if (depth > MAX_REPLY_DEPTH) return null;
     const replies = postTree.replyMap.get(post.id) ?? [];
+    const isReplyingToThis = replyingTo?.id === post.id;
+    const isEditingThis = editingPost?.id === post.id;
     return (
       <div key={post.id} className={depth > 0 ? 'mt-2 ml-8 border-l-2 border-gray-700 pl-4' : ''}>
         <PostCard
@@ -196,6 +210,7 @@ export default function MapsetPage() {
           currentUserId={user?.id ?? ''}
           isOwner={isOwner}
           decryptedBody={post.decryptedBody}
+          showReplyButton={depth === 0}
           onReply={(p) => {
             setEditingPost(null);
             setShowCreateForm(false);
@@ -210,6 +225,35 @@ export default function MapsetPage() {
           }}
           onDelete={handleDeletePost}
         />
+
+        {isReplyingToThis && (
+          <div className={depth === 0 ? 'mt-2 ml-8 border-l-2 border-gray-700 pl-4' : 'mt-2'}>
+            <CreatePostForm
+              mapsetId={mapsetId}
+              difficultyId={selectedDifficultyId ?? ''}
+              onSubmit={handleCreatePost}
+              onCancel={() => setReplyingTo(null)}
+              parentPost={post}
+            />
+          </div>
+        )}
+
+        {isEditingThis && (
+          <div className="mt-2">
+            <CreatePostForm
+              mapsetId={mapsetId}
+              difficultyId={selectedDifficultyId ?? ''}
+              onSubmit={handleUpdatePost}
+              onCancel={() => {
+                setEditingPost(null);
+                setEditingPostBody('');
+              }}
+              editingPost={post}
+              initialBody={editingPostBody}
+            />
+          </div>
+        )}
+
         {replies.map((reply) => renderPostNode(reply, depth + 1))}
       </div>
     );
@@ -267,7 +311,7 @@ export default function MapsetPage() {
     );
   }
 
-  const sections = difficultyDetail?.sections ?? [];
+  const sections = difficultyDetail?.sections ?? EMPTY_SECTIONS;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
@@ -378,34 +422,6 @@ export default function MapsetPage() {
                     difficultyId={selectedDifficultyId}
                     onSubmit={handleCreatePost}
                     onCancel={() => setShowCreateForm(false)}
-                  />
-                </div>
-              )}
-
-              {replyingTo && (
-                <div className="mb-6">
-                  <CreatePostForm
-                    mapsetId={mapsetId}
-                    difficultyId={selectedDifficultyId}
-                    onSubmit={handleCreatePost}
-                    onCancel={() => setReplyingTo(null)}
-                    parentPost={replyingTo}
-                  />
-                </div>
-              )}
-
-              {editingPost && (
-                <div className="mb-6">
-                  <CreatePostForm
-                    mapsetId={mapsetId}
-                    difficultyId={selectedDifficultyId}
-                    onSubmit={handleUpdatePost}
-                    onCancel={() => {
-                      setEditingPost(null);
-                      setEditingPostBody('');
-                    }}
-                    editingPost={editingPost}
-                    initialBody={editingPostBody}
                   />
                 </div>
               )}
