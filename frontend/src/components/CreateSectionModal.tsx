@@ -7,6 +7,7 @@ import { formatTimestamp, parseTimestampString } from '../utils/extractTimestamp
 interface PreviousSection {
   id: string;
   endTimeMs: number;
+  sortOrder: number;
 }
 
 interface CreateSectionModalProps {
@@ -79,7 +80,10 @@ export default function CreateSectionModal({
       }
 
       const id = crypto.randomUUID();
-      const order = 0;
+      const order =
+        previousSections.length === 0
+          ? 0
+          : Math.max(...previousSections.map((s) => s.sortOrder)) + 1;
 
       const [encryptedName, encryptedStart, encryptedEnd, encryptedSort] = await Promise.all([
         encrypt(key, name.trim(), sectionFieldAad(id, mapsetId)),

@@ -115,7 +115,7 @@ describe('CreateSectionModal', () => {
   it('shows error for end time before computed start time', async () => {
     renderModal({
       previousSections: [
-        { id: 's-prev', endTimeMs: 125000 },
+        { id: 's-prev', endTimeMs: 125000, sortOrder: 0 },
       ],
     });
     const user = userEvent.setup();
@@ -133,7 +133,7 @@ describe('CreateSectionModal', () => {
   it('computes start time from previous sections', () => {
     renderModal({
       previousSections: [
-        { id: 's-prev', endTimeMs: 125000 },
+        { id: 's-prev', endTimeMs: 125000, sortOrder: 0 },
       ],
     });
 
@@ -144,6 +144,31 @@ describe('CreateSectionModal', () => {
   it('defaults start time to 0 when no previous sections exist', () => {
     renderModal({ previousSections: [] });
     expect(screen.getByText(/00:00:000/)).toBeInTheDocument();
+  });
+
+  it('assigns sort_order as max(previousSections.sortOrder) + 1', async () => {
+    renderModal({
+      previousSections: [
+        { id: 's-a', endTimeMs: 30000, sortOrder: 0 },
+        { id: 's-b', endTimeMs: 60000, sortOrder: 3 },
+        { id: 's-c', endTimeMs: 125000, sortOrder: 1 },
+      ],
+    });
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/Name/i), 'Next');
+    await user.type(screen.getByLabelText(/End Time/i), '03:00:000');
+    await user.click(screen.getByRole('button', { name: /Add Section/i }));
+
+    await waitFor(() => {
+      expect(mockCreateSection).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = mockCreateSection.mock.calls[0][0];
+    // Encrypted via the mocked encrypt() => `enc:${plaintext}`; the plaintext
+    // is the JSON envelope {"v":0,"ms":<order>}.  Max existing sortOrder is 3,
+    // so the new section must be 4 — regression guard against the order=0 bug.
+    expect(payload.encrypted_sort_order).toBe('enc:{"v":0,"ms":4}');
   });
 
   it('shows error when encryption key is missing', async () => {
