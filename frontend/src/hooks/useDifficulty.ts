@@ -6,6 +6,7 @@ import {
   createPost,
   createSection,
   deletePost,
+  deleteSection,
   fetchBaseOsuVersions,
   fetchDifficulties,
   fetchDifficultyDetail,
@@ -55,6 +56,17 @@ export function useUpdateSection(difficultyId: string) {
       sectionId: string;
       payload: Parameters<typeof updateSection>[2];
     }) => updateSection(difficultyId, sectionId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+    },
+  });
+}
+
+export function useDeleteSection(difficultyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sectionId: string) => deleteSection(difficultyId, sectionId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });

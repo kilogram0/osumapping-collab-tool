@@ -223,6 +223,9 @@ vi.mock('../hooks/useDifficulty', () => ({
   useDeletePost: () => ({
     mutateAsync: mockDeletePost,
   }),
+  useDeleteSection: () => ({
+    mutateAsync: vi.fn(),
+  }),
 }));
 
 function renderPage() {

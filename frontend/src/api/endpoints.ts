@@ -267,6 +267,10 @@ export async function updateSection(
   return data;
 }
 
+export async function deleteSection(difficultyId: string, sectionId: string): Promise<void> {
+  await client.delete(`/difficulties/${difficultyId}/sections/${sectionId}`);
+}
+
 export interface SectionOsuVersion {
   id: string;
   section_id: string;

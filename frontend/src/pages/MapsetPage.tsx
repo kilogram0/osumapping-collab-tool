@@ -17,6 +17,7 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import {
   useCreatePost,
   useDeletePost,
+  useDeleteSection,
   useDifficultyDetail,
   useDifficulties,
   useUpdatePost,
@@ -56,6 +57,7 @@ export default function MapsetPage() {
   const createPostMutation = useCreatePost(selectedDifficultyId ?? '');
   const updatePostMutation = useUpdatePost(selectedDifficultyId ?? '');
   const deletePostMutation = useDeletePost(selectedDifficultyId ?? '');
+  const deleteSectionMutation = useDeleteSection(selectedDifficultyId ?? '');
 
   const [showCreateDifficulty, setShowCreateDifficulty] = useState(false);
   const [showCreateSection, setShowCreateSection] = useState(false);
@@ -391,6 +393,11 @@ export default function MapsetPage() {
     await deletePostMutation.mutateAsync(postId);
   }
 
+  async function handleDeleteSection(section: DecryptedSection) {
+    await deleteSectionMutation.mutateAsync(section.id);
+    setSelectedSectionId((current) => (current === section.id ? null : current));
+  }
+
   async function handleDownloadBase() {
     if (!unlocked || !selectedDifficultyId) return;
     try {
@@ -624,6 +631,7 @@ export default function MapsetPage() {
                   setEditingSection(s);
                   setShowEditSection(true);
                 }}
+                onDeleteSection={handleDeleteSection}
               />
             )}
 

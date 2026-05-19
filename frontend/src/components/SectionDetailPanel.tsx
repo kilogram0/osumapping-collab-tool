@@ -40,6 +40,7 @@ interface SectionDetailPanelProps {
   }) => void | Promise<void>;
   onDeletePost: (postId: string) => void | Promise<void>;
   onEditSection?: (section: DecryptedSection) => void;
+  onDeleteSection?: (section: DecryptedSection) => void | Promise<void>;
 }
 
 function formatTime(ms: number): string {
@@ -72,6 +73,7 @@ export default function SectionDetailPanel({
   onUpdatePost,
   onDeletePost,
   onEditSection,
+  onDeleteSection,
 }: SectionDetailPanelProps) {
   const { isUnlocked, getKey } = useEncryption();
   const unlocked = isUnlocked(mapsetId);
@@ -245,6 +247,20 @@ export default function SectionDetailPanel({
                 </button>
               )}
             </>
+          )}
+          {isOwner && onDeleteSection && (
+            <button
+              type="button"
+              onClick={() => {
+                const ok = window.confirm(
+                  `Delete section "${section.name}"? This permanently removes the section and all of its posts and uploaded .osu versions. This cannot be undone.`,
+                );
+                if (ok) void onDeleteSection(section);
+              }}
+              className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded transition-colors"
+            >
+              Delete
+            </button>
           )}
           <button
             type="button"

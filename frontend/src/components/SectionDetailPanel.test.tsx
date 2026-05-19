@@ -222,6 +222,58 @@ describe('SectionDetailPanel', () => {
     expect(payload.encrypted_body).toBe('enc:01:00:000 - great rhythm');
   });
 
+  describe('Delete section button', () => {
+    it('is visible to the mapset owner', () => {
+      renderPanel({ isOwner: true, onDeleteSection: vi.fn() });
+      const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start');
+      expect(header!.textContent).toMatch(/Delete/);
+    });
+
+    it('is hidden for mappers (canEditStructure without isOwner)', () => {
+      renderPanel({
+        isOwner: false,
+        canEditStructure: true,
+        role: 'mapper',
+        onEditSection: vi.fn(),
+        onDeleteSection: vi.fn(),
+      });
+      const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start');
+      // Edit is visible to mappers; Delete is not.
+      expect(header!.textContent).toMatch(/Edit/);
+      expect(header!.textContent).not.toMatch(/Delete/);
+    });
+
+    it('does nothing when the user cancels the confirm dialog', async () => {
+      const onDeleteSection = vi.fn();
+      window.confirm = vi.fn(() => false);
+      renderPanel({ isOwner: true, onDeleteSection });
+      const user = userEvent.setup();
+      const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start')!;
+      const deleteButton = Array.from(header.querySelectorAll('button')).find(
+        (b) => b.textContent === 'Delete',
+      )!;
+      await user.click(deleteButton);
+      expect(window.confirm).toHaveBeenCalledTimes(1);
+      expect(onDeleteSection).not.toHaveBeenCalled();
+    });
+
+    it('calls onDeleteSection with the section when confirmed', async () => {
+      const onDeleteSection = vi.fn();
+      window.confirm = vi.fn(() => true);
+      renderPanel({ isOwner: true, onDeleteSection });
+      const user = userEvent.setup();
+      const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start')!;
+      const deleteButton = Array.from(header.querySelectorAll('button')).find(
+        (b) => b.textContent === 'Delete',
+      )!;
+      await user.click(deleteButton);
+      await waitFor(() => {
+        expect(onDeleteSection).toHaveBeenCalledTimes(1);
+      });
+      expect(onDeleteSection).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
+    });
+  });
+
   it('calls onDeletePost when Delete is clicked', async () => {
     const onDeletePost = vi.fn();
     window.confirm = vi.fn(() => true);
