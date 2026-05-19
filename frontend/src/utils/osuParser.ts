@@ -220,6 +220,66 @@ export function stringifySections(sections: OsuSection[]): string {
 }
 
 /**
+ * Parse bookmarks from the [Editor] section of a .osu file.
+ * Returns an array of timestamps in milliseconds, sorted ascending.
+ */
+export function parseBookmarks(parsed: ParsedOsuFile): number[] {
+  const editorSection = parsed.sections.find((s) => s.name === 'Editor');
+  if (!editorSection) return [];
+
+  for (const line of editorSection.lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('Bookmarks:')) continue;
+    const value = trimmed.slice('Bookmarks:'.length).trim();
+    if (!value) return [];
+    return value
+      .split(',')
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n >= 0)
+      .sort((a, b) => a - b);
+  }
+  return [];
+}
+
+export interface SectionBoundary {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * Convert a list of bookmark timestamps into section boundaries.
+ *
+ * Each bookmark is treated as a section boundary. Sections are created
+ * between consecutive bookmarks, plus an optional intro (0 → first bookmark)
+ * and an optional outro (last bookmark → songLengthMs).
+ */
+export function bookmarksToSectionBoundaries(
+  bookmarks: number[],
+  songLengthMs?: number | null,
+): SectionBoundary[] {
+  if (bookmarks.length === 0) return [];
+
+  const sorted = [...bookmarks].sort((a, b) => a - b);
+  const boundaries: SectionBoundary[] = [];
+
+  if (sorted[0] > 0) {
+    boundaries.push({ startMs: 0, endMs: sorted[0] });
+  }
+
+  for (let i = 0; i < sorted.length - 1; i++) {
+    if (sorted[i + 1] > sorted[i]) {
+      boundaries.push({ startMs: sorted[i], endMs: sorted[i + 1] });
+    }
+  }
+
+  if (songLengthMs != null && songLengthMs > sorted[sorted.length - 1]) {
+    boundaries.push({ startMs: sorted[sorted.length - 1], endMs: songLengthMs });
+  }
+
+  return boundaries;
+}
+
+/**
  * Build a candidate base from a parsed .osu file:
  * 1. Keep everything before [HitObjects] intact.
  * 2. In [TimingPoints]: keep only positive (uninherited / BPM) lines.

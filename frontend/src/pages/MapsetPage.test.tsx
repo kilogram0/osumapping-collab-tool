@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import MapsetPage from './MapsetPage';
+import { ToastProvider } from '../contexts/ToastContext';
 
 const mockIsUnlocked = vi.fn(() => true);
 const mockGetKey = vi.fn(async () => ({ key: 'mock-key' } as unknown as CryptoKey));
@@ -232,11 +233,13 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/mapsets/ms1']}>
-        <Routes>
-          <Route path="/mapsets/:id" element={<MapsetPage />} />
-        </Routes>
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={['/mapsets/ms1']}>
+          <Routes>
+            <Route path="/mapsets/:id" element={<MapsetPage />} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

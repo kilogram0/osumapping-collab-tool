@@ -6,6 +6,7 @@ import CreatePostForm from '../components/CreatePostForm';
 import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyTabs from '../components/DifficultyTabs';
 import EditSectionModal from '../components/EditSectionModal';
+import ImportBookmarksButton from '../components/ImportBookmarksButton';
 import ManageMembersModal from '../components/ManageMembersModal';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
@@ -14,6 +15,7 @@ import SectionDetailPanel from '../components/SectionDetailPanel';
 import Timeline from '../components/Timeline';
 import { useAuth } from '../hooks/useAuth';
 import { useEncryption } from '../contexts/EncryptionContext';
+import { useToast } from '../contexts/ToastContext';
 import {
   useCreatePost,
   useDeletePost,
@@ -51,6 +53,7 @@ export default function MapsetPage() {
   const { data: difficultyDetail, isLoading: detailLoading } = useDifficultyDetail(selectedDifficultyId);
   const { isUnlocked, getKey } = useEncryption();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const unlocked = isUnlocked(mapsetId);
 
@@ -372,9 +375,16 @@ export default function MapsetPage() {
     encrypted_body: string;
     parent_id?: string | null;
   }) {
-    await createPostMutation.mutateAsync(payload);
-    setReplyingTo(null);
-    setShowCreateForm(false);
+    try {
+      await createPostMutation.mutateAsync(payload);
+      setReplyingTo(null);
+      setShowCreateForm(false);
+      showToast('Post created.', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to create post.', 'error');
+      // Re-throw so CreatePostForm can keep its draft state on failure.
+      throw err;
+    }
   }
 
   async function handleUpdatePost(payload: {
@@ -383,19 +393,36 @@ export default function MapsetPage() {
     encrypted_body: string;
     parent_id?: string | null;
   }) {
-    await updatePostMutation.mutateAsync({ postId: payload.id, payload: { encrypted_body: payload.encrypted_body } });
-    setEditingPost(null);
-    setEditingPostBody('');
+    try {
+      await updatePostMutation.mutateAsync({ postId: payload.id, payload: { encrypted_body: payload.encrypted_body } });
+      setEditingPost(null);
+      setEditingPostBody('');
+      showToast('Post updated.', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to update post.', 'error');
+      // Re-throw so CreatePostForm can keep its draft state on failure.
+      throw err;
+    }
   }
 
   async function handleDeletePost(postId: string) {
     if (!confirm('Are you sure you want to delete this post?')) return;
-    await deletePostMutation.mutateAsync(postId);
+    try {
+      await deletePostMutation.mutateAsync(postId);
+      showToast('Post deleted.', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to delete post.', 'error');
+    }
   }
 
   async function handleDeleteSection(section: DecryptedSection) {
-    await deleteSectionMutation.mutateAsync(section.id);
-    setSelectedSectionId((current) => (current === section.id ? null : current));
+    try {
+      await deleteSectionMutation.mutateAsync(section.id);
+      setSelectedSectionId((current) => (current === section.id ? null : current));
+      showToast('Section deleted.', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to delete section.', 'error');
+    }
   }
 
   async function handleDownloadBase() {
@@ -572,6 +599,16 @@ export default function MapsetPage() {
                   >
                     Add Section
                   </button>
+                )}
+                {canEditStructure && selectedDifficultyId && (
+                  <ImportBookmarksButton
+                    difficultyId={selectedDifficultyId}
+                    mapsetId={mapsetId}
+                    existingSections={decryptedSections}
+                    songLengthMs={songLengthMs}
+                    onSuccess={(count) => showToast(`Imported ${count} section${count === 1 ? '' : 's'} from bookmarks.`, 'success')}
+                    onError={(msg) => showToast(msg, 'error')}
+                  />
                 )}
               </div>
               <div className="flex items-center gap-2">

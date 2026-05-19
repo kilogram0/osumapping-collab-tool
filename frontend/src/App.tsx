@@ -2,6 +2,8 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
 import MapsetPage from './pages/MapsetPage'
+import { ToastProvider } from './contexts/ToastContext'
+import ToastContainer from './components/ToastContainer'
 
 export function AppRoutes() {
   return (
@@ -24,7 +26,10 @@ function App() {
         v7_relativeSplatPath: true,
       }}
     >
-      <AppRoutes />
+      <ToastProvider>
+        <AppRoutes />
+        <ToastContainer />
+      </ToastProvider>
     </BrowserRouter>
   )
 }

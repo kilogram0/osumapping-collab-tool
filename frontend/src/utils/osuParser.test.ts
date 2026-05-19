@@ -9,6 +9,8 @@ import {
   isNegativeTimingPoint,
   stringifySections,
   buildCandidateBase,
+  parseBookmarks,
+  bookmarksToSectionBoundaries,
 } from './osuParser';
 
 // ------------------------------------------------------------------
@@ -428,5 +430,105 @@ describe('buildCandidateBase', () => {
     expect(base).toContain('[Metadata]');
     expect(base).toContain('[Difficulty]');
     expect(base).toContain('osu file format v14');
+  });
+});
+
+// ------------------------------------------------------------------
+// parseBookmarks
+// ------------------------------------------------------------------
+
+describe('parseBookmarks', () => {
+  it('returns bookmarks from [Editor] section', () => {
+    const parsed = parseOsuFile(VALID_OSU);
+    expect(parseBookmarks(parsed)).toEqual([1000, 2000, 3000]);
+  });
+
+  it('returns empty array when Editor section is missing', () => {
+    const noEditor = VALID_OSU.replace(/\[Editor\][\s\S]*?\n\n/m, '');
+    const parsed = parseOsuFile(noEditor);
+    expect(parseBookmarks(parsed)).toEqual([]);
+  });
+
+  it('returns empty array when Bookmarks line is missing', () => {
+    const noBookmarks = VALID_OSU.replace(/^Bookmarks:.*$/m, '');
+    const parsed = parseOsuFile(noBookmarks);
+    expect(parseBookmarks(parsed)).toEqual([]);
+  });
+
+  it('returns empty array for empty Bookmarks value', () => {
+    const emptyBookmarks = VALID_OSU.replace(/^Bookmarks:.*$/m, 'Bookmarks:');
+    const parsed = parseOsuFile(emptyBookmarks);
+    expect(parseBookmarks(parsed)).toEqual([]);
+  });
+
+  it('sorts bookmarks ascending', () => {
+    const osu = VALID_OSU.replace(/^Bookmarks:.*$/m, 'Bookmarks: 3000,1000,2000');
+    const parsed = parseOsuFile(osu);
+    expect(parseBookmarks(parsed)).toEqual([1000, 2000, 3000]);
+  });
+
+  it('filters out negative values', () => {
+    const osu = VALID_OSU.replace(/^Bookmarks:.*$/m, 'Bookmarks: -100,500,1000');
+    const parsed = parseOsuFile(osu);
+    expect(parseBookmarks(parsed)).toEqual([500, 1000]);
+  });
+});
+
+// ------------------------------------------------------------------
+// bookmarksToSectionBoundaries
+// ------------------------------------------------------------------
+
+describe('bookmarksToSectionBoundaries', () => {
+  it('returns empty array for empty bookmarks', () => {
+    expect(bookmarksToSectionBoundaries([])).toEqual([]);
+  });
+
+  it('creates intro + inter sections when bookmarks start after 0', () => {
+    const result = bookmarksToSectionBoundaries([5000, 30000]);
+    expect(result).toEqual([
+      { startMs: 0, endMs: 5000 },
+      { startMs: 5000, endMs: 30000 },
+    ]);
+  });
+
+  it('skips intro when first bookmark is at 0', () => {
+    const result = bookmarksToSectionBoundaries([0, 10000, 20000]);
+    expect(result).toEqual([
+      { startMs: 0, endMs: 10000 },
+      { startMs: 10000, endMs: 20000 },
+    ]);
+  });
+
+  it('adds outro section when songLengthMs is provided', () => {
+    const result = bookmarksToSectionBoundaries([5000, 30000], 60000);
+    expect(result).toEqual([
+      { startMs: 0, endMs: 5000 },
+      { startMs: 5000, endMs: 30000 },
+      { startMs: 30000, endMs: 60000 },
+    ]);
+  });
+
+  it('does not add outro when last bookmark equals songLengthMs', () => {
+    const result = bookmarksToSectionBoundaries([5000, 60000], 60000);
+    expect(result).toEqual([
+      { startMs: 0, endMs: 5000 },
+      { startMs: 5000, endMs: 60000 },
+    ]);
+  });
+
+  it('ignores duplicate bookmarks', () => {
+    const result = bookmarksToSectionBoundaries([5000, 5000, 30000]);
+    expect(result).toEqual([
+      { startMs: 0, endMs: 5000 },
+      { startMs: 5000, endMs: 30000 },
+    ]);
+  });
+
+  it('handles a single bookmark with songLengthMs', () => {
+    const result = bookmarksToSectionBoundaries([30000], 60000);
+    expect(result).toEqual([
+      { startMs: 0, endMs: 30000 },
+      { startMs: 30000, endMs: 60000 },
+    ]);
   });
 });
