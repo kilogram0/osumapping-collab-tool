@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { encrypt, sectionFieldAad } from '../utils/crypto';
-import { parseOsuFile, parseBookmarks, bookmarksToSectionBoundaries } from '../utils/osuParser';
-import { useCreateSection } from '../hooks/useDifficulty';
+import { parseOsuFile, MAX_OSU_BYTES } from '../utils/osuParser';
+import { importSectionsFromBookmarks } from '../utils/importSectionsFromBookmarks';
+import { fetchBaseOsuVersions } from '../api/endpoints';
 import type { DecryptedSection } from './SectionList';
 
 interface ImportBookmarksButtonProps {
@@ -10,7 +11,7 @@ interface ImportBookmarksButtonProps {
   mapsetId: string;
   existingSections: DecryptedSection[];
   songLengthMs: number | null;
-  onSuccess: (count: number) => void;
+  onSuccess: (count: number, prepopulated: boolean) => void;
   onError: (message: string) => void;
 }
 
@@ -25,29 +26,22 @@ export default function ImportBookmarksButton({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const { getKey } = useEncryption();
-  const createSection = useCreateSection(difficultyId);
+  const queryClient = useQueryClient();
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
 
+    if (file.size > MAX_OSU_BYTES) {
+      onError(`File too large (${file.size} bytes; max ${MAX_OSU_BYTES}).`);
+      return;
+    }
+
     setImporting(true);
     try {
       const text = await file.text();
       const parsed = parseOsuFile(text);
-      const bookmarks = parseBookmarks(parsed);
-
-      if (bookmarks.length === 0) {
-        onError('No bookmarks found in the [Editor] section of this .osu file.');
-        return;
-      }
-
-      const boundaries = bookmarksToSectionBoundaries(bookmarks, songLengthMs);
-      if (boundaries.length === 0) {
-        onError('Could not derive any sections from the bookmarks.');
-        return;
-      }
 
       const key = await getKey(mapsetId);
       if (!key) {
@@ -55,49 +49,43 @@ export default function ImportBookmarksButton({
         return;
       }
 
-      const baseOrder = existingSections.length === 0
+      // Pre-populate only when **no** base history exists. Checking just the
+      // active base would let a user re-activate an older base after import
+      // and find sections that disagree with it. We list the full history.
+      const baseHistory = await fetchBaseOsuVersions(difficultyId);
+      const canPrepopulate = baseHistory.length === 0;
+
+      const startingSortOrder = existingSections.length === 0
         ? 0
         : Math.max(...existingSections.map((s) => s.sortOrder)) + 1;
 
-      let succeeded = 0;
-      for (let i = 0; i < boundaries.length; i++) {
-        const { startMs, endMs } = boundaries[i];
-        const id = crypto.randomUUID();
-        const order = baseOrder + i;
-        // Name uses the bookmark index, not order. Sort_order can later
-        // diverge via reordering, but the imported name should remain stable.
-        const name = `Imported section ${i + 1}`;
+      const result = await importSectionsFromBookmarks({
+        parsed,
+        key,
+        mapsetId,
+        difficultyId,
+        songLengthMs,
+        prepopulate: canPrepopulate,
+        startingSortOrder,
+      });
 
-        try {
-          const [encName, encStart, encEnd, encSort] = await Promise.all([
-            encrypt(key, name, sectionFieldAad(id, mapsetId)),
-            encrypt(key, JSON.stringify({ v: 0, ms: startMs }), sectionFieldAad(id, mapsetId)),
-            encrypt(key, JSON.stringify({ v: 0, ms: endMs }), sectionFieldAad(id, mapsetId)),
-            encrypt(key, JSON.stringify({ v: 0, ms: order }), sectionFieldAad(id, mapsetId)),
-          ]);
+      // Refresh the cached section list / difficulty detail so the new
+      // sections appear without a manual reload. Done by the caller because
+      // the helper doesn't know about react-query.
+      queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
 
-          await createSection.mutateAsync({
-            id,
-            encrypted_name: encName,
-            encrypted_start_time_ms: encStart,
-            encrypted_end_time_ms: encEnd,
-            encrypted_sort_order: encSort,
-          });
-          succeeded++;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Failed to create section';
-          onError(
-            succeeded > 0
-              ? `Imported ${succeeded} of ${boundaries.length} sections before failing: ${message}`
-              : `Failed to import sections: ${message}`,
-          );
-          return;
-        }
+      if (result.error) {
+        onError(
+          result.created > 0
+            ? `Imported ${result.created} of ${result.total} sections before failing: ${result.error}`
+            : result.error,
+        );
+        return;
       }
 
-      onSuccess(succeeded);
+      onSuccess(result.created, canPrepopulate);
     } catch (err) {
-      // Reached only when parsing/key-resolution fails before the loop runs.
       onError(err instanceof Error ? err.message : 'Failed to import bookmarks.');
     } finally {
       setImporting(false);

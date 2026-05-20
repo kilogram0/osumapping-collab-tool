@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import DashboardPage from './DashboardPage';
 import type { Mapset } from '../api/endpoints';
+import { ToastProvider } from '../contexts/ToastContext';
 
 vi.mock('../api/endpoints', () => ({
   fetchMapsets: vi.fn(),
@@ -41,9 +42,11 @@ function renderDashboard() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <DashboardPage />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

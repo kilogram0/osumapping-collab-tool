@@ -8,7 +8,14 @@ import {
 } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, decrypt, sectionOsuVersionAad, difficultyBaseOsuVersionAad } from '../utils/crypto';
-import { parseOsuFile, buildCandidateBase, validateOsuFile } from '../utils/osuParser';
+import {
+  parseOsuFile,
+  buildCandidateBase,
+  validateOsuFile,
+  sanitizeSectionUpload,
+  MAX_OSU_BYTES,
+  type SectionFilterCounts,
+} from '../utils/osuParser';
 import { diffBase, type DiffReport, normalizeCriticalLines } from '../utils/osuBase';
 import { logger } from '../utils/logger';
 
@@ -17,6 +24,11 @@ interface OsuUploadButtonProps {
   sectionId: string;
   mapsetId: string;
   role?: 'owner' | 'mapper' | 'modder' | null;
+  /** Section time range [start, end). When omitted, the upload is not
+   *  sanitized (legacy callers / tests). Both bounds must be present
+   *  together — typing them as one object makes that all-or-nothing
+   *  contract visible. */
+  sectionRange?: { start: number; end: number };
 }
 
 interface UploadState {
@@ -26,9 +38,15 @@ interface UploadState {
   warning: string | null;
 }
 
-type ModalMode = 'owner-critical' | 'mapper-critical' | 'legacy';
+type ModalMode = 'owner-critical' | 'mapper-critical' | 'legacy' | 'sanitize';
 
-export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, role }: OsuUploadButtonProps) {
+export default function OsuUploadButton({
+  difficultyId,
+  sectionId,
+  mapsetId,
+  role,
+  sectionRange,
+}: OsuUploadButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
@@ -50,6 +68,14 @@ export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, rol
     sectionContent: string;
     candidateBase: string;
     activeBase: string | null;
+  } | null>(null);
+  const [sanitizeReport, setSanitizeReport] = useState<SectionFilterCounts | null>(null);
+  const [pendingSanitized, setPendingSanitized] = useState<{
+    /** Original .osu text — used to compute the candidate base (keeps positive
+     *  BPM timing points across the whole song, not just this section). */
+    original: string;
+    /** Sanitized .osu text — used as the section's encrypted_content. */
+    sanitized: string;
   } | null>(null);
 
   useEffect(() => {
@@ -128,31 +154,26 @@ export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, rol
     [difficultyId, sectionId, mapsetId, queryClient],
   );
 
-  const handleFileSelect = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      event.target.value = '';
-
-      if (!unlocked) {
-        setUploadState({ loading: false, error: 'Mapset is locked. Enter the passphrase first.', success: false, warning: null });
-        return;
-      }
-
+  /**
+   * Continue an upload after parsing and (if applicable) sanitizing.
+   *
+   * Two inputs because the candidate base and the section content come from
+   * different sources:
+   *   - candidateBase is derived from `originalText` (the full uploaded file)
+   *     so positive BPM timing points across the whole song are preserved —
+   *     the base is the song-wide trunk, not section-bounded.
+   *   - sectionText is what gets encrypted into this section's content. It
+   *     may have been trimmed to [startMs, endMs) by sanitizeSectionUpload.
+   *
+   * Conflating the two would strip BPM points outside the section's range
+   * from the base, which the merged-download path then can't restore.
+   */
+  const proceedAfterSanitize = useCallback(
+    async (originalText: string, sectionText: string) => {
       setUploadState({ loading: true, error: null, success: false, warning: null });
-
       try {
-        const text = await file.text();
-
-        const validationError = validateOsuFile(text);
-        if (validationError) {
-          setUploadState({ loading: false, error: validationError, success: false, warning: null });
-          return;
-        }
-
-        const parsed = parseOsuFile(text);
-        const candidateBase = buildCandidateBase(parsed);
+        const originalParsed = parseOsuFile(originalText);
+        const candidateBase = buildCandidateBase(originalParsed);
 
         const key = await getKey(mapsetId);
         if (!key) {
@@ -173,7 +194,7 @@ export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, rol
         }
 
         if (activeBase === null) {
-          await performUpload(key, text, candidateBase);
+          await performUpload(key, sectionText, candidateBase);
         } else {
           const report = diffBase(candidateBase, activeBase);
           if (report.critical.length > 0) {
@@ -186,12 +207,11 @@ export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, rol
               setNormalizeCritical(false);
             }
             setDiffReport(report);
-            setPendingUpload({ sectionContent: text, candidateBase, activeBase });
+            setPendingUpload({ sectionContent: sectionText, candidateBase, activeBase });
             setModalOpen(true);
             setUploadState({ loading: false, error: null, success: false, warning: null });
           } else if (report.notice.length > 0 || report.timingPointsChanged) {
-            // Notice-only diff: auto-upload both section and base.
-            const ok = await performUpload(key, text, candidateBase);
+            const ok = await performUpload(key, sectionText, candidateBase);
             if (ok) {
               const parts = [...report.notice];
               if (report.timingPointsChanged) parts.push('TimingPoints');
@@ -202,8 +222,7 @@ export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, rol
               }));
             }
           } else {
-            // No diff: upload section only.
-            await performUpload(key, text, null);
+            await performUpload(key, sectionText, null);
           }
         }
       } catch (err) {
@@ -212,8 +231,85 @@ export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, rol
         setUploadState({ loading: false, error: message, success: false, warning: null });
       }
     },
-    [difficultyId, mapsetId, unlocked, getKey, performUpload, role],
+    [difficultyId, mapsetId, getKey, performUpload, role],
   );
+
+  const handleFileSelect = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      event.target.value = '';
+
+      if (!unlocked) {
+        setUploadState({ loading: false, error: 'Mapset is locked. Enter the passphrase first.', success: false, warning: null });
+        return;
+      }
+
+      // Reject by file.size before reading into memory — validateOsuFile would
+      // catch it after the read, but only once the whole file is in memory.
+      if (file.size > MAX_OSU_BYTES) {
+        setUploadState({
+          loading: false,
+          error: `File too large (${file.size} bytes; max ${MAX_OSU_BYTES}).`,
+          success: false,
+          warning: null,
+        });
+        return;
+      }
+
+      setUploadState({ loading: true, error: null, success: false, warning: null });
+
+      try {
+        const text = await file.text();
+
+        const validationError = validateOsuFile(text);
+        if (validationError) {
+          setUploadState({ loading: false, error: validationError, success: false, warning: null });
+          return;
+        }
+
+        const parsed = parseOsuFile(text);
+
+        // Sanitize to the section's range when start/end are known. Strips
+        // hit objects, negative timing points, and break events that fall
+        // outside [start, end) — otherwise a full-song .osu would duplicate
+        // content under this section when the difficulty is merged.
+        if (sectionRange) {
+          const result = sanitizeSectionUpload(parsed, sectionRange.start, sectionRange.end);
+          if (result.changed) {
+            setSanitizeReport(result.dropped);
+            setPendingSanitized({ original: text, sanitized: result.content });
+            setModalMode('sanitize');
+            setModalOpen(true);
+            setUploadState({ loading: false, error: null, success: false, warning: null });
+            return;
+          }
+          // Nothing trimmed; the sanitized content is identical to the input.
+          // Pass the original twice — base derives from it, section uses it too.
+          await proceedAfterSanitize(text, result.content);
+          return;
+        }
+
+        // No section range provided (caller didn't pass it): upload as-is.
+        await proceedAfterSanitize(text, text);
+      } catch (err) {
+        logger.warn('Upload failed:', err);
+        const message = err instanceof Error ? err.message : 'Upload failed';
+        setUploadState({ loading: false, error: message, success: false, warning: null });
+      }
+    },
+    [unlocked, sectionRange, proceedAfterSanitize],
+  );
+
+  const handleConfirmSanitize = useCallback(async () => {
+    const pending = pendingSanitized;
+    setModalOpen(false);
+    setSanitizeReport(null);
+    setPendingSanitized(null);
+    if (!pending) return;
+    await proceedAfterSanitize(pending.original, pending.sanitized);
+  }, [pendingSanitized, proceedAfterSanitize]);
 
   const handleConfirmUpload = useCallback(async () => {
     if (!pendingUpload) return;
@@ -255,10 +351,63 @@ export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, rol
     setPendingUpload(null);
     setDiffReport(null);
     setNormalizeCritical(false);
+    setSanitizeReport(null);
+    setPendingSanitized(null);
     setUploadState({ loading: false, error: null, success: false, warning: null });
   }, []);
 
   const renderModalContent = () => {
+    if (modalMode === 'sanitize') {
+      if (!sanitizeReport) return null;
+      const items: string[] = [];
+      if (sanitizeReport.hitObjects > 0) items.push(`${sanitizeReport.hitObjects} hit object${sanitizeReport.hitObjects === 1 ? '' : 's'}`);
+      if (sanitizeReport.timingPoints > 0) items.push(`${sanitizeReport.timingPoints} timing point${sanitizeReport.timingPoints === 1 ? '' : 's'}`);
+      if (sanitizeReport.breaks > 0) items.push(`${sanitizeReport.breaks} break${sanitizeReport.breaks === 1 ? '' : 's'}`);
+      return (
+        <>
+          <h3 id="upload-confirm-title" className="text-lg font-semibold text-white mb-3">
+            Trim content outside this section?
+          </h3>
+          <p className="text-sm text-gray-300 mb-4">
+            Your file contains content outside this section&apos;s time range. Uploading it
+            as-is would duplicate that content when the difficulty is merged. We can
+            drop it for you before uploading.
+          </p>
+          <div className="mb-3">
+            <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">Will drop</p>
+            <ul className="list-disc list-inside text-sm text-yellow-300">
+              {items.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ul>
+          </div>
+          <p className="text-xs text-gray-500 mb-4">
+            Anything sitting exactly on the section&apos;s end time is treated as belonging
+            to the next section and dropped. A break event whose start or end falls
+            outside this section&apos;s range is also dropped — including a long break
+            that <em>spans</em> the whole section. If you need that break, split it so
+            it fits within one section before uploading.
+          </p>
+          <div className="flex gap-3 justify-end mt-5">
+            <button
+              type="button"
+              onClick={handleCancelModal}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmSanitize}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
+            >
+              Upload trimmed
+            </button>
+          </div>
+        </>
+      );
+    }
+
     if (!pendingUpload || !diffReport) return null;
 
     if (modalMode === 'owner-critical') {
@@ -434,7 +583,7 @@ export default function OsuUploadButton({ difficultyId, sectionId, mapsetId, rol
         </p>
       )}
 
-      {modalOpen && diffReport && (
+      {modalOpen && (diffReport || sanitizeReport) && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
           onClick={(e) => {

@@ -109,6 +109,7 @@ function renderPanel(props?: Partial<React.ComponentProps<typeof SectionDetailPa
         section={SECTION}
         posts={POSTS}
         mapsetId="ms1"
+        mapsetTitle="Test Mapset"
         difficultyId="d1"
         currentUserId="current-user-uuid"
         isOwner={false}

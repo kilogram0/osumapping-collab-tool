@@ -6,9 +6,10 @@ import PostCard from './PostCard';
 import CreatePostForm from './CreatePostForm';
 import OsuUploadButton from './OsuUploadButton';
 import OsuVersionHistory from './OsuVersionHistory';
-import { downloadSectionOsu } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { decrypt, sectionOsuVersionAad } from '../utils/crypto';
+import { assembleSectionOsu } from '../utils/sectionDownload';
+import { composeOsuFilename } from '../utils/osuFilename';
+import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { logger } from '../utils/logger';
 
 interface SectionDetailPanelProps {
@@ -19,6 +20,7 @@ interface SectionDetailPanelProps {
   isLastSection?: boolean;
   posts: DecryptedPost[];
   mapsetId: string;
+  mapsetTitle: string;
   difficultyId: string;
   currentUserId: string;
   isOwner: boolean;
@@ -63,6 +65,7 @@ export default function SectionDetailPanel({
   isLastSection = false,
   posts,
   mapsetId,
+  mapsetTitle,
   difficultyId,
   currentUserId,
   isOwner,
@@ -117,13 +120,35 @@ export default function SectionDetailPanel({
     try {
       const key = await getKey(mapsetId);
       if (!key) return;
-      const resp = await downloadSectionOsu(difficultyId, section.id);
-      const plaintext = await decrypt(key, resp.encrypted_content, sectionOsuVersionAad(resp.id, mapsetId));
-      const blob = new Blob([plaintext], { type: 'text/plain' });
+      // Merge the section with the active base so positive BPM timing points
+      // (which live on DifficultyBaseOsuVersion, not on the section) are
+      // included — otherwise the file opens with no timing in the editor.
+      const assembled = await assembleSectionOsu({
+        difficultyId,
+        sectionId: section.id,
+        mapsetId,
+        key,
+        sortOrder: section.sortOrder,
+      });
+      // Now that we know the section version number, rewrite [Metadata]
+      // Version so the editor shows e.g. "Intro_version_3" rather than the
+      // parent difficulty name, and use the same string in the filename.
+      const diffName = `${section.name}_version_${assembled.sectionVersion}`;
+      const { content: finalContent, metadata } = withMetadataVersion(
+        parseOsuFile(assembled.content),
+        diffName,
+      );
+      const filename = composeOsuFilename({
+        artist: metadata.artist,
+        title: metadata.title,
+        mapsetTitle,
+        diffName,
+      });
+      const blob = new Blob([finalContent], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${section.name.replace(/[^a-z0-9]/gi, '_')}.osu`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -236,6 +261,7 @@ export default function SectionDetailPanel({
                 sectionId={section.id}
                 mapsetId={mapsetId}
                 role={role}
+                sectionRange={{ start: section.startTimeMs, end: section.endTimeMs }}
               />
               {onEditSection && (
                 <button

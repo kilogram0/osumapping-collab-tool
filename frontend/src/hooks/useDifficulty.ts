@@ -11,6 +11,7 @@ import {
   fetchDifficulties,
   fetchDifficultyDetail,
   fetchSectionOsuVersions,
+  updateDifficulty,
   updatePost,
   updateSection,
 } from '../api/endpoints';
@@ -30,6 +31,23 @@ export function useCreateDifficulty(mapsetId: string) {
       createDifficulty(mapsetId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
+    },
+  });
+}
+
+export function useUpdateDifficulty(mapsetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      difficultyId,
+      payload,
+    }: {
+      difficultyId: string;
+      payload: Parameters<typeof updateDifficulty>[1];
+    }) => updateDifficulty(difficultyId, payload),
+    onSuccess: (_data, { difficultyId }) => {
+      queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
     },
   });
 }

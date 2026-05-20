@@ -16,7 +16,10 @@ const mockUploadSectionOsu = vi.fn(async () => ({
   created_at: '',
   updated_at: '',
 }));
-const mockDownloadBaseOsu = vi.fn(async () => {
+// Default: 404 (no active base). Without an explicit type, TS infers
+// Promise<never> from the always-throwing body, which then rejects partial
+// fixtures in mockResolvedValue overrides downstream.
+const mockDownloadBaseOsu = vi.fn<[], Promise<unknown>>(async () => {
   const err = new Error('No base');
   (err as any).response = { status: 404 };
   throw err;
@@ -60,6 +63,14 @@ vi.mock('../utils/osuParser', () => ({
   }),
   parseOsuFile: vi.fn((content: string) => ({ content })),
   buildCandidateBase: vi.fn(() => 'base-content'),
+  // Existing tests don't exercise sanitization (callers don't pass
+  // sectionRange), so we return changed=false so the upload proceeds.
+  sanitizeSectionUpload: vi.fn((parsed: { content: string }) => ({
+    content: parsed.content,
+    dropped: { hitObjects: 0, timingPoints: 0, breaks: 0 },
+    changed: false,
+  })),
+  MAX_OSU_BYTES: 1 * 1024 * 1024,
 }));
 
 vi.mock('../utils/osuBase', () => ({

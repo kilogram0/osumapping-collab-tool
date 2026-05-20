@@ -11,6 +11,11 @@ import {
   buildCandidateBase,
   parseBookmarks,
   bookmarksToSectionBoundaries,
+  parseDifficultyName,
+  parseMetadata,
+  withMetadataVersion,
+  sliceForSection,
+  sanitizeSectionUpload,
 } from './osuParser';
 
 // ------------------------------------------------------------------
@@ -530,5 +535,258 @@ describe('bookmarksToSectionBoundaries', () => {
       { startMs: 0, endMs: 30000 },
       { startMs: 30000, endMs: 60000 },
     ]);
+  });
+});
+
+// ------------------------------------------------------------------
+// parseDifficultyName
+// ------------------------------------------------------------------
+
+describe('parseDifficultyName', () => {
+  it('reads Version from [Metadata]', () => {
+    const parsed = parseOsuFile(VALID_OSU);
+    expect(parseDifficultyName(parsed)).toBe('Easy');
+  });
+
+  it('returns null when Metadata section is missing', () => {
+    const noMeta = VALID_OSU.replace(/\[Metadata\][\s\S]*?\n\n/m, '');
+    const parsed = parseOsuFile(noMeta);
+    expect(parseDifficultyName(parsed)).toBeNull();
+  });
+
+  it('returns null when Version line is empty', () => {
+    const emptyVersion = VALID_OSU.replace(/^Version:.*$/m, 'Version:');
+    const parsed = parseOsuFile(emptyVersion);
+    expect(parseDifficultyName(parsed)).toBeNull();
+  });
+
+  it('trims whitespace from Version value', () => {
+    const padded = VALID_OSU.replace(/^Version:.*$/m, 'Version:   Insane Plus   ');
+    const parsed = parseOsuFile(padded);
+    expect(parseDifficultyName(parsed)).toBe('Insane Plus');
+  });
+});
+
+// ------------------------------------------------------------------
+// parseMetadata
+// ------------------------------------------------------------------
+
+describe('parseMetadata', () => {
+  it('reads Artist, Title, and Version', () => {
+    const parsed = parseOsuFile(VALID_OSU);
+    expect(parseMetadata(parsed)).toEqual({
+      artist: 'Test Artist',
+      title: 'Test Song',
+      version: 'Easy',
+    });
+  });
+
+  it('returns null fields when [Metadata] is missing', () => {
+    const noMeta = VALID_OSU.replace(/\[Metadata\][\s\S]*?\n\n/m, '');
+    const parsed = parseOsuFile(noMeta);
+    expect(parseMetadata(parsed)).toEqual({ artist: null, title: null, version: null });
+  });
+});
+
+// ------------------------------------------------------------------
+// withMetadataVersion
+// ------------------------------------------------------------------
+
+describe('withMetadataVersion', () => {
+  it('replaces the existing Version line', () => {
+    const parsed = parseOsuFile(VALID_OSU);
+    const { content } = withMetadataVersion(parsed, 'Intro_version_2');
+    const lines = content.split(/\r?\n/);
+    expect(lines).toContain('Version:Intro_version_2');
+    expect(lines).not.toContain('Version:Easy');
+  });
+
+  it('appends a Version line when none exists', () => {
+    const noVersion = VALID_OSU.replace(/^Version:.*$/m, '');
+    const parsed = parseOsuFile(noVersion);
+    const { content } = withMetadataVersion(parsed, 'Base_version_1');
+    expect(content.split(/\r?\n/)).toContain('Version:Base_version_1');
+  });
+
+  it('leaves other [Metadata] fields untouched', () => {
+    const parsed = parseOsuFile(VALID_OSU);
+    const { content } = withMetadataVersion(parsed, 'Anything');
+    const lines = content.split(/\r?\n/);
+    expect(lines).toContain('Title:Test Song');
+    expect(lines).toContain('Artist:Test Artist');
+    expect(lines).toContain('Creator:Mapper');
+  });
+
+  it('returns post-rewrite metadata in the same pass', () => {
+    const parsed = parseOsuFile(VALID_OSU);
+    const { metadata } = withMetadataVersion(parsed, 'Hard_version_5');
+    expect(metadata).toEqual({
+      artist: 'Test Artist',
+      title: 'Test Song',
+      version: 'Hard_version_5',
+    });
+  });
+});
+
+// ------------------------------------------------------------------
+// sliceForSection
+// ------------------------------------------------------------------
+
+const SLICE_OSU = `osu file format v14
+
+[General]
+AudioFilename: audio.mp3
+
+[Metadata]
+Title:Test
+Version:Hard
+
+[TimingPoints]
+0,500,4,1,0,100,1,0
+1000,-100,4,1,0,80,0,0
+2000,500,4,1,0,100,1,0
+3000,-200,4,1,0,60,0,0
+
+[HitObjects]
+100,100,500,1,0,
+200,200,1500,1,0,
+300,300,2500,1,0,
+400,400,3500,1,0,
+`;
+
+describe('sliceForSection', () => {
+  it('keeps only timing points and hit objects within [startMs, endMs)', () => {
+    const parsed = parseOsuFile(SLICE_OSU);
+    const sliced = sliceForSection(parsed, 1000, 3000);
+    // Compare full lines — substring checks collide (e.g. "2000,500,…" ⊃ "0,500,…").
+    const lines = sliced.split(/\r?\n/);
+
+    // TimingPoints at 1000 and 2000 should remain; 0 and 3000 should not.
+    expect(lines).toContain('1000,-100,4,1,0,80,0,0');
+    expect(lines).toContain('2000,500,4,1,0,100,1,0');
+    expect(lines).not.toContain('0,500,4,1,0,100,1,0');
+    expect(lines).not.toContain('3000,-200,4,1,0,60,0,0');
+
+    // HitObjects: 1500 and 2500 stay; 500 and 3500 do not.
+    expect(lines).toContain('200,200,1500,1,0,');
+    expect(lines).toContain('300,300,2500,1,0,');
+    expect(lines).not.toContain('100,100,500,1,0,');
+    expect(lines).not.toContain('400,400,3500,1,0,');
+  });
+
+  it('treats the end timestamp as exclusive', () => {
+    const parsed = parseOsuFile(SLICE_OSU);
+    const sliced = sliceForSection(parsed, 0, 2000);
+    // Hit object at exactly 2000 would be excluded; here we just verify 1500 in and 2500 out.
+    expect(sliced).toContain(',1500,');
+    expect(sliced).not.toContain(',2500,');
+  });
+
+  it('preserves headers like [General] and [Metadata]', () => {
+    const parsed = parseOsuFile(SLICE_OSU);
+    const sliced = sliceForSection(parsed, 0, 5000);
+    expect(sliced).toContain('[General]');
+    expect(sliced).toContain('[Metadata]');
+    expect(sliced).toContain('Version:Hard');
+  });
+
+  it('produces empty TimingPoints and HitObjects sections when the range is empty', () => {
+    const parsed = parseOsuFile(SLICE_OSU);
+    const sliced = sliceForSection(parsed, 10000, 20000);
+    // Should still be a parseable .osu with the expected sections.
+    expect(sliced).toContain('[TimingPoints]');
+    expect(sliced).toContain('[HitObjects]');
+    expect(sliced).not.toContain('1000,-100,');
+    expect(sliced).not.toContain(',1500,');
+  });
+});
+
+// ------------------------------------------------------------------
+// sanitizeSectionUpload
+// ------------------------------------------------------------------
+
+const SANITIZE_OSU = `osu file format v14
+
+[General]
+AudioFilename: audio.mp3
+
+[Editor]
+Bookmarks: 0,1000,2000,3000
+
+[Metadata]
+Title:Test
+Artist:A
+Version:Hard
+
+[Events]
+0,0,"bg.jpg",0,0
+2,500,800
+2,1200,1500
+2,1800,2500
+2,2800,2900
+
+[TimingPoints]
+500,500,4,1,0,100,1,0
+1500,-100,4,1,0,80,0,0
+2000,-50,4,1,0,80,0,0
+2500,-200,4,1,0,80,0,0
+
+[HitObjects]
+100,100,500,1,0,
+100,100,1500,1,0,
+100,100,1999,1,0,
+100,100,2000,1,0,
+100,100,2500,1,0,
+`;
+
+describe('sanitizeSectionUpload', () => {
+  it('keeps content inside [startMs, endMs) and reports drop counts', () => {
+    const parsed = parseOsuFile(SANITIZE_OSU);
+    const result = sanitizeSectionUpload(parsed, 1000, 2000);
+
+    // Drops: hit objects at 500, 2000, 2500 → 3.
+    //        timing points at 500, 2000, 2500 → 3.
+    //        breaks (500,800), (1800,2500), (2800,2900) → 3
+    //        kept break: (1200,1500).
+    expect(result.dropped.hitObjects).toBe(3);
+    expect(result.dropped.timingPoints).toBe(3);
+    expect(result.dropped.breaks).toBe(3);
+    expect(result.changed).toBe(true);
+
+    const lines = result.content.split(/\r?\n/);
+    // Hit objects: 1500 and 1999 stay; 500, 2000, 2500 dropped.
+    expect(lines).toContain('100,100,1500,1,0,');
+    expect(lines).toContain('100,100,1999,1,0,');
+    expect(lines).not.toContain('100,100,500,1,0,');
+    expect(lines).not.toContain('100,100,2000,1,0,');
+    expect(lines).not.toContain('100,100,2500,1,0,');
+    // Timing points: 1500 stays; 500, 2000, 2500 dropped.
+    expect(lines).toContain('1500,-100,4,1,0,80,0,0');
+    expect(lines).not.toContain('500,500,4,1,0,100,1,0');
+    expect(lines).not.toContain('2000,-50,4,1,0,80,0,0');
+    expect(lines).not.toContain('2500,-200,4,1,0,80,0,0');
+    // Breaks: only (1200,1500) is fully inside [1000,2000); end exclusive.
+    expect(lines).toContain('2,1200,1500');
+    expect(lines).not.toContain('2,500,800');
+    expect(lines).not.toContain('2,1800,2500');
+    expect(lines).not.toContain('2,2800,2900');
+    // Non-break events preserved.
+    expect(lines).toContain('0,0,"bg.jpg",0,0');
+  });
+
+  it('drops content exactly at endMs (belongs to the next section)', () => {
+    const parsed = parseOsuFile(SANITIZE_OSU);
+    const result = sanitizeSectionUpload(parsed, 1000, 2000);
+    // 2000 is the next section's start; must not appear in this section.
+    const lines = result.content.split(/\r?\n/);
+    expect(lines).not.toContain('100,100,2000,1,0,');
+    expect(lines).not.toContain('2000,-50,4,1,0,80,0,0');
+  });
+
+  it('reports no changes when everything is inside the range', () => {
+    const parsed = parseOsuFile(SANITIZE_OSU);
+    const result = sanitizeSectionUpload(parsed, 0, 5000);
+    expect(result.changed).toBe(false);
+    expect(result.dropped).toEqual({ hitObjects: 0, timingPoints: 0, breaks: 0 });
   });
 });

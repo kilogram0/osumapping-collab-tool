@@ -16,7 +16,10 @@ const mockUploadSectionOsu = vi.fn(async () => ({
   created_at: '',
   updated_at: '',
 }));
-const mockDownloadBaseOsu = vi.fn(async () => {
+// Default: 404 (no active base). Explicit `Promise<unknown>` typing so tests
+// that override via mockResolvedValue can pass a partial BaseOsuVersion
+// fixture; without it TS infers Promise<never> from the always-throwing body.
+const mockDownloadBaseOsu = vi.fn<[], Promise<unknown>>(async () => {
   const err = new Error('No base');
   (err as any).response = { status: 404 };
   throw err;

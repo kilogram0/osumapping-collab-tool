@@ -13,18 +13,24 @@ import {
   difficultyBaseOsuVersionAad,
 } from '../utils/crypto';
 import { mergeOsu } from '../utils/osuMerge';
+import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
+import { composeOsuFilename } from '../utils/osuFilename';
 import { logger } from '../utils/logger';
 
 interface MergedDownloadButtonProps {
   difficultyId: string;
   mapsetId: string;
+  mapsetTitle: string;
   sections: Section[];
+  difficultyName?: string | null;
 }
 
 export default function MergedDownloadButton({
   difficultyId,
   mapsetId,
+  mapsetTitle,
   sections,
+  difficultyName,
 }: MergedDownloadButtonProps) {
   const { isUnlocked, getKey } = useEncryption();
   const [loading, setLoading] = useState(false);
@@ -72,11 +78,27 @@ export default function MergedDownloadButton({
 
       const merged = mergeOsu(basePlaintext, sectionInputs);
 
-      const blob = new Blob([merged], { type: 'text/plain' });
+      // Rewrite [Metadata] Version to "<diffName>_version_<baseVersion>" so
+      // the editor and the filename share the same label. The base version
+      // is the closest "trunk version" for an assembled difficulty.
+      const baseVersionLabel = baseResp.version ?? 0;
+      const diffName = `${difficultyName ?? 'Difficulty'}_version_${baseVersionLabel}`;
+      const { content: finalContent, metadata } = withMetadataVersion(
+        parseOsuFile(merged),
+        diffName,
+      );
+      const filename = composeOsuFilename({
+        artist: metadata.artist,
+        title: metadata.title,
+        mapsetTitle,
+        diffName,
+      });
+
+      const blob = new Blob([finalContent], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'merged.osu';
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -86,7 +108,7 @@ export default function MergedDownloadButton({
     } finally {
       setLoading(false);
     }
-  }, [difficultyId, mapsetId, sections, unlocked, getKey]);
+  }, [difficultyId, mapsetId, mapsetTitle, sections, unlocked, getKey, difficultyName]);
 
   return (
     <button

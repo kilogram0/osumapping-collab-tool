@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import type { Difficulty } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { decrypt, difficultyFieldAad } from '../utils/crypto';
@@ -9,9 +9,17 @@ interface DifficultyTabsProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   mapsetId: string;
+  /**
+   * Receives the freshly-decrypted difficulty name map. Typed as a `useState`
+   * setter (Dispatch<SetStateAction<…>>) rather than a generic callback so the
+   * stability requirement is structural, not just documented — inline lambdas
+   * won't satisfy the type, removing the footgun where a new function every
+   * render would land in the effect's deps and retrigger the decrypt loop.
+   */
+  onDecrypted?: Dispatch<SetStateAction<Record<string, string>>>;
 }
 
-export default function DifficultyTabs({ difficulties, selectedId, onSelect, mapsetId }: DifficultyTabsProps) {
+export default function DifficultyTabs({ difficulties, selectedId, onSelect, mapsetId, onDecrypted }: DifficultyTabsProps) {
   const { isUnlocked, getKey } = useEncryption();
   const [names, setNames] = useState<Record<string, string>>({});
   const unlocked = isUnlocked(mapsetId);
@@ -19,6 +27,7 @@ export default function DifficultyTabs({ difficulties, selectedId, onSelect, map
   useEffect(() => {
     if (!unlocked) {
       setNames({});
+      onDecrypted?.({});
       return;
     }
     let cancelled = false;
@@ -37,12 +46,15 @@ export default function DifficultyTabs({ difficulties, selectedId, onSelect, map
           }
         }),
       );
-      if (!cancelled) setNames(decrypted);
+      if (!cancelled) {
+        setNames(decrypted);
+        onDecrypted?.(decrypted);
+      }
     }
 
     decryptAll();
     return () => { cancelled = true; };
-  }, [unlocked, difficulties, mapsetId, getKey]);
+  }, [unlocked, difficulties, mapsetId, getKey, onDecrypted]);
 
   if (difficulties.length === 0) {
     return (

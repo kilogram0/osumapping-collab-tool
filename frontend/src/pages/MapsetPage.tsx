@@ -11,6 +11,7 @@ import ManageMembersModal from '../components/ManageMembersModal';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
 import PostCard from '../components/PostCard';
+import RenameDifficultyModal from '../components/RenameDifficultyModal';
 import SectionDetailPanel from '../components/SectionDetailPanel';
 import Timeline from '../components/Timeline';
 import { useAuth } from '../hooks/useAuth';
@@ -30,6 +31,8 @@ import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
 import { downloadBaseOsu } from '../api/endpoints';
 import { difficultyBaseOsuVersionAad } from '../utils/crypto';
+import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
+import { composeOsuFilename } from '../utils/osuFilename';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
@@ -63,10 +66,12 @@ export default function MapsetPage() {
   const deleteSectionMutation = useDeleteSection(selectedDifficultyId ?? '');
 
   const [showCreateDifficulty, setShowCreateDifficulty] = useState(false);
+  const [showRenameDifficulty, setShowRenameDifficulty] = useState(false);
   const [showCreateSection, setShowCreateSection] = useState(false);
   const [showEditSection, setShowEditSection] = useState(false);
   const [showBaseHistory, setShowBaseHistory] = useState(false);
   const [showManageMembers, setShowManageMembers] = useState(false);
+  const [difficultyNames, setDifficultyNames] = useState<Record<string, string>>({});
   const [editingSection, setEditingSection] = useState<DecryptedSection | null>(null);
   const [decryptedSections, setDecryptedSections] = useState<DecryptedSection[]>([]);
   const [decryptedDescription, setDecryptedDescription] = useState<string | null>(null);
@@ -432,11 +437,24 @@ export default function MapsetPage() {
       if (!key) return;
       const resp = await downloadBaseOsu(selectedDifficultyId);
       const plaintext = await decrypt(key, resp.encrypted_content, difficultyBaseOsuVersionAad(resp.id, mapsetId));
-      const blob = new Blob([plaintext], { type: 'text/plain' });
+      // Rewrite [Metadata] Version to "Base_version_<N>" so the editor and
+      // filename match. resp.version may be undefined on older payloads.
+      const diffName = `Base_version_${resp.version ?? 0}`;
+      const { content: finalContent, metadata } = withMetadataVersion(
+        parseOsuFile(plaintext),
+        diffName,
+      );
+      const filename = composeOsuFilename({
+        artist: metadata.artist,
+        title: metadata.title,
+        mapsetTitle: mapset!.title,
+        diffName,
+      });
+      const blob = new Blob([finalContent], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'base.osu';
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -510,7 +528,9 @@ export default function MapsetPage() {
             <MergedDownloadButton
               difficultyId={selectedDifficultyId ?? ''}
               mapsetId={mapsetId}
+              mapsetTitle={mapset.title}
               sections={sections}
+              difficultyName={selectedDifficultyId ? difficultyNames[selectedDifficultyId] ?? null : null}
             />
             <button
               type="button"
@@ -554,6 +574,7 @@ export default function MapsetPage() {
               selectedId={selectedDifficultyId}
               onSelect={setSelectedDifficultyId}
               mapsetId={mapsetId}
+              onDecrypted={setDifficultyNames}
             />
           </div>
         )}
@@ -606,9 +627,25 @@ export default function MapsetPage() {
                     mapsetId={mapsetId}
                     existingSections={decryptedSections}
                     songLengthMs={songLengthMs}
-                    onSuccess={(count) => showToast(`Imported ${count} section${count === 1 ? '' : 's'} from bookmarks.`, 'success')}
+                    onSuccess={(count, prepopulated) =>
+                      showToast(
+                        prepopulated
+                          ? `Imported ${count} section${count === 1 ? '' : 's'} with content from bookmarks.`
+                          : `Imported ${count} section${count === 1 ? '' : 's'} from bookmarks. (Base history exists, so section content was not pre-filled.)`,
+                        'success',
+                      )
+                    }
                     onError={(msg) => showToast(msg, 'error')}
                   />
+                )}
+                {canEditStructure && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRenameDifficulty(true)}
+                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
+                  >
+                    Rename Difficulty
+                  </button>
                 )}
               </div>
               <div className="flex items-center gap-2">
@@ -655,6 +692,7 @@ export default function MapsetPage() {
                 })()}
                 posts={decryptedPosts}
                 mapsetId={mapsetId}
+                mapsetTitle={mapset.title}
                 difficultyId={selectedDifficultyId}
                 currentUserId={user?.id ?? ''}
                 isOwner={isOwner}
@@ -726,7 +764,11 @@ export default function MapsetPage() {
       {showCreateDifficulty && (
         <CreateDifficultyModal
           mapsetId={mapsetId}
-          onSuccess={() => setShowCreateDifficulty(false)}
+          songLengthMs={songLengthMs}
+          onSuccess={(newDifficultyId) => {
+            setShowCreateDifficulty(false);
+            setSelectedDifficultyId(newDifficultyId);
+          }}
           onCancel={() => setShowCreateDifficulty(false)}
         />
       )}
@@ -774,6 +816,16 @@ export default function MapsetPage() {
         <BaseVersionHistory
           difficultyId={selectedDifficultyId}
           onClose={() => setShowBaseHistory(false)}
+        />
+      )}
+
+      {showRenameDifficulty && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
+        <RenameDifficultyModal
+          mapsetId={mapsetId}
+          difficultyId={selectedDifficultyId}
+          currentName={difficultyNames[selectedDifficultyId]}
+          onSuccess={() => setShowRenameDifficulty(false)}
+          onCancel={() => setShowRenameDifficulty(false)}
         />
       )}
 

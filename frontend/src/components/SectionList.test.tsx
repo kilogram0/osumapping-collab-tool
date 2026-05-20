@@ -12,13 +12,22 @@ const mockGetKey = vi.fn(async () => null as CryptoKey | null);
 const mockDownloadSectionOsu = vi.fn(async () => ({
   id: 'sov1',
   section_id: 's1',
-  encrypted_content: 'enc:osu content',
+  encrypted_content: 'enc:osu file format v14\n\n[Metadata]\nTitle:Song\nArtist:Artist\nVersion:Diff\n\n[TimingPoints]\n\n[HitObjects]\n',
   version: 1,
   is_active: true,
   uploaded_by: 'u1',
   created_at: '',
   updated_at: '',
 }));
+// Default: no base history → assembleSectionOsu's catch path emits the
+// section content verbatim. Tests that exercise base-merging behavior can
+// override this on a per-test basis.
+const mockDownloadBaseOsu = vi.fn<[], Promise<unknown>>(async () => {
+  const err: any = new Error('not found');
+  err.isAxiosError = true;
+  err.response = { status: 404 };
+  throw err;
+});
 
 vi.mock('../contexts/EncryptionContext', () => ({
   useEncryption: () => ({
@@ -36,6 +45,7 @@ vi.mock('../api/endpoints', async (importOriginal) => {
   return {
     ...actual,
     downloadSectionOsu: (...args: any[]) => mockDownloadSectionOsu(...args),
+    downloadBaseOsu: (...args: any[]) => mockDownloadBaseOsu(...args),
   };
 });
 
@@ -92,6 +102,7 @@ function renderList(props?: Partial<React.ComponentProps<typeof SectionList>>) {
       <SectionList
         sections={SECTIONS}
         mapsetId="ms1"
+        mapsetTitle="Test Mapset"
         difficultyId="d1"
         {...props}
       />
@@ -112,7 +123,7 @@ describe('SectionList', () => {
     mockDownloadSectionOsu.mockResolvedValue({
       id: 'sov1',
       section_id: 's1',
-      encrypted_content: 'enc:osu content',
+      encrypted_content: 'enc:osu file format v14\n\n[Metadata]\nTitle:Song\nArtist:Artist\nVersion:Diff\n\n[TimingPoints]\n\n[HitObjects]\n',
       version: 1,
       is_active: true,
       uploaded_by: 'u1',

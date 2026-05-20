@@ -40,7 +40,8 @@ export interface ParsedOsuFile {
   hitObjects: HitObject[];
 }
 
-const MAX_SIZE_BYTES = 1 * 1024 * 1024; // 1 MB
+export const MAX_OSU_BYTES = 1 * 1024 * 1024; // 1 MB
+const MAX_SIZE_BYTES = MAX_OSU_BYTES;
 
 /**
  * Validate that the .osu file meets basic requirements.
@@ -219,6 +220,94 @@ export function stringifySections(sections: OsuSection[]): string {
     .join('\n\n');
 }
 
+export interface OsuMetadata {
+  artist: string | null;
+  title: string | null;
+  version: string | null;
+}
+
+/**
+ * Read Artist, Title, and Version from the [Metadata] section.
+ * Returns null for fields that are absent or empty.
+ */
+export function parseMetadata(parsed: ParsedOsuFile): OsuMetadata {
+  const meta = parsed.sections.find((s) => s.name === 'Metadata');
+  if (!meta) return { artist: null, title: null, version: null };
+
+  function readKey(key: string): string | null {
+    for (const line of meta!.lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith(`${key}:`)) continue;
+      const value = trimmed.slice(key.length + 1).trim();
+      return value || null;
+    }
+    return null;
+  }
+
+  return {
+    artist: readKey('Artist'),
+    title: readKey('Title'),
+    version: readKey('Version'),
+  };
+}
+
+/**
+ * Return a new .osu string with the [Metadata] Version line replaced by
+ * `Version:<newVersion>`. If no Version line exists, one is appended at
+ * the end of the [Metadata] section. If no [Metadata] section exists, the
+ * input is returned unchanged — this is a permissive utility, not a validator.
+ *
+ * Returns the rewritten content and the post-rewrite metadata in one pass
+ * so callers don't have to reparse just to read Artist/Title for filename use.
+ */
+export function withMetadataVersion(
+  parsed: ParsedOsuFile,
+  newVersion: string,
+): { content: string; metadata: OsuMetadata } {
+  let artist: string | null = null;
+  let title: string | null = null;
+  const next: OsuSection[] = parsed.sections.map((section) => {
+    if (section.name !== 'Metadata') return section;
+    let replaced = false;
+    const lines = section.lines.map((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('Version:')) {
+        replaced = true;
+        return `Version:${newVersion}`;
+      }
+      if (trimmed.startsWith('Artist:')) {
+        artist = trimmed.slice('Artist:'.length).trim() || null;
+      } else if (trimmed.startsWith('Title:')) {
+        title = trimmed.slice('Title:'.length).trim() || null;
+      }
+      return line;
+    });
+    if (!replaced) lines.push(`Version:${newVersion}`);
+    return { name: 'Metadata', lines };
+  });
+  return {
+    content: stringifySections(next),
+    metadata: { artist, title, version: newVersion },
+  };
+}
+
+/**
+ * Read the difficulty name from the [Metadata] Version: line of a .osu file.
+ * Returns null when missing or empty. This mirrors osu! editor semantics where
+ * "Version" is the difficulty label (e.g. "Hard", "Insane").
+ */
+export function parseDifficultyName(parsed: ParsedOsuFile): string | null {
+  const meta = parsed.sections.find((s) => s.name === 'Metadata');
+  if (!meta) return null;
+  for (const line of meta.lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('Version:')) continue;
+    const value = trimmed.slice('Version:'.length).trim();
+    return value || null;
+  }
+  return null;
+}
+
 /**
  * Parse bookmarks from the [Editor] section of a .osu file.
  * Returns an array of timestamps in milliseconds, sorted ascending.
@@ -277,6 +366,143 @@ export function bookmarksToSectionBoundaries(
   }
 
   return boundaries;
+}
+
+/**
+ * Parse a break-event line from [Events]. Returns null if the line is not a
+ * break (event-type code "2"). Break format: `2,startMs,endMs`.
+ */
+function parseBreakEvent(line: string): { start: number; end: number } | null {
+  const trimmed = line.trim();
+  if (trimmed === '' || trimmed.startsWith('//')) return null;
+  const parts = trimmed.split(',');
+  if (parts.length < 3) return null;
+  if (parts[0].trim() !== '2') return null;
+  const start = parseInt(parts[1].trim(), 10);
+  const end = parseInt(parts[2].trim(), 10);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return { start, end };
+}
+
+export interface SectionFilterCounts {
+  hitObjects: number;
+  timingPoints: number;
+  breaks: number;
+}
+
+interface FilterResult {
+  sections: OsuSection[];
+  dropped: SectionFilterCounts;
+}
+
+/**
+ * Internal: apply [startMs, endMs) filtering to TimingPoints, HitObjects, and
+ * [Events] break entries. Returns the filtered section list plus per-category
+ * drop counts so callers can show a "trimmed N objects" summary.
+ *
+ * Break rule (per user-supplied requirement): a break is kept only if **both**
+ * its start and end fall inside [startMs, endMs). Either endpoint outside ⇒ drop.
+ */
+function filterSectionsByRange(
+  parsed: ParsedOsuFile,
+  startMs: number,
+  endMs: number,
+): FilterResult {
+  const dropped: SectionFilterCounts = { hitObjects: 0, timingPoints: 0, breaks: 0 };
+
+  const sections: OsuSection[] = parsed.sections.map((section) => {
+    if (section.name === 'TimingPoints') {
+      const lines = section.lines.filter((line) => {
+        const trimmed = line.trim();
+        if (trimmed === '' || trimmed.startsWith('//')) return true;
+        const tp = parseTimingPoints([line]);
+        if (tp.length === 0) return false;
+        const t = tp[0].time;
+        const keep = t >= startMs && t < endMs;
+        if (!keep) dropped.timingPoints++;
+        return keep;
+      });
+      return { name: 'TimingPoints', lines };
+    }
+    if (section.name === 'HitObjects') {
+      const lines = section.lines.filter((line) => {
+        const trimmed = line.trim();
+        if (trimmed === '' || trimmed.startsWith('//')) return true;
+        const ho = parseHitObjects([line]);
+        if (ho.length === 0) return false;
+        const t = ho[0].time;
+        const keep = t >= startMs && t < endMs;
+        if (!keep) dropped.hitObjects++;
+        return keep;
+      });
+      return { name: 'HitObjects', lines };
+    }
+    if (section.name === 'Events') {
+      const lines = section.lines.filter((line) => {
+        const br = parseBreakEvent(line);
+        if (br === null) return true; // non-break event (background, video, etc.) — keep
+        const keep = br.start >= startMs && br.start < endMs && br.end >= startMs && br.end < endMs;
+        if (!keep) dropped.breaks++;
+        return keep;
+      });
+      return { name: 'Events', lines };
+    }
+    return section;
+  });
+
+  return { sections, dropped };
+}
+
+/**
+ * Build a per-section .osu file from a parsed source .osu, keeping only
+ * the timing points, hit objects, and [Events] breaks whose timestamps fall
+ * inside [startMs, endMs).
+ *
+ * Headers and the [TimingPoints]/[HitObjects] structure are preserved so the
+ * result is a stand-alone, mergeable .osu. The merge engine deduplicates
+ * positive timing points across sections vs. base, so it is safe to leave
+ * them in each slice — the slice is self-contained.
+ *
+ * Half-open interval (inclusive start, exclusive end) so that hit objects
+ * sitting exactly on a section boundary belong to the later section and
+ * never appear in two slices at once.
+ */
+export function sliceForSection(
+  parsed: ParsedOsuFile,
+  startMs: number,
+  endMs: number,
+): string {
+  const { sections } = filterSectionsByRange(parsed, startMs, endMs);
+  return stringifySections(sections);
+}
+
+export interface SanitizeReport {
+  /** Sanitized .osu plaintext, ready to encrypt + upload. */
+  content: string;
+  /** How many lines of each category were dropped. */
+  dropped: SectionFilterCounts;
+  /** True iff anything was dropped. */
+  changed: boolean;
+}
+
+/**
+ * Sanitize a user-uploaded .osu against a section's [startMs, endMs) range.
+ * Identical filtering to {@link sliceForSection}, but also returns counts of
+ * what was dropped so callers can surface a confirmation to the user.
+ *
+ * Why: a mapper may export a full-song .osu from osu! editor and upload it as
+ * "their section". Without sanitization, hit objects belonging to other
+ * sections would be stored under this section and duplicate on merge.
+ */
+export function sanitizeSectionUpload(
+  parsed: ParsedOsuFile,
+  startMs: number,
+  endMs: number,
+): SanitizeReport {
+  const { sections, dropped } = filterSectionsByRange(parsed, startMs, endMs);
+  const content = stringifySections(sections);
+  const changed = dropped.hitObjects > 0 || dropped.timingPoints > 0 || dropped.breaks > 0;
+  return { content, dropped, changed };
 }
 
 /**

@@ -219,6 +219,18 @@ export async function createDifficulty(
   return data;
 }
 
+export interface UpdateDifficultyPayload {
+  encrypted_name?: string;
+}
+
+export async function updateDifficulty(
+  difficultyId: string,
+  payload: UpdateDifficultyPayload,
+): Promise<Difficulty> {
+  const { data } = await client.patch<Difficulty>(`/difficulties/${difficultyId}`, payload);
+  return data;
+}
+
 export interface Section {
   id: string;
   difficulty_id: string;
@@ -282,9 +294,19 @@ export interface SectionOsuVersion {
   updated_at: string;
 }
 
+/** Shape of `GET /api/difficulties/{id}/base.osu` — matches BaseOsuRead in
+ *  backend/app/schemas.py. All fields are always present per that contract.
+ *  Consumers that previously fell back with `?? null` did so defensively
+ *  against older mocks, not the live API. */
 export interface BaseOsuVersion {
   id: string;
   encrypted_content: string;
+  version: number;
+  difficulty_id: string;
+  is_active: boolean;
+  source_section_version_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface UploadSectionOsuPayload {

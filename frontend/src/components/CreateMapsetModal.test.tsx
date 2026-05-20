@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import CreateMapsetModal from './CreateMapsetModal';
 import { encrypt } from '../utils/crypto';
 import { createMapset } from '../api/endpoints';
+import { ToastProvider } from '../contexts/ToastContext';
 
 vi.mock('../api/endpoints', () => ({
   createMapset: vi.fn().mockResolvedValue({
@@ -20,6 +21,9 @@ vi.mock('../api/endpoints', () => ({
   }),
   fetchMapsets: vi.fn().mockResolvedValue([]),
   fetchMapset: vi.fn().mockResolvedValue(null),
+  createDifficulty: vi.fn(),
+  createSection: vi.fn(),
+  uploadSectionOsu: vi.fn(),
 }));
 
 vi.mock('../contexts/EncryptionContext', () => ({
@@ -40,6 +44,10 @@ vi.mock('../utils/crypto', () => ({
   encrypt: vi.fn().mockResolvedValue('encrypted-mock'),
   mapsetFieldAad: vi.fn().mockReturnValue('Mapset|id|id'),
   mapsetVerificationAad: vi.fn().mockReturnValue('Mapset|id|id'),
+  difficultyFieldAad: vi.fn().mockReturnValue('Difficulty|id|id'),
+  sectionFieldAad: vi.fn().mockReturnValue('Section|id|id'),
+  sectionOsuVersionAad: vi.fn().mockReturnValue('SectionOsuVersion|id|id'),
+  difficultyBaseOsuVersionAad: vi.fn().mockReturnValue('DifficultyBaseOsuVersion|id|id'),
   VERIFICATION_CANARY: 'verified',
 }));
 
@@ -49,7 +57,9 @@ function renderModal() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <CreateMapsetModal onSuccess={vi.fn()} onCancel={vi.fn()} />
+      <ToastProvider>
+        <CreateMapsetModal onSuccess={vi.fn()} onCancel={vi.fn()} />
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

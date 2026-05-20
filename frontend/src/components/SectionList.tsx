@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { Section } from '../api/endpoints';
-import { downloadSectionOsu } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { decrypt, decodeJsonEnvelope, sectionFieldAad, sectionOsuVersionAad } from '../utils/crypto';
+import { decrypt, decodeJsonEnvelope, sectionFieldAad } from '../utils/crypto';
+import { assembleSectionOsu } from '../utils/sectionDownload';
+import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
+import { composeOsuFilename } from '../utils/osuFilename';
 import { logger } from '../utils/logger';
 import OsuUploadButton from './OsuUploadButton';
 import OsuVersionHistory from './OsuVersionHistory';
@@ -10,6 +12,7 @@ import OsuVersionHistory from './OsuVersionHistory';
 interface SectionListProps {
   sections: Section[];
   mapsetId: string;
+  mapsetTitle: string;
   difficultyId: string;
   onEdit?: (section: DecryptedSection) => void;
   onDecrypted?: (sections: DecryptedSection[]) => void;
@@ -24,7 +27,7 @@ export interface DecryptedSection {
   sortOrder: number;
 }
 
-export default function SectionList({ sections, mapsetId, difficultyId, onEdit, onDecrypted, role }: SectionListProps) {
+export default function SectionList({ sections, mapsetId, mapsetTitle, difficultyId, onEdit, onDecrypted, role }: SectionListProps) {
   const { isUnlocked, getKey } = useEncryption();
   const [decrypted, setDecrypted] = useState<DecryptedSection[]>([]);
   const [historySectionId, setHistorySectionId] = useState<string | null>(null);
@@ -74,18 +77,36 @@ export default function SectionList({ sections, mapsetId, difficultyId, onEdit, 
   }, [unlocked, sections, mapsetId, getKey, onDecrypted]);
 
   const handleDownload = useCallback(
-    async (sectionId: string, sectionName: string) => {
+    async (sectionId: string, sectionName: string, sortOrder: number) => {
       if (!unlocked) return;
       try {
         const key = await getKey(mapsetId);
         if (!key) return;
-        const resp = await downloadSectionOsu(difficultyId, sectionId);
-        const plaintext = await decrypt(key, resp.encrypted_content, sectionOsuVersionAad(resp.id, mapsetId));
-        const blob = new Blob([plaintext], { type: 'text/plain' });
+        // Merge with the active base so the downloaded file carries the
+        // positive BPM timing points (which live on DifficultyBaseOsuVersion).
+        const assembled = await assembleSectionOsu({
+          difficultyId,
+          sectionId,
+          mapsetId,
+          key,
+          sortOrder,
+        });
+        const diffName = `${sectionName}_version_${assembled.sectionVersion}`;
+        const { content: finalContent, metadata } = withMetadataVersion(
+          parseOsuFile(assembled.content),
+          diffName,
+        );
+        const filename = composeOsuFilename({
+          artist: metadata.artist,
+          title: metadata.title,
+          mapsetTitle,
+          diffName,
+        });
+        const blob = new Blob([finalContent], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${sectionName.replace(/[^a-z0-9]/gi, '_')}.osu`;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -94,7 +115,7 @@ export default function SectionList({ sections, mapsetId, difficultyId, onEdit, 
         logger.warn(`Failed to download section ${sectionId}:`, err);
       }
     },
-    [difficultyId, mapsetId, unlocked, getKey],
+    [difficultyId, mapsetId, mapsetTitle, unlocked, getKey],
   );
 
   if (sections.length === 0) {
@@ -133,17 +154,33 @@ export default function SectionList({ sections, mapsetId, difficultyId, onEdit, 
     );
   }
 
-  const items = unlocked ? decrypted : sections.map((s) => ({
-    id: s.id,
-    name: '🔒 Encrypted Section' as const,
-    startTimeMs: null as number | null,
-    endTimeMs: null as number | null,
-  }));
+  // Two branches so the unlocked .map narrows to DecryptedSection — otherwise
+  // a single discriminated-union iteration loses startTimeMs/endTimeMs/sortOrder
+  // typing inside the map callback and TS reports "number | null" / "missing
+  // sortOrder" at the OsuUploadButton + handleDownload call sites.
+  if (!unlocked) {
+    return (
+      <ul className="space-y-2" aria-label="Sections">
+        {sections.map((s) => (
+          <li
+            key={s.id}
+            className="bg-gray-800 border border-gray-700 rounded-lg p-3"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-white font-medium text-sm">🔒 Encrypted Section</p>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
+  }
 
   return (
     <>
       <ul className="space-y-2" aria-label="Sections">
-        {items.map((s) => (
+        {decrypted.map((s) => (
           <li
             key={s.id}
             className="bg-gray-800 border border-gray-700 rounded-lg p-3"
@@ -151,48 +188,42 @@ export default function SectionList({ sections, mapsetId, difficultyId, onEdit, 
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-white font-medium text-sm">{s.name}</p>
-                {s.startTimeMs !== null && s.endTimeMs !== null && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    {formatTime(s.startTimeMs)} – {formatTime(s.endTimeMs)}
-                  </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {formatTime(s.startTimeMs)} – {formatTime(s.endTimeMs)}
+                </p>
+              </div>
+              <div className="flex flex-col gap-1 shrink-0">
+                <OsuUploadButton
+                  difficultyId={difficultyId}
+                  sectionId={s.id}
+                  mapsetId={mapsetId}
+                  role={role}
+                  sectionRange={{ start: s.startTimeMs, end: s.endTimeMs }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleDownload(s.id, s.name, s.sortOrder)}
+                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                >
+                  Download .osu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistorySectionId(s.id)}
+                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                >
+                  Version History
+                </button>
+                {onEdit && (
+                  <button
+                    type="button"
+                    onClick={() => onEdit(s)}
+                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                  >
+                    Edit
+                  </button>
                 )}
               </div>
-              {unlocked && (
-                <div className="flex flex-col gap-1 shrink-0">
-                  <OsuUploadButton
-                    difficultyId={difficultyId}
-                    sectionId={s.id}
-                    mapsetId={mapsetId}
-                    role={role}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleDownload(s.id, s.name)}
-                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
-                  >
-                    Download .osu
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHistorySectionId(s.id)}
-                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
-                  >
-                    Version History
-                  </button>
-                  {onEdit && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const ds = decrypted.find((d) => d.id === s.id);
-                        if (ds) onEdit(ds);
-                      }}
-                      className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
-                    >
-                      Edit
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
           </li>
         ))}

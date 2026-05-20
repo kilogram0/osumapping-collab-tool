@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import CreateDifficultyModal from './CreateDifficultyModal';
+import { ToastProvider } from '../contexts/ToastContext';
 
 const mockGetKey = vi.fn(async () => ({ key: 'mock-key' } as unknown as CryptoKey));
 const mockCreateDifficulty = vi.fn(async () => ({
@@ -38,12 +39,14 @@ function renderModal(props?: Partial<React.ComponentProps<typeof CreateDifficult
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <CreateDifficultyModal
-        mapsetId="ms1"
-        onSuccess={vi.fn()}
-        onCancel={vi.fn()}
-        {...props}
-      />
+      <ToastProvider>
+        <CreateDifficultyModal
+          mapsetId="ms1"
+          onSuccess={vi.fn()}
+          onCancel={vi.fn()}
+          {...props}
+        />
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
