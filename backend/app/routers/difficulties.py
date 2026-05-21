@@ -9,7 +9,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Difficulty, Mapset, MapsetRole, User
-from app.queries import get_mapset_membership
+from app.queries import MAX_DIFFICULTY_SLOTS_PER_OWNER, get_mapset_membership, get_owner_quota_used
 from app.schemas import (
     DifficultyCreate,
     DifficultyDetailRead,
@@ -55,6 +55,23 @@ async def create_difficulty(
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
         raise _forbidden()
+
+    # Quota check: adding the first diff to a mapset costs 0 extra slots (the
+    # mapset already counted as 1 when empty); any subsequent diff costs 1.
+    # Known TOCTOU: two concurrent POSTs at quota = limit - 1 can both pass.
+    # Acceptable for the current single-UI use case; add SELECT FOR UPDATE if
+    # scripted abuse becomes a concern.
+    existing_in_mapset_result = await db.execute(
+        select(func.count(Difficulty.id)).where(Difficulty.mapset_id == mapset_id)
+    )
+    existing_in_mapset = existing_in_mapset_result.scalar_one()
+    quota_increase = 0 if existing_in_mapset == 0 else 1
+    current_quota = await get_owner_quota_used(db, mapset.owner_id)
+    if current_quota + quota_increase > MAX_DIFFICULTY_SLOTS_PER_OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Difficulty limit reached",
+        )
 
     difficulty = Difficulty(
         id=payload.id,

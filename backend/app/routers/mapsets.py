@@ -10,13 +10,13 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
-from app.models import Mapset, MapsetMember, MapsetRole, User
+from app.models import Difficulty, Mapset, MapsetMember, MapsetRole, User
 from app.queries import get_mapset_membership
 from app.schemas import MapsetCreate, MapsetMemberRead, MapsetRead, MapsetUpdate
 
@@ -25,6 +25,29 @@ router = APIRouter(prefix="/mapsets", tags=["mapsets"])
 
 def _forbidden() -> HTTPException:
     return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def _count_difficulties(db: AsyncSession, mapset_id: UUID) -> int:
+    result = await db.execute(
+        select(func.count(Difficulty.id)).where(Difficulty.mapset_id == mapset_id)
+    )
+    return result.scalar_one()
+
+
+def _to_read(mapset: Mapset, difficulty_count: int) -> MapsetRead:
+    return MapsetRead(
+        id=mapset.id,
+        title=mapset.title,
+        encrypted_description=mapset.encrypted_description,
+        encrypted_song_length_ms=mapset.encrypted_song_length_ms,
+        passphrase_salt=mapset.passphrase_salt,
+        encrypted_verification=mapset.encrypted_verification,
+        owner_id=mapset.owner_id,
+        created_at=mapset.created_at,
+        updated_at=mapset.updated_at,
+        delete_at=mapset.delete_at,
+        difficulty_count=difficulty_count,
+    )
 
 
 @router.post(
@@ -37,7 +60,7 @@ async def create_mapset(
     payload: MapsetCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> Mapset:
+) -> MapsetRead:
     """Create a new encrypted mapset and add the creator as ``owner``.
 
     The backend stores all encrypted fields verbatim. The creator is
@@ -75,7 +98,7 @@ async def create_mapset(
             detail="Conflict creating mapset",
         ) from exc
     await db.refresh(mapset)
-    return mapset
+    return _to_read(mapset, 0)
 
 
 @router.get("/{mapset_id}", response_model=MapsetRead)
@@ -83,7 +106,7 @@ async def get_mapset(
     mapset_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> Mapset:
+) -> MapsetRead:
     """Return full mapset details for members.
 
     Returns ``403`` if the current user is not a member of the mapset, and
@@ -98,25 +121,28 @@ async def get_mapset(
     if membership is None:
         raise _forbidden()
 
-    return mapset
+    diff_count = await _count_difficulties(db, mapset_id)
+    return _to_read(mapset, diff_count)
 
 
 @router.get("", response_model=list[MapsetRead])
 async def list_mapsets(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> list[Mapset]:
+) -> list[MapsetRead]:
     """List all mapsets where the current user is a member.
 
     Returns encrypted fields only; the frontend decrypts titles for display
     if the key is cached in ``sessionStorage``.
     """
     result = await db.execute(
-        select(Mapset)
+        select(Mapset, func.count(Difficulty.id).label("difficulty_count"))
         .join(MapsetMember, MapsetMember.mapset_id == Mapset.id)
+        .outerjoin(Difficulty, Difficulty.mapset_id == Mapset.id)
         .where(MapsetMember.user_id == current_user.id)
+        .group_by(Mapset.id)
     )
-    return list(result.scalars().all())
+    return [_to_read(mapset, count) for mapset, count in result.all()]
 
 
 @router.patch(
@@ -129,7 +155,7 @@ async def update_mapset(
     payload: MapsetUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> Mapset:
+) -> MapsetRead:
     """Partially update encrypted mapset fields (PATCH semantics).
 
     Permitted for ``owner`` and ``mapper`` roles only.  Only fields present in
@@ -155,7 +181,8 @@ async def update_mapset(
 
     await db.commit()
     await db.refresh(mapset)
-    return mapset
+    diff_count = await _count_difficulties(db, mapset_id)
+    return _to_read(mapset, diff_count)
 
 
 @router.delete(
@@ -200,7 +227,7 @@ async def schedule_mapset_deletion(
     mapset_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> Mapset:
+) -> MapsetRead:
     """Schedule a mapset for deletion after a grace period. Owner only."""
     mapset = await db.get(Mapset, mapset_id)
     if mapset is None:
@@ -219,7 +246,8 @@ async def schedule_mapset_deletion(
     mapset.delete_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=_DELETION_GRACE_DAYS)
     await db.commit()
     await db.refresh(mapset)
-    return mapset
+    diff_count = await _count_difficulties(db, mapset_id)
+    return _to_read(mapset, diff_count)
 
 
 @router.delete(

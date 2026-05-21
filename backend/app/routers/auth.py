@@ -11,7 +11,8 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import generate_oauth_state, get_current_user, validate_oauth_state
 from app.models import User
-from app.schemas import UserRead
+from app.queries import MAX_DIFFICULTY_SLOTS_PER_OWNER, get_owner_quota_used
+from app.schemas import QuotaRead, UserRead
 from app.services.auth_service import (
     AuthServiceError,
     create_access_token,
@@ -178,6 +179,16 @@ async def osu_callback(
 async def auth_me(current_user: Annotated[User, Depends(get_current_user)]) -> User:
     """Return the currently authenticated user."""
     return current_user
+
+
+@router.get("/me/quota", response_model=QuotaRead)
+async def auth_me_quota(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> QuotaRead:
+    """Return the current user's difficulty slot usage."""
+    used = await get_owner_quota_used(db, current_user.id)
+    return QuotaRead(used=used, limit=MAX_DIFFICULTY_SLOTS_PER_OWNER)
 
 
 @router.post("/logout")

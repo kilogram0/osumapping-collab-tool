@@ -27,6 +27,8 @@ const MAPSET: Mapset = {
   owner_id: 'owner-uuid',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
+  delete_at: null,
+  difficulty_count: 0,
 };
 
 describe('PassphraseModal', () => {

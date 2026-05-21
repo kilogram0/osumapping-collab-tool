@@ -11,6 +11,7 @@ vi.mock('./api/endpoints', () => ({
   fetchCurrentUser: vi.fn().mockResolvedValue(null),
   logout: vi.fn().mockResolvedValue(undefined),
   fetchMapsets: vi.fn().mockResolvedValue([]),
+  fetchQuota: vi.fn().mockResolvedValue({ used: 0, limit: 50 }),
 }))
 
 const mockedFetchCurrentUser = vi.mocked(fetchCurrentUser)

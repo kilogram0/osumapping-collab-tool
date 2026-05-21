@@ -10,6 +10,7 @@ import { ToastProvider } from '../contexts/ToastContext';
 
 vi.mock('../api/endpoints', () => ({
   fetchMapsets: vi.fn(),
+  fetchQuota: vi.fn().mockResolvedValue({ used: 0, limit: 50 }),
   fetchCurrentUser: vi.fn().mockResolvedValue(null),
   logout: vi.fn().mockResolvedValue(undefined),
 }));
@@ -24,6 +25,7 @@ vi.mock('../hooks/useMapset', async (importOriginal) => {
     ...actual,
     useScheduleMapsetDeletion: () => ({ mutate: vi.fn() }),
     useCancelMapsetDeletion: () => ({ mutate: vi.fn() }),
+    useQuota: () => ({ data: { used: 0, limit: 50 } }),
   };
 });
 
@@ -50,6 +52,7 @@ const MAPSET: Mapset = {
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
   delete_at: null,
+  difficulty_count: 0,
 };
 
 function renderDashboard() {

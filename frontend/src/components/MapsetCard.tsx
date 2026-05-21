@@ -85,9 +85,14 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
     >
       <div className="min-w-0">
         <p className="text-white font-semibold truncate">{mapset.title}</p>
-        <p className="text-xs text-gray-500 mt-1">
-          {new Date(mapset.created_at).toLocaleDateString()}
-        </p>
+        <div className="flex items-center gap-2 mt-1">
+          <p className="text-xs text-gray-500">
+            {new Date(mapset.created_at).toLocaleDateString()}
+          </p>
+          <span className="text-xs text-gray-400 bg-gray-700 px-1.5 py-0.5 rounded">
+            {mapset.difficulty_count} {mapset.difficulty_count === 1 ? 'diff' : 'diffs'}
+          </span>
+        </div>
         {isPendingDeletion && (
           <p className="text-xs text-red-400 mt-1">
             {daysLeft === 0

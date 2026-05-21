@@ -32,6 +32,8 @@ export function useCreateDifficulty(mapsetId: string) {
       createDifficulty(mapsetId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+      queryClient.invalidateQueries({ queryKey: ['quota'] });
     },
   });
 }
@@ -59,6 +61,8 @@ export function useDeleteDifficulty(mapsetId: string) {
     mutationFn: (difficultyId: string) => deleteDifficulty(difficultyId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+      queryClient.invalidateQueries({ queryKey: ['quota'] });
     },
   });
 }

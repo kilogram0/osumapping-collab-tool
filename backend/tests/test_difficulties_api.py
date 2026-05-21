@@ -708,3 +708,186 @@ async def test_get_difficulty_includes_sections_and_posts(
     # Posts should be ordered chronologically by created_at ascending
     post_ids = [p["id"] for p in body["posts"]]
     assert post_ids == [post1["id"], post2["id"]]
+
+
+# ---------------------------------------------------------------------------
+# Difficulty quota cap
+# ---------------------------------------------------------------------------
+
+
+async def _seed_difficulties(mapset_id: UUID, count: int) -> None:
+    """Insert `count` Difficulty rows directly into the DB for quota tests."""
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        for _ in range(count):
+            session.add(
+                Difficulty(
+                    id=uuid4(),
+                    mapset_id=mapset_id,
+                    encrypted_name="encrypted:seeded",
+                )
+            )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_difficulty_cap_rejects_when_limit_exceeded(client: AsyncClient):
+    """Adding a difficulty beyond MAX_DIFFICULTIES_PER_USER (50) returns 409.
+
+    Setup: 1 mapset with 50 seeded diffs (quota = 50). The next creation must fail.
+    """
+    owner = await _seed_user(79001)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    resp = await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    assert resp.status_code == 201
+
+    await _seed_difficulties(UUID(ms["id"]), 50)
+
+    resp = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 409, resp.text
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_difficulty_cap_first_diff_does_not_increase_quota(client: AsyncClient):
+    """Adding the first diff to an empty mapset does not consume extra quota.
+
+    Setup: mapset1 with 49 diffs + mapset2 empty → quota = 49 + 1 = 50.
+    Adding the first diff to mapset2 keeps quota at 50 → allowed.
+    Adding a second diff to mapset2 pushes quota to 51 → rejected.
+    """
+    owner = await _seed_user(79002)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms1 = _mapset_payload()
+    ms2 = _mapset_payload()
+    for ms in (ms1, ms2):
+        r = await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+        assert r.status_code == 201
+
+    await _seed_difficulties(UUID(ms1["id"]), 49)
+
+    # First diff in empty mapset2 — no quota increase (was already 1), must succeed.
+    first = await client.post(
+        f"/api/mapsets/{ms2['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert first.status_code == 201, first.text
+
+    # Second diff in mapset2 — quota would be 51, must be rejected.
+    second = await client.post(
+        f"/api/mapsets/{ms2['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert second.status_code == 409, second.text
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_difficulty_cap_detail_message(client: AsyncClient):
+    """409 response for quota exceeded must carry the expected detail string."""
+    owner = await _seed_user(79003)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    await _seed_difficulties(UUID(ms["id"]), 50)
+
+    resp = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Difficulty limit reached"
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_difficulty_cap_delete_frees_slot(client: AsyncClient):
+    """Deleting a difficulty decreases quota so a new one can be created."""
+    owner = await _seed_user(79004)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    await _seed_difficulties(UUID(ms["id"]), 50)
+
+    # At capacity — creating fails.
+    blocked = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert blocked.status_code == 409
+
+    # Fetch one of the seeded diffs to get a real ID.
+    list_resp = await client.get(f"/api/mapsets/{ms['id']}/difficulties")
+    diff_id = list_resp.json()[0]["id"]
+
+    await client.delete(f"/api/difficulties/{diff_id}", headers=CSRF_HEADERS)
+
+    # Now there's a free slot — creating must succeed.
+    freed = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert freed.status_code == 201, freed.text
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_difficulty_cap_charges_mapset_owner_not_mapper(client: AsyncClient):
+    """Quota is tracked against the mapset owner, not the user creating the diff.
+
+    Setup: owner has a mapset with 50 diffs (quota full). A mapper on that
+    mapset tries to add a difficulty — it must be rejected by the owner's quota,
+    even though the mapper's own quota is empty.
+    """
+    owner = await _seed_user(79005)
+    mapper_user = await _seed_user(79006)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    await _seed_difficulties(UUID(ms["id"]), 50)
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    resp = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 409, resp.text
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)

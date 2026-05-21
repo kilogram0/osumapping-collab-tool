@@ -378,3 +378,71 @@ async def test_me_rejects_expired_token(client: AsyncClient):
     response = await client.get("/api/auth/me")
     assert response.status_code == 401
     assert "expired" in response.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/me/quota
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_me_quota_returns_zero_for_new_user(client: AsyncClient):
+    """A user with no mapsets has used == 0."""
+    user = await _seed_user(91001, "QuotaUser", "https://a.ppy.sh/91001")
+    client.cookies.set(settings.cookie_name, create_access_token(user.id))
+
+    resp = await client.get("/api/auth/me/quota")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["used"] == 0
+    assert body["limit"] == 50
+
+    # Cleanup
+    from sqlalchemy import delete
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        await session.execute(delete(User).where(User.id == user.id))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_me_quota_counts_empty_mapset_as_one(client: AsyncClient):
+    """An empty owned mapset consumes one quota slot."""
+    from app.models import Mapset, MapsetMember, MapsetRole
+
+    user = await _seed_user(91002, "QuotaUser2", "https://a.ppy.sh/91002")
+    client.cookies.set(settings.cookie_name, create_access_token(user.id))
+
+    CSRF_HEADERS = {"X-Requested-With": "XMLHttpRequest", "Origin": settings.FRONTEND_URL}
+    mapset_payload = {
+        "id": str(uuid4()),
+        "title": "Quota Test",
+        "encrypted_song_length_ms": "encrypted:1000",
+        "passphrase_salt": "c2FsdC1iYXNlNjQ=",
+        "encrypted_verification": "encrypted:verified",
+    }
+    r = await client.post("/api/mapsets", json=mapset_payload, headers=CSRF_HEADERS)
+    assert r.status_code == 201
+
+    resp = await client.get("/api/auth/me/quota")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["used"] == 1
+    assert body["limit"] == 50
+
+    # Cleanup
+    from sqlalchemy import delete
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        await session.execute(delete(Mapset).where(Mapset.owner_id == user.id))
+        await session.execute(delete(User).where(User.id == user.id))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_me_quota_rejects_unauthenticated(client: AsyncClient):
+    resp = await client.get("/api/auth/me/quota")
+    assert resp.status_code == 401
+

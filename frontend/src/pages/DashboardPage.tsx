@@ -3,12 +3,17 @@ import type { Mapset } from '../api/endpoints';
 import CreateMapsetModal from '../components/CreateMapsetModal';
 import MapsetCard from '../components/MapsetCard';
 import PassphraseModal from '../components/PassphraseModal';
-import { useMapsets } from '../hooks/useMapset';
+import { useMapsets, useQuota } from '../hooks/useMapset';
 
 export default function DashboardPage() {
   const { data: mapsets, isLoading, isError } = useMapsets();
+  const { data: quota } = useQuota();
   const [showCreate, setShowCreate] = useState(false);
   const [unlockTarget, setUnlockTarget] = useState<Mapset | null>(null);
+
+  const quotaPct = quota ? Math.min((quota.used / quota.limit) * 100, 100) : 0;
+  const quotaColor =
+    quotaPct >= 90 ? 'bg-red-500' : quotaPct >= 70 ? 'bg-yellow-400' : 'bg-green-500';
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
@@ -22,6 +27,21 @@ export default function DashboardPage() {
             Create Mapset
           </button>
         </div>
+
+        {quota && (
+          <div className="mb-6">
+            <div className="flex justify-between text-sm text-gray-400 mb-1">
+              <span>Difficulty slots</span>
+              <span>{quota.used} / {quota.limit}</span>
+            </div>
+            <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${quotaColor}`}
+                style={{ width: `${quotaPct}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {isLoading && (
           <p className="text-gray-400">Loading mapsets…</p>

@@ -7,6 +7,7 @@ import {
   fetchMapsets,
   fetchMembers,
   fetchMyMembership,
+  fetchQuota,
   inviteMember,
   removeMember,
   scheduleMapsetDeletion,
@@ -16,6 +17,13 @@ import {
   type MapsetRole,
   type UpdateMapsetPayload,
 } from '../api/endpoints';
+
+export function useQuota() {
+  return useQuery({
+    queryKey: ['quota'],
+    queryFn: fetchQuota,
+  });
+}
 
 export function useMapsets() {
   return useQuery({
@@ -38,6 +46,7 @@ export function useCreateMapset() {
     mutationFn: (payload: CreateMapsetPayload) => createMapset(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+      queryClient.invalidateQueries({ queryKey: ['quota'] });
     },
   });
 }
@@ -59,6 +68,7 @@ export function useDeleteMapset() {
     mutationFn: (id: string) => deleteMapset(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+      queryClient.invalidateQueries({ queryKey: ['quota'] });
     },
   });
 }

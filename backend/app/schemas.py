@@ -98,11 +98,19 @@ class MapsetRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     delete_at: datetime | None
+    difficulty_count: int
 
 
 _NAME_CT_MAX = 2_048
 _TIME_CT_MAX = 256
 _SORT_ORDER_CT_MAX = 256
+
+
+class QuotaRead(BaseModel):
+    """Current difficulty slot usage for the authenticated user."""
+
+    used: int
+    limit: int
 
 
 class DifficultyCreate(BaseModel):

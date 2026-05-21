@@ -37,6 +37,17 @@ export interface Mapset {
   created_at: string;
   updated_at: string;
   delete_at: string | null;
+  difficulty_count: number;
+}
+
+export interface QuotaInfo {
+  used: number;
+  limit: number;
+}
+
+export async function fetchQuota(): Promise<QuotaInfo> {
+  const { data } = await client.get<QuotaInfo>('/auth/me/quota');
+  return data;
 }
 
 export interface CreateMapsetPayload {
