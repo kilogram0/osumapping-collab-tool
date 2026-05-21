@@ -1,16 +1,33 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { vi } from 'vitest'
 import App, { AppRoutes } from './App'
 import { AuthProvider } from './hooks/useAuth'
+import { fetchCurrentUser } from './api/endpoints'
 
 vi.mock('./api/endpoints', () => ({
   fetchCurrentUser: vi.fn().mockResolvedValue(null),
   logout: vi.fn().mockResolvedValue(undefined),
   fetchMapsets: vi.fn().mockResolvedValue([]),
 }))
+
+const mockedFetchCurrentUser = vi.mocked(fetchCurrentUser)
+
+const authedUser = {
+  id: 'u1',
+  osu_id: 1,
+  username: 'tester',
+  avatar_url: '',
+  created_at: '',
+  updated_at: '',
+}
+
+beforeEach(() => {
+  mockedFetchCurrentUser.mockReset()
+  mockedFetchCurrentUser.mockResolvedValue(null)
+})
 
 vi.mock('./contexts/EncryptionContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./contexts/EncryptionContext')>()
@@ -51,28 +68,72 @@ function renderWithProviders(ui: ReactNode, initialEntries: string[] = ['/']) {
 }
 
 describe('AppRoutes', () => {
-  it('renders LoginPage on /login', () => {
+  it('renders LoginPage on /login when unauthenticated', async () => {
     renderWithProviders(<AppRoutes />, ['/login'])
     expect(
-      screen.getByRole('button', { name: /login with osu/i }),
+      await screen.findByRole('button', { name: /login with osu/i }),
     ).toBeInTheDocument()
   })
 
-  it('renders DashboardPage on /dashboard', () => {
-    renderWithProviders(<AppRoutes />, ['/dashboard'])
-    expect(screen.getByText('Dashboard')).toBeInTheDocument()
+  it('redirects /login to /dashboard when authenticated', async () => {
+    mockedFetchCurrentUser.mockResolvedValue(authedUser)
+    renderWithProviders(<AppRoutes />, ['/login'])
+    expect(await screen.findByText('Dashboard')).toBeInTheDocument()
   })
 
-  it('redirects unknown routes to /login', () => {
+  it('redirects /dashboard to /login when unauthenticated', async () => {
+    renderWithProviders(<AppRoutes />, ['/dashboard'])
+    expect(
+      await screen.findByRole('button', { name: /login with osu/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('renders DashboardPage on /dashboard when authenticated', async () => {
+    mockedFetchCurrentUser.mockResolvedValue(authedUser)
+    renderWithProviders(<AppRoutes />, ['/dashboard'])
+    expect(await screen.findByText('Dashboard')).toBeInTheDocument()
+  })
+
+  it('redirects / to /login when unauthenticated', async () => {
+    renderWithProviders(<AppRoutes />, ['/'])
+    expect(
+      await screen.findByRole('button', { name: /login with osu/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('redirects / to /dashboard when authenticated', async () => {
+    mockedFetchCurrentUser.mockResolvedValue(authedUser)
+    renderWithProviders(<AppRoutes />, ['/'])
+    expect(await screen.findByText('Dashboard')).toBeInTheDocument()
+  })
+
+  it('redirects unknown routes to /login', async () => {
     renderWithProviders(<AppRoutes />, ['/unknown'])
     expect(
-      screen.getByRole('button', { name: /login with osu/i }),
+      await screen.findByRole('button', { name: /login with osu/i }),
     ).toBeInTheDocument()
+  })
+
+  it('redirects /mapsets/:id to /login when unauthenticated', async () => {
+    renderWithProviders(<AppRoutes />, ['/mapsets/some-id'])
+    expect(
+      await screen.findByRole('button', { name: /login with osu/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the auth loading state while /auth/me is in flight', () => {
+    mockedFetchCurrentUser.mockImplementation(() => new Promise(() => {}))
+    renderWithProviders(<AppRoutes />, ['/dashboard'])
+    expect(screen.getByRole('status', { name: /loading/i })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /login with osu/i }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Dashboard')).not.toBeInTheDocument()
   })
 })
 
 describe('App', () => {
-  it('redirects default route to login', () => {
+  it('renders login button at default route when unauthenticated', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -87,8 +148,10 @@ describe('App', () => {
       </QueryClientProvider>,
     )
 
-    expect(
-      screen.getByRole('button', { name: /login with osu/i }),
-    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /login with osu/i }),
+      ).toBeInTheDocument(),
+    )
   })
 })
