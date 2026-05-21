@@ -1,6 +1,9 @@
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Mapset } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
+import { useAuth } from '../hooks/useAuth';
+import { useCancelMapsetDeletion, useScheduleMapsetDeletion } from '../hooks/useMapset';
 
 interface MapsetCardProps {
   mapset: Mapset;
@@ -9,9 +12,35 @@ interface MapsetCardProps {
 
 export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
   const { isUnlocked } = useEncryption();
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const scheduleDelete = useScheduleMapsetDeletion();
+  const cancelDelete = useCancelMapsetDeletion();
 
   const unlocked = isUnlocked(mapset.id);
+  const isOwner = !!user && user.id === mapset.owner_id;
+  const isPendingDeletion = !!mapset.delete_at;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [menuOpen]);
 
   function handleClick() {
     navigate(`/mapsets/${mapset.id}`);
@@ -22,13 +51,36 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
     onUnlock?.(mapset);
   }
 
+  function handleMenuToggle(e: React.MouseEvent) {
+    e.stopPropagation();
+    setMenuOpen((open) => !open);
+  }
+
+  function handleScheduleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    setMenuOpen(false);
+    scheduleDelete.mutate(mapset.id);
+  }
+
+  function handleCancelDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    setMenuOpen(false);
+    cancelDelete.mutate(mapset.id);
+  }
+
+  const daysLeft = isPendingDeletion
+    ? Math.max(0, Math.ceil((new Date(mapset.delete_at!).getTime() - Date.now()) / 86_400_000))
+    : null;
+
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={handleClick}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleClick()}
-      className="bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-lg p-4 cursor-pointer transition-colors flex items-center justify-between gap-4"
+      className={`bg-gray-800 hover:bg-gray-750 border rounded-lg p-4 cursor-pointer transition-colors flex items-center justify-between gap-4 ${
+        isPendingDeletion ? 'border-red-500/60' : 'border-gray-700'
+      }`}
       data-testid="mapset-card"
     >
       <div className="min-w-0">
@@ -36,17 +88,68 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
         <p className="text-xs text-gray-500 mt-1">
           {new Date(mapset.created_at).toLocaleDateString()}
         </p>
+        {isPendingDeletion && (
+          <p className="text-xs text-red-400 mt-1">
+            {daysLeft === 0
+              ? 'Deletion imminent'
+              : `Scheduled for deletion in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}
+          </p>
+        )}
       </div>
 
-      {!unlocked && onUnlock && (
-        <button
-          onClick={handleUnlock}
-          className="shrink-0 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors"
-          aria-label="Unlock mapset"
-        >
-          Unlock
-        </button>
-      )}
+      <div className="flex items-center gap-2 shrink-0">
+        {!unlocked && onUnlock && (
+          <button
+            onClick={handleUnlock}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors"
+            aria-label="Unlock mapset"
+          >
+            Unlock
+          </button>
+        )}
+
+        {isOwner && (
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={handleMenuToggle}
+              className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
+              aria-label="Mapset options"
+              data-testid="mapset-menu-button"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <circle cx="8" cy="2" r="1.5" />
+                <circle cx="8" cy="8" r="1.5" />
+                <circle cx="8" cy="14" r="1.5" />
+              </svg>
+            </button>
+
+            {menuOpen && (
+              <div
+                className="absolute right-0 top-8 z-10 w-44 bg-gray-800 border border-gray-700 rounded-lg shadow-lg py-1"
+                data-testid="mapset-menu"
+              >
+                {isPendingDeletion ? (
+                  <button
+                    onClick={handleCancelDelete}
+                    className="w-full text-left px-4 py-2 text-sm text-green-400 hover:bg-gray-700 transition-colors"
+                    data-testid="cancel-delete-button"
+                  >
+                    Cancel deletion
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleScheduleDelete}
+                    className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700 transition-colors"
+                    data-testid="schedule-delete-button"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

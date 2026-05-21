@@ -14,6 +14,19 @@ vi.mock('../api/endpoints', () => ({
   logout: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../hooks/useAuth', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
+vi.mock('../hooks/useMapset', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../hooks/useMapset')>();
+  return {
+    ...actual,
+    useScheduleMapsetDeletion: () => ({ mutate: vi.fn() }),
+    useCancelMapsetDeletion: () => ({ mutate: vi.fn() }),
+  };
+});
+
 vi.mock('../contexts/EncryptionContext', () => ({
   useEncryption: () => ({
     isUnlocked: vi.fn(() => false),
@@ -36,6 +49,7 @@ const MAPSET: Mapset = {
   owner_id: 'owner-uuid',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
+  delete_at: null,
 };
 
 function renderDashboard() {

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  cancelMapsetDeletion,
   createMapset,
   deleteMapset,
   fetchMapset,
@@ -8,6 +9,7 @@ import {
   fetchMyMembership,
   inviteMember,
   removeMember,
+  scheduleMapsetDeletion,
   updateMapset,
   updateMemberRole,
   type CreateMapsetPayload,
@@ -106,6 +108,28 @@ export function useRemoveMember(mapsetId: string) {
     mutationFn: (userId: string) => removeMember(mapsetId, userId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['members', mapsetId] });
+    },
+  });
+}
+
+export function useScheduleMapsetDeletion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => scheduleMapsetDeletion(id),
+    onSuccess: () => {
+      // prefix match — also invalidates ['mapsets', id]
+      queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+    },
+  });
+}
+
+export function useCancelMapsetDeletion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => cancelMapsetDeletion(id),
+    onSuccess: () => {
+      // prefix match — also invalidates ['mapsets', id]
+      queryClient.invalidateQueries({ queryKey: ['mapsets'] });
     },
   });
 }

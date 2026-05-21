@@ -122,6 +122,10 @@ class Mapset(SQLModel, table=True):
             "onupdate": func.clock_timestamp(),
         },
     )
+    delete_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={"nullable": True},
+    )
 
     # Relationships
     owner: User = Relationship(back_populates="owned_mapsets")

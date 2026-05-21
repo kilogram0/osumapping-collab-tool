@@ -36,6 +36,7 @@ export interface Mapset {
   owner_id: string;
   created_at: string;
   updated_at: string;
+  delete_at: string | null;
 }
 
 export interface CreateMapsetPayload {
@@ -75,6 +76,15 @@ export async function updateMapset(id: string, payload: UpdateMapsetPayload): Pr
 
 export async function deleteMapset(id: string): Promise<void> {
   await client.delete(`/mapsets/${id}`);
+}
+
+export async function scheduleMapsetDeletion(id: string): Promise<Mapset> {
+  const { data } = await client.post<Mapset>(`/mapsets/${id}/schedule-delete`);
+  return data;
+}
+
+export async function cancelMapsetDeletion(id: string): Promise<void> {
+  await client.delete(`/mapsets/${id}/schedule-delete`);
 }
 
 // ---------------------------------------------------------------------------

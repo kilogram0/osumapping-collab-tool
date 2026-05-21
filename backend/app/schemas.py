@@ -97,6 +97,7 @@ class MapsetRead(BaseModel):
     owner_id: UUID
     created_at: datetime
     updated_at: datetime
+    delete_at: datetime | None
 
 
 _NAME_CT_MAX = 2_048

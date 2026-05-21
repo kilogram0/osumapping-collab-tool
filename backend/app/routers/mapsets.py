@@ -5,6 +5,7 @@ verbatim.  Every mapset-specific route is member-gated: non-members and
 insufficiently-privileged members both receive ``403``.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -184,6 +185,63 @@ async def delete_mapset(
     # `db.delete(mapset)` would attempt to NULL-out FKs before deleting, which
     # violates the NOT NULL constraint on MapsetMember.mapset_id.
     await db.execute(sa_delete(Mapset).where(Mapset.id == mapset_id))
+    await db.commit()
+
+
+_DELETION_GRACE_DAYS = 7
+
+
+@router.post(
+    "/{mapset_id}/schedule-delete",
+    response_model=MapsetRead,
+    dependencies=[Depends(require_csrf_protection)],
+)
+async def schedule_mapset_deletion(
+    mapset_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Mapset:
+    """Schedule a mapset for deletion after a grace period. Owner only."""
+    mapset = await db.get(Mapset, mapset_id)
+    if mapset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
+
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
+    if membership is None or membership.role != MapsetRole.owner:
+        raise _forbidden()
+
+    if mapset.delete_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Deletion already scheduled",
+        )
+
+    mapset.delete_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=_DELETION_GRACE_DAYS)
+    await db.commit()
+    await db.refresh(mapset)
+    return mapset
+
+
+@router.delete(
+    "/{mapset_id}/schedule-delete",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_csrf_protection)],
+)
+async def cancel_mapset_deletion(
+    mapset_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    """Cancel a scheduled deletion. Owner only."""
+    mapset = await db.get(Mapset, mapset_id)
+    if mapset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
+
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
+    if membership is None or membership.role != MapsetRole.owner:
+        raise _forbidden()
+
+    mapset.delete_at = None
     await db.commit()
 
 

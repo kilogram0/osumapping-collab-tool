@@ -674,3 +674,227 @@ async def test_get_my_membership_returns_404_for_unknown_mapset(
 ):
     response = await client.get(f"/api/mapsets/{uuid4()}/members/me")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /mapsets/{id}/schedule-delete
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_schedule_delete_owner_sets_delete_at(
+    client: AsyncClient, authed_user: User
+):
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+
+    response = await client.post(
+        f"/api/mapsets/{payload['id']}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["delete_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_schedule_delete_non_owner_gets_403(client: AsyncClient):
+    owner = await _seed_user(60019)
+    mapper_user = await _seed_user(60020)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+    mapset_id = payload["id"]
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(mapset_id),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    response = await client.post(
+        f"/api/mapsets/{mapset_id}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert response.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_schedule_delete_returns_404_for_unknown(
+    client: AsyncClient, authed_user: User
+):
+    response = await client.post(
+        f"/api/mapsets/{uuid4()}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_schedule_delete_rejects_unauthenticated(client: AsyncClient):
+    response = await client.post(
+        f"/api/mapsets/{uuid4()}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# DELETE /mapsets/{id}/schedule-delete
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_delete_owner_clears_delete_at(
+    client: AsyncClient, authed_user: User
+):
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+
+    schedule = await client.post(
+        f"/api/mapsets/{payload['id']}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert schedule.status_code == 200
+    assert schedule.json()["delete_at"] is not None
+
+    cancel = await client.delete(
+        f"/api/mapsets/{payload['id']}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert cancel.status_code == 204
+
+    get = await client.get(f"/api/mapsets/{payload['id']}")
+    assert get.status_code == 200
+    assert get.json()["delete_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_delete_non_owner_gets_403(client: AsyncClient):
+    owner = await _seed_user(60021)
+    mapper_user = await _seed_user(60022)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+    mapset_id = payload["id"]
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(mapset_id),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    response = await client.delete(
+        f"/api/mapsets/{mapset_id}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert response.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_cancel_delete_returns_404_for_unknown(
+    client: AsyncClient, authed_user: User
+):
+    response = await client.delete(
+        f"/api/mapsets/{uuid4()}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_schedule_delete_twice_returns_409(
+    client: AsyncClient, authed_user: User
+):
+    """Re-scheduling an already-scheduled deletion returns 409."""
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+
+    first = await client.post(
+        f"/api/mapsets/{payload['id']}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert first.status_code == 200
+
+    second = await client.post(
+        f"/api/mapsets/{payload['id']}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert second.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# _purge_expired_mapsets (cleanup body)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_purge_expired_mapsets_deletes_past_due_rows(
+    client: AsyncClient, authed_user: User
+):
+    """_purge_expired_mapsets removes mapsets whose delete_at has passed."""
+    from app.main import _purge_expired_mapsets
+
+    payload = _build_payload()
+    mapset_id = UUID(payload["id"])
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+
+    # Backdate delete_at to the past directly in the DB
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        mapset = await session.get(Mapset, mapset_id)
+        assert mapset is not None
+        from datetime import timedelta
+        mapset.delete_at = mapset.created_at - timedelta(seconds=1)
+        await session.commit()
+
+    await _purge_expired_mapsets(test_engine)
+
+    get = await client.get(f"/api/mapsets/{payload['id']}")
+    assert get.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_purge_expired_mapsets_keeps_future_rows(
+    client: AsyncClient, authed_user: User
+):
+    """_purge_expired_mapsets does not delete mapsets scheduled for the future."""
+    from app.main import _purge_expired_mapsets
+
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+
+    schedule = await client.post(
+        f"/api/mapsets/{payload['id']}/schedule-delete", headers=CSRF_HEADERS
+    )
+    assert schedule.status_code == 200
+
+    await _purge_expired_mapsets(test_engine)
+
+    get = await client.get(f"/api/mapsets/{payload['id']}")
+    assert get.status_code == 200

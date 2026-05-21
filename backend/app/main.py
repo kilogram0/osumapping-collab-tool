@@ -1,14 +1,52 @@
 """FastAPI application factory."""
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import delete as sa_delete, text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.config import settings
 from app.database import engine
+from app.models import Mapset
 from app.routers import auth, difficulties, mapsets, members, posts, sections
+
+logger = logging.getLogger(__name__)
+
+_CLEANUP_INTERVAL_SECONDS = 3600
+
+
+async def _purge_expired_mapsets(db_engine: AsyncEngine | None = None) -> None:
+    """Delete all mapsets whose delete_at has passed.
+
+    Assumed to run in a single-worker deployment. In a multi-worker setup each
+    worker will run its own copy (idempotent, but wasteful). For production
+    scale prefer pg_cron, a k8s CronJob, or a dedicated worker process.
+    Timestamps are naive UTC — all app containers must run in UTC.
+
+    Pass db_engine to override the default app engine (used in tests).
+    """
+    async with AsyncSession(db_engine or engine) as session:
+        await session.execute(
+            sa_delete(Mapset).where(
+                Mapset.delete_at <= datetime.now(timezone.utc).replace(tzinfo=None)
+            )
+        )
+        await session.commit()
+
+
+async def _cleanup_expired_mapsets() -> None:
+    while True:
+        try:
+            await _purge_expired_mapsets()
+        except Exception:
+            logger.exception("Error during scheduled mapset cleanup")
+        await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
 
 
 @asynccontextmanager
@@ -19,8 +57,10 @@ async def lifespan(app: FastAPI):
         result = await conn.execute(text("SELECT 1"))
         if result.scalar() != 1:
             raise RuntimeError("Database connectivity check failed")
+    cleanup_task = asyncio.create_task(_cleanup_expired_mapsets())
     yield
     # Shutdown
+    cleanup_task.cancel()
     await engine.dispose()
 
 
