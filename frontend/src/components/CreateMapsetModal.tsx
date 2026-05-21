@@ -13,13 +13,7 @@ import {
 } from '../utils/crypto';
 import { useCreateMapset } from '../hooks/useMapset';
 import { createDifficulty } from '../api/endpoints';
-import {
-  parseOsuFile,
-  parseDifficultyName,
-  parseMetadata,
-  MAX_OSU_BYTES,
-  type ParsedOsuFile,
-} from '../utils/osuParser';
+import { parseOszFile, type ParsedOsz } from '../utils/oszParser';
 import { importSectionsFromBookmarks } from '../utils/importSectionsFromBookmarks';
 
 interface CreateMapsetModalProps {
@@ -64,9 +58,10 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [osuFile, setOsuFile] = useState<File | null>(null);
-  const [parsedOsu, setParsedOsu] = useState<ParsedOsuFile | null>(null);
-  const [osuFileError, setOsuFileError] = useState<string | null>(null);
+  const [oszFile, setOszFile] = useState<File | null>(null);
+  const [parsedOsz, setParsedOsz] = useState<ParsedOsz | null>(null);
+  const [oszError, setOszError] = useState<string | null>(null);
+  const [oszParsing, setOszParsing] = useState(false);
 
   useEffect(() => {
     if (copied) {
@@ -84,89 +79,101 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
     }
   }
 
-  async function handleOsuFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleOszFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null;
-    setOsuFileError(null);
+    setOszError(null);
     if (!f) {
-      setOsuFile(null);
-      setParsedOsu(null);
+      setOszFile(null);
+      setParsedOsz(null);
       return;
     }
-    if (f.size > MAX_OSU_BYTES) {
-      setOsuFile(null);
-      setParsedOsu(null);
-      setOsuFileError(`File too large (${f.size} bytes; max ${MAX_OSU_BYTES}).`);
-      e.target.value = '';
-      return;
-    }
+    setOszParsing(true);
     try {
-      const text = await f.text();
-      const parsed = parseOsuFile(text);
-      setOsuFile(f);
-      setParsedOsu(parsed);
-      // Auto-fill title from [Metadata] Title if the user hasn't typed one.
+      const result = await parseOszFile(f);
+      if (result.difficulties.length === 0) {
+        throw new Error('No valid .osu files found in this .osz archive.');
+      }
+      setOszFile(f);
+      setParsedOsz(result);
       if (!title.trim()) {
-        const derivedTitle = parseMetadata(parsed).title;
-        if (derivedTitle) setTitle(derivedTitle);
+        const autoTitle =
+          result.artist && result.title
+            ? `${result.artist} - ${result.title}`
+            : result.title || result.artist || '';
+        if (autoTitle) setTitle(autoTitle);
+      }
+      if (result.songLengthMs != null && result.songLengthMs > 0 && !minutes && !seconds) {
+        const totalSec = Math.round(result.songLengthMs / 1000);
+        setMinutes(String(Math.floor(totalSec / 60)));
+        setSeconds(String(totalSec % 60));
       }
     } catch (err) {
-      setOsuFile(null);
-      setParsedOsu(null);
-      setOsuFileError(err instanceof Error ? err.message : 'Invalid .osu file.');
+      setOszFile(null);
+      setParsedOsz(null);
+      setOszError(err instanceof Error ? err.message : 'Failed to parse .osz file.');
       e.target.value = '';
+    } finally {
+      setOszParsing(false);
     }
   }
 
   /**
-   * After the mapset exists and the key is in memory, create a first
-   * difficulty from the attached .osu plus its bookmark-derived sections
-   * and pre-populated section .osu versions.
+   * After the mapset exists and the key is in memory, create all difficulties
+   * extracted from the .osz, each with their bookmark-derived sections and
+   * pre-populated .osu versions.
    *
-   * INVARIANT: this runs only after `createDifficulty` succeeds in this same
-   * submit, so the difficulty has zero base history → prepopulate=true is
-   * unconditionally safe. (The standalone Import Bookmarks button handles
-   * the "existing difficulty, maybe has history" case with a separate check;
-   * do not copy this assumption into a context where the difficulty already
-   * existed before the import was requested.)
-   *
-   * Returns a status string for toast display.
+   * INVARIANT: each difficulty is brand-new (just created in this submit),
+   * so prepopulate=true is unconditionally safe here.
    */
-  async function importFirstDifficulty(
+  async function importDifficultiesFromOsz(
     key: CryptoKey,
     mapsetId: string,
     songLengthMs: number,
   ): Promise<string> {
-    if (!parsedOsu || !osuFile) return '';
+    if (!parsedOsz || parsedOsz.difficulties.length === 0) return '';
 
-    const fallbackName =
-      osuFile.name.replace(/\.osu$/i, '').trim() || 'Difficulty';
-    const diffName = parseDifficultyName(parsedOsu) || fallbackName;
-    const diffId = crypto.randomUUID();
-    const encDiffName = await encrypt(key, diffName, difficultyFieldAad(diffId, mapsetId));
-    await createDifficulty(mapsetId, { id: diffId, encrypted_name: encDiffName });
+    const summaries: string[] = [];
+    let failedCount = 0;
 
-    const result = await importSectionsFromBookmarks({
-      parsed: parsedOsu,
-      key,
-      mapsetId,
-      difficultyId: diffId,
-      songLengthMs: songLengthMs > 0 ? songLengthMs : null,
-      prepopulate: true,
-      startingSortOrder: 0,
-    });
+    for (const diff of parsedOsz.difficulties) {
+      const diffName = diff.name || diff.filename.replace(/\.osu$/i, '').trim() || 'Difficulty';
+      const diffId = crypto.randomUUID();
+      try {
+        const encDiffName = await encrypt(key, diffName, difficultyFieldAad(diffId, mapsetId));
+        await createDifficulty(mapsetId, { id: diffId, encrypted_name: encDiffName });
 
-    if (result.total === 0) {
-      // No bookmarks (or no derivable boundaries). Difficulty exists, no
-      // sections — the difficulty is still usable, user can add sections later.
-      return `Mapset created with difficulty "${diffName}". (${result.error ?? 'No sections imported.'})`;
+        const result = await importSectionsFromBookmarks({
+          parsed: diff.parsed,
+          key,
+          mapsetId,
+          difficultyId: diffId,
+          songLengthMs: songLengthMs > 0 ? songLengthMs : null,
+          prepopulate: true,
+          startingSortOrder: 0,
+        });
+
+        if (result.total === 0) {
+          summaries.push(`"${diffName}" (no sections)`);
+        } else if (result.error) {
+          summaries.push(`"${diffName}" (${result.created}/${result.total} sections)`);
+        } else {
+          summaries.push(`"${diffName}" (${result.created} section${result.created === 1 ? '' : 's'})`);
+        }
+      } catch (err) {
+        failedCount++;
+        summaries.push(
+          `"${diffName}" (failed: ${err instanceof Error ? err.message : 'unknown error'})`,
+        );
+      }
     }
-    if (result.error) {
-      // Partial failure: difficulty + base + some sections exist. The user
-      // is on a path where re-running the standalone Import Bookmarks button
-      // on the new diff won't pre-populate (base history is no longer empty).
-      return `Mapset created with difficulty "${diffName}". Imported ${result.created} of ${result.total} sections before failing: ${result.error}. Re-running Import Bookmarks on this difficulty will add the missing sections but won't pre-fill their content.`;
-    }
-    return `Mapset created with difficulty "${diffName}" (${result.created} section${result.created === 1 ? '' : 's'} imported).`;
+
+    const total = parsedOsz.difficulties.length;
+    const ok = total - failedCount;
+    const header =
+      failedCount > 0
+        ? `Mapset created. ${ok}/${total} difficulties imported`
+        : `Mapset created with ${total} difficult${total === 1 ? 'y' : 'ies'}`;
+    return `${header}: ${summaries.join(', ')}.`;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -206,16 +213,16 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
       // Cache the passphrase in memory so the owner can re-view it from the Manage Members modal.
       await unlockWithKey(id, key, passphrase);
 
-      // If a .osu file was attached, create the first difficulty + sections +
-      // pre-populated section versions. A failure here is toasted as a
-      // warning but does not abort onSuccess — the mapset itself exists.
-      if (parsedOsu && osuFile) {
+      // If a .osz was uploaded, create all difficulties + sections.
+      // A failure here is toasted as a warning but does not abort onSuccess
+      // — the mapset itself exists.
+      if (parsedOsz && parsedOsz.difficulties.length > 0) {
         try {
-          const message = await importFirstDifficulty(key, id, totalMs);
+          const message = await importDifficultiesFromOsz(key, id, totalMs);
           if (message) showToast(message, 'success');
         } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Failed to import first difficulty.';
-          showToast(`Mapset created, but first-difficulty import failed: ${msg}`, 'warning');
+          const msg = err instanceof Error ? err.message : 'Failed to import difficulties.';
+          showToast(`Mapset created, but difficulty import failed: ${msg}`, 'warning');
         }
       }
 
@@ -307,25 +314,39 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
           </div>
 
           <div>
-            <label htmlFor="mapset-osu" className="block text-sm font-medium text-gray-300 mb-1">
-              Optionally start from a .osu file
+            <label htmlFor="mapset-osz" className="block text-sm font-medium text-gray-300 mb-1">
+              Optionally start from a .osz file
             </label>
             <input
               ref={fileInputRef}
-              id="mapset-osu"
+              id="mapset-osz"
               type="file"
-              accept=".osu"
-              onChange={handleOsuFileChange}
-              className="block w-full text-sm text-gray-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-purple-600 file:text-white hover:file:bg-purple-500"
+              accept=".osz,application/zip"
+              onChange={handleOszFileChange}
+              disabled={oszParsing}
+              className="block w-full text-sm text-gray-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-purple-600 file:text-white hover:file:bg-purple-500 disabled:opacity-60"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Creates a first difficulty (name from <code>[Metadata] Version</code>), plus sections from <code>[Editor] Bookmarks</code> with their first .osu versions pre-populated. Max 1 MB; not uploaded raw.
+              Auto-fills title and song length, then creates one difficulty per .osu file inside
+              the archive, with sections from <code>[Editor] Bookmarks</code> pre-populated. Max 100 MB; not uploaded.
             </p>
-            {osuFile && !osuFileError && (
-              <p className="text-xs text-green-400 mt-1">Selected: {osuFile.name}</p>
+            {oszParsing && (
+              <p className="text-xs text-blue-400 mt-1">Reading archive…</p>
             )}
-            {osuFileError && (
-              <p role="alert" className="text-xs text-red-400 mt-1">{osuFileError}</p>
+            {oszFile && parsedOsz && !oszError && !oszParsing && (
+              <div className="mt-2 space-y-1">
+                <p className="text-xs text-green-400">
+                  Found {parsedOsz.difficulties.length} difficult{parsedOsz.difficulties.length === 1 ? 'y' : 'ies'}:
+                </p>
+                <ul className="text-xs text-gray-400 list-disc list-inside space-y-0.5">
+                  {parsedOsz.difficulties.map((d) => (
+                    <li key={d.filename}>{d.name ?? d.filename}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {oszError && (
+              <p role="alert" className="text-xs text-red-400 mt-1">{oszError}</p>
             )}
           </div>
 

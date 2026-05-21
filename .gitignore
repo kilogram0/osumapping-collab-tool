@@ -53,3 +53,6 @@ Thumbs.db
 *.pid
 *.seed
 *.pid.lock
+
+# osu! beatmap archives (test fixtures / local use only)
+*.osz

@@ -3,6 +3,22 @@ import { act, renderHook } from '@testing-library/react';
 import { EncryptionProvider, useEncryption } from './EncryptionContext';
 import { deriveKey, encrypt, generateSalt, VERIFICATION_CANARY } from '../utils/crypto';
 
+// Replace the 600k-iteration PBKDF2 with a direct importKey so tests are fast
+// and deterministic on any hardware. encrypt/decrypt stay real — the canary
+// check and wrong-passphrase rejection are still genuinely exercised because
+// different passphrases produce different AES-GCM keys → AES-GCM tag failure.
+vi.mock('../utils/crypto', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../utils/crypto')>();
+  return {
+    ...real,
+    deriveKey: async (passphrase: string, _salt: string): Promise<CryptoKey> => {
+      const raw = new Uint8Array(32);
+      raw.set(new TextEncoder().encode(passphrase).slice(0, 32));
+      return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    },
+  };
+});
+
 // Mock the IDB module so tests run in jsdom without a real IndexedDB implementation.
 const idbStore = new Map<string, CryptoKey>();
 
