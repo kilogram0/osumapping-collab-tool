@@ -53,6 +53,8 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
   const [description, setDescription] = useState('');
   const [minutes, setMinutes] = useState('');
   const [seconds, setSeconds] = useState('');
+  const [titleDirty, setTitleDirty] = useState(false);
+  const [songLengthDirty, setSongLengthDirty] = useState(false);
   const [passphrase] = useState(() => generatePassphrase());
   const [copied, setCopied] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -95,14 +97,14 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
       }
       setOszFile(f);
       setParsedOsz(result);
-      if (!title.trim()) {
+      if (!titleDirty) {
         const autoTitle =
           result.artist && result.title
             ? `${result.artist} - ${result.title}`
             : result.title || result.artist || '';
         if (autoTitle) setTitle(autoTitle);
       }
-      if (result.songLengthMs != null && result.songLengthMs > 0 && !minutes && !seconds) {
+      if (!songLengthDirty && result.songLengthMs != null && result.songLengthMs > 0) {
         const totalSec = Math.round(result.songLengthMs / 1000);
         setMinutes(String(Math.floor(totalSec / 60)));
         setSeconds(String(totalSec % 60));
@@ -255,7 +257,7 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
               id="mapset-title"
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => { setTitle(e.target.value); setTitleDirty(true); }}
               required
               maxLength={255}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
@@ -289,7 +291,7 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
                   id="mapset-song-minutes"
                   type="number"
                   value={minutes}
-                  onChange={makeClampedOnChange(setMinutes)}
+                  onChange={makeClampedOnChange((v) => { setMinutes(v); setSongLengthDirty(true); })}
                   min={0}
                   className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                   placeholder="0"
@@ -302,7 +304,7 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
                   id="mapset-song-seconds"
                   type="number"
                   value={seconds}
-                  onChange={makeClampedOnChange(setSeconds, 59)}
+                  onChange={makeClampedOnChange((v) => { setSeconds(v); setSongLengthDirty(true); }, 59)}
                   min={0}
                   max={59}
                   className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"

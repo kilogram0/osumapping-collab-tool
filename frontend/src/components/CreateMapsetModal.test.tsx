@@ -6,6 +6,11 @@ import CreateMapsetModal from './CreateMapsetModal';
 import { encrypt } from '../utils/crypto';
 import { createMapset } from '../api/endpoints';
 import { ToastProvider } from '../contexts/ToastContext';
+import { parseOszFile } from '../utils/oszParser';
+
+vi.mock('../utils/oszParser', () => ({
+  parseOszFile: vi.fn(),
+}));
 
 vi.mock('../api/endpoints', () => ({
   createMapset: vi.fn().mockResolvedValue({
@@ -144,5 +149,113 @@ describe('CreateMapsetModal', () => {
     await userEvent.click(screen.getByRole('button', { name: /create mapset/i }));
 
     expect(vi.mocked(createMapset)).not.toHaveBeenCalled();
+  });
+});
+
+function makeOsz(overrides?: Partial<import('../utils/oszParser').ParsedOsz>) {
+  return {
+    difficulties: [{ filename: 'Hard.osu', content: '', parsed: { sections: [] }, name: 'Hard', bookmarks: [] }],
+    title: 'Song',
+    artist: 'Artist',
+    audioFilename: null,
+    songLengthMs: 180000, // 3:00
+    ...overrides,
+  };
+}
+
+async function uploadOsz(result: import('../utils/oszParser').ParsedOsz) {
+  vi.mocked(parseOszFile).mockResolvedValueOnce(result);
+  const file = new File([''], 'test.osz', { type: 'application/zip' });
+  await userEvent.upload(screen.getByLabelText(/start from a \.osz/i), file);
+  await waitFor(() => {
+    expect(vi.mocked(parseOszFile)).toHaveBeenCalled();
+  });
+}
+
+describe('CreateMapsetModal — OSZ dirty-field behaviour', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('auto-fills title from first OSZ upload', async () => {
+    renderModal();
+    await uploadOsz(makeOsz());
+    await waitFor(() => {
+      expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe('Artist - Song');
+    });
+  });
+
+  it('auto-fills song length from first OSZ upload', async () => {
+    renderModal();
+    await uploadOsz(makeOsz());
+    await waitFor(() => {
+      expect((screen.getByLabelText(/minutes/i) as HTMLInputElement).value).toBe('3');
+      expect((screen.getByLabelText(/seconds/i) as HTMLInputElement).value).toBe('0');
+    });
+  });
+
+  it('replaces title on second OSZ when not dirty', async () => {
+    renderModal();
+    await uploadOsz(makeOsz({ artist: 'Artist1', title: 'Song1' }));
+    await waitFor(() => {
+      expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe('Artist1 - Song1');
+    });
+    await uploadOsz(makeOsz({ artist: 'Artist2', title: 'Song2' }));
+    await waitFor(() => {
+      expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe('Artist2 - Song2');
+    });
+  });
+
+  it('replaces song length on second OSZ when not dirty', async () => {
+    renderModal();
+    await uploadOsz(makeOsz({ songLengthMs: 60000 })); // 1:00
+    await waitFor(() => {
+      expect((screen.getByLabelText(/minutes/i) as HTMLInputElement).value).toBe('1');
+    });
+    await uploadOsz(makeOsz({ songLengthMs: 120000 })); // 2:00
+    await waitFor(() => {
+      expect((screen.getByLabelText(/minutes/i) as HTMLInputElement).value).toBe('2');
+      expect((screen.getByLabelText(/seconds/i) as HTMLInputElement).value).toBe('0');
+    });
+  });
+
+  it('does not replace title on second OSZ when user has edited it', async () => {
+    renderModal();
+    await uploadOsz(makeOsz({ artist: 'Artist1', title: 'Song1' }));
+    await waitFor(() => {
+      expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe('Artist1 - Song1');
+    });
+    const titleInput = screen.getByLabelText(/title/i);
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, 'My Custom Title');
+    await uploadOsz(makeOsz({ artist: 'Artist2', title: 'Song2' }));
+    // Title should remain what the user typed
+    expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe('My Custom Title');
+  });
+
+  it('does not replace song length on second OSZ when user has edited minutes', async () => {
+    renderModal();
+    await uploadOsz(makeOsz({ songLengthMs: 60000 }));
+    await waitFor(() => {
+      expect((screen.getByLabelText(/minutes/i) as HTMLInputElement).value).toBe('1');
+    });
+    const minutesInput = screen.getByLabelText(/minutes/i);
+    await userEvent.clear(minutesInput);
+    await userEvent.type(minutesInput, '5');
+    await uploadOsz(makeOsz({ songLengthMs: 120000 }));
+    expect((screen.getByLabelText(/minutes/i) as HTMLInputElement).value).toBe('5');
+  });
+
+  it('does not replace song length on second OSZ when user has edited seconds', async () => {
+    renderModal();
+    await uploadOsz(makeOsz({ songLengthMs: 60000 }));
+    await waitFor(() => {
+      expect((screen.getByLabelText(/seconds/i) as HTMLInputElement).value).toBe('0');
+    });
+    const secondsInput = screen.getByLabelText(/seconds/i);
+    await userEvent.clear(secondsInput);
+    await userEvent.type(secondsInput, '30');
+    await uploadOsz(makeOsz({ songLengthMs: 120000 }));
+    expect((screen.getByLabelText(/seconds/i) as HTMLInputElement).value).toBe('30');
   });
 });
