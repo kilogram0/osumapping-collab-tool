@@ -243,6 +243,7 @@ function renderPage() {
         <MemoryRouter initialEntries={['/mapsets/ms1']}>
           <Routes>
             <Route path="/mapsets/:id" element={<MapsetPage />} />
+            <Route path="/dashboard" element={<div data-testid="dashboard-route">Dashboard</div>} />
           </Routes>
         </MemoryRouter>
         <ToastContainer />
@@ -270,6 +271,18 @@ describe('MapsetPage', () => {
         updated_at: '',
       },
       isLoading: false,
+    });
+  });
+
+  it('navigates back to dashboard when back button is clicked', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('Test Mapset')).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Back to Dashboard/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('dashboard-route')).toBeInTheDocument();
     });
   });
 

@@ -502,6 +502,13 @@ export default function MapsetPage() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-6xl mx-auto">
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          className="mb-4 inline-flex items-center gap-1.5 text-sm text-gray-300 hover:text-white transition-colors"
+        >
+          <span aria-hidden="true">←</span> Back to Dashboard
+        </button>
         {actualIsOwner && emulatedRole && (
           <div
             role="status"
