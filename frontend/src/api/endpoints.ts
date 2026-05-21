@@ -231,6 +231,10 @@ export async function updateDifficulty(
   return data;
 }
 
+export async function deleteDifficulty(difficultyId: string): Promise<void> {
+  await client.delete(`/difficulties/${difficultyId}`);
+}
+
 export interface Section {
   id: string;
   difficulty_id: string;

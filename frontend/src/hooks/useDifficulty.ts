@@ -5,6 +5,7 @@ import {
   createDifficulty,
   createPost,
   createSection,
+  deleteDifficulty,
   deletePost,
   deleteSection,
   fetchBaseOsuVersions,
@@ -48,6 +49,16 @@ export function useUpdateDifficulty(mapsetId: string) {
     onSuccess: (_data, { difficultyId }) => {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+    },
+  });
+}
+
+export function useDeleteDifficulty(mapsetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (difficultyId: string) => deleteDifficulty(difficultyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
     },
   });
 }

@@ -19,6 +19,7 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import { useToast } from '../contexts/ToastContext';
 import {
   useCreatePost,
+  useDeleteDifficulty,
   useDeletePost,
   useDeleteSection,
   useDifficultyDetail,
@@ -64,9 +65,11 @@ export default function MapsetPage() {
   const updatePostMutation = useUpdatePost(selectedDifficultyId ?? '');
   const deletePostMutation = useDeletePost(selectedDifficultyId ?? '');
   const deleteSectionMutation = useDeleteSection(selectedDifficultyId ?? '');
+  const deleteDifficultyMutation = useDeleteDifficulty(mapsetId);
 
   const [showCreateDifficulty, setShowCreateDifficulty] = useState(false);
   const [showRenameDifficulty, setShowRenameDifficulty] = useState(false);
+  const [showDeleteDifficultyConfirm, setShowDeleteDifficultyConfirm] = useState(false);
   const [showCreateSection, setShowCreateSection] = useState(false);
   const [showEditSection, setShowEditSection] = useState(false);
   const [showBaseHistory, setShowBaseHistory] = useState(false);
@@ -430,6 +433,17 @@ export default function MapsetPage() {
     }
   }
 
+  async function handleDeleteDifficulty() {
+    try {
+      await deleteDifficultyMutation.mutateAsync(selectedDifficultyId);
+      setSelectedDifficultyId(null);
+      setShowDeleteDifficultyConfirm(false);
+      showToast('Difficulty deleted.', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to delete difficulty.', 'error');
+    }
+  }
+
   async function handleDownloadBase() {
     if (!unlocked || !selectedDifficultyId) return;
     try {
@@ -647,6 +661,15 @@ export default function MapsetPage() {
                     Rename Difficulty
                   </button>
                 )}
+                {isOwner && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteDifficultyConfirm(true)}
+                    className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded transition-colors"
+                  >
+                    Delete Difficulty
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -827,6 +850,47 @@ export default function MapsetPage() {
           onSuccess={() => setShowRenameDifficulty(false)}
           onCancel={() => setShowRenameDifficulty(false)}
         />
+      )}
+
+      {showDeleteDifficultyConfirm && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-difficulty-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+        >
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm shadow-xl">
+            <h2 id="delete-difficulty-modal-title" className="text-lg font-bold text-white mb-3">
+              Delete Difficulty
+            </h2>
+            <p className="text-sm text-gray-300 mb-5">
+              Delete{' '}
+              <strong className="text-white">
+                {difficultyNames[selectedDifficultyId]}
+              </strong>
+              ? This will permanently remove all its sections, posts, and uploaded .osu versions.{' '}
+              <span className="text-red-400">This cannot be undone.</span>
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowDeleteDifficultyConfirm(false)}
+                disabled={deleteDifficultyMutation.isPending}
+                className="px-4 py-2 text-gray-300 hover:text-white transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteDifficulty}
+                disabled={deleteDifficultyMutation.isPending}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded transition-colors"
+              >
+                {deleteDifficultyMutation.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showManageMembers && (

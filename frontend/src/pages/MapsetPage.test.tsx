@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import MapsetPage from './MapsetPage';
 import { ToastProvider } from '../contexts/ToastContext';
+import ToastContainer from '../components/ToastContainer';
 
 const mockIsUnlocked = vi.fn(() => true);
 const mockGetKey = vi.fn(async () => ({ key: 'mock-key' } as unknown as CryptoKey));
@@ -177,6 +178,7 @@ const mockUseMyMembership = vi.fn(() => ({
 const mockCreatePost = vi.fn().mockResolvedValue({});
 const mockUpdatePost = vi.fn().mockResolvedValue({});
 const mockDeletePost = vi.fn().mockResolvedValue({});
+const mockDeleteDifficulty = vi.fn().mockResolvedValue({});
 
 vi.mock('../hooks/useMapset', () => ({
   useMapset: () => ({
@@ -227,6 +229,10 @@ vi.mock('../hooks/useDifficulty', () => ({
   useDeleteSection: () => ({
     mutateAsync: vi.fn(),
   }),
+  useDeleteDifficulty: () => ({
+    mutateAsync: mockDeleteDifficulty,
+    isPending: false,
+  }),
 }));
 
 function renderPage() {
@@ -239,6 +245,7 @@ function renderPage() {
             <Route path="/mapsets/:id" element={<MapsetPage />} />
           </Routes>
         </MemoryRouter>
+        <ToastContainer />
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -252,6 +259,7 @@ describe('MapsetPage', () => {
     mockCreatePost.mockClear();
     mockUpdatePost.mockClear();
     mockDeletePost.mockClear();
+    mockDeleteDifficulty.mockClear();
     mockUseMyMembership.mockReturnValue({
       data: {
         id: 'member-1',
@@ -446,8 +454,10 @@ describe('MapsetPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
     });
-    const deleteButtons = screen.getAllByRole('button', { name: /Delete/i });
-    await user.click(deleteButtons[0]);
+    const postCards = screen.getAllByTestId('post-card');
+    const ownPost = postCards.find((card) => within(card).queryByText(/these are too close/i));
+    expect(ownPost).toBeDefined();
+    await user.click(within(ownPost!).getByRole('button', { name: /Delete/i }));
 
     await waitFor(() => {
       expect(mockDeletePost).toHaveBeenCalledTimes(1);
@@ -507,5 +517,117 @@ describe('MapsetPage', () => {
     const replyPost = postCards.find((card) => within(card).queryByText(/Thanks for the feedback/i));
     expect(replyPost).toBeDefined();
     expect(within(replyPost!).queryByRole('button', { name: /Reply/i })).not.toBeInTheDocument();
+  });
+
+  describe('Delete Difficulty', () => {
+    it('shows Delete Difficulty button for owner when a difficulty is selected', async () => {
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+    });
+
+    it('hides Delete Difficulty button for mapper role', async () => {
+      mockUseMyMembership.mockReturnValue({
+        data: {
+          id: 'member-2',
+          mapset_id: 'ms1',
+          user_id: 'current-user-uuid',
+          role: 'mapper',
+          created_at: '',
+          updated_at: '',
+        },
+        isLoading: false,
+      });
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Add Difficulty/i })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: /Delete Difficulty/i })).not.toBeInTheDocument();
+    });
+
+    it('hides Delete Difficulty button for modder role', async () => {
+      mockUseMyMembership.mockReturnValue({
+        data: {
+          id: 'member-3',
+          mapset_id: 'ms1',
+          user_id: 'current-user-uuid',
+          role: 'modder',
+          created_at: '',
+          updated_at: '',
+        },
+        isLoading: false,
+      });
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText('Test Mapset')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: /Delete Difficulty/i })).not.toBeInTheDocument();
+    });
+
+    it('opens confirmation modal with difficulty name when Delete Difficulty is clicked', async () => {
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      const dialog = screen.getByRole('dialog', { name: /Delete Difficulty/i });
+      expect(within(dialog).getByText('Hard')).toBeInTheDocument();
+      expect(within(dialog).getByText(/permanently remove all its sections/i)).toBeInTheDocument();
+    });
+
+    it('cancels and closes modal without calling delete', async () => {
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Cancel/i }));
+      expect(screen.queryByRole('dialog', { name: /Delete Difficulty/i })).not.toBeInTheDocument();
+      expect(mockDeleteDifficulty).not.toHaveBeenCalled();
+    });
+
+    it('calls delete mutation and closes modal on confirm', async () => {
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /^Delete$/i }));
+      await waitFor(() => {
+        expect(mockDeleteDifficulty).toHaveBeenCalledWith('d1');
+      });
+      expect(screen.queryByRole('dialog', { name: /Delete Difficulty/i })).not.toBeInTheDocument();
+    });
+
+    it('shows an error toast and keeps modal open when delete fails', async () => {
+      mockDeleteDifficulty.mockRejectedValueOnce(new Error('Server error'));
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /^Delete$/i }));
+      await waitFor(() => {
+        expect(screen.getByText('Server error')).toBeInTheDocument();
+      });
+      expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
+    });
   });
 });
