@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useToast } from '../contexts/ToastContext';
 import { encrypt, difficultyFieldAad } from '../utils/crypto';
@@ -19,6 +20,7 @@ export default function RenameDifficultyModal({
   onSuccess,
   onCancel,
 }: RenameDifficultyModalProps) {
+  const { t } = useTranslation();
   const { getKey } = useEncryption();
   const { showToast } = useToast();
   const updateDifficulty = useUpdateDifficulty(mapsetId);
@@ -40,7 +42,7 @@ export default function RenameDifficultyModal({
     try {
       const key = await getKey(mapsetId);
       if (!key) {
-        setError('Encryption key not found. Please unlock the mapset first.');
+        setError(t('renameDifficultyModal.errorKeyMissing'));
         setSubmitting(false);
         return;
       }
@@ -50,10 +52,10 @@ export default function RenameDifficultyModal({
         difficultyId,
         payload: { encrypted_name: encryptedName },
       });
-      showToast('Difficulty renamed.', 'success');
+      showToast(t('renameDifficultyModal.toastRenamed'), 'success');
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to rename difficulty.');
+      setError(err instanceof Error ? err.message : t('renameDifficultyModal.errorGeneric'));
     } finally {
       setSubmitting(false);
     }
@@ -71,13 +73,13 @@ export default function RenameDifficultyModal({
     >
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl">
         <h2 id="rename-difficulty-title" className="text-xl font-bold text-white mb-4">
-          Rename Difficulty
+          {t('renameDifficultyModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="rename-difficulty-name" className="block text-sm font-medium text-gray-300 mb-1">
-              Name <span className="text-red-400">*</span>
+              {t('renameDifficultyModal.nameLabel')} <span className="text-red-400">{t('common.required')}</span>
             </label>
             <input
               id="rename-difficulty-name"
@@ -103,14 +105,14 @@ export default function RenameDifficultyModal({
               onClick={onCancel}
               className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={!name.trim() || submitting}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
             >
-              {submitting ? 'Saving…' : 'Save'}
+              {submitting ? t('renameDifficultyModal.submitting') : t('renameDifficultyModal.submit')}
             </button>
           </div>
         </form>

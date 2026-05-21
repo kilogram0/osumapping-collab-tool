@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
+import { useTranslation } from 'react-i18next';
 import { useEncryption } from '../contexts/EncryptionContext';
 import {
   useInviteMember,
@@ -21,11 +22,11 @@ interface ManageMembersModalProps {
 
 const ROLES: MapsetRole[] = ['owner', 'mapper', 'modder'];
 
-const ROLE_LABELS: Record<MapsetRole, string> = {
-  owner: 'Owner',
-  mapper: 'Mapper',
-  modder: 'Modder',
-};
+const ROLE_LABEL_KEYS = {
+  owner: 'manageMembers.roleOwner',
+  mapper: 'manageMembers.roleMapper',
+  modder: 'manageMembers.roleModder',
+} as const satisfies Record<MapsetRole, string>;
 
 function errorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -43,6 +44,7 @@ export default function ManageMembersModal({
   onEmulateRole,
   onClose,
 }: ManageMembersModalProps) {
+  const { t } = useTranslation();
   const { getPassphrase } = useEncryption();
   const { data: members, isLoading, isError } = useMembers(mapsetId);
   const inviteMutation = useInviteMember(mapsetId);
@@ -66,7 +68,7 @@ export default function ManageMembersModal({
       await inviteMutation.mutateAsync(trimmed);
       setUsername('');
     } catch (err) {
-      setInviteError(errorMessage(err, 'Failed to invite user.'));
+      setInviteError(errorMessage(err, t('manageMembers.errorInvite')));
     }
   }
 
@@ -74,30 +76,28 @@ export default function ManageMembersModal({
     if (member.role === newRole) return;
     setMemberError(null);
     if (member.user_id === currentUserId && newRole !== 'owner') {
-      setMemberError(
-        'You cannot demote yourself. Transfer ownership to another member first.',
-      );
+      setMemberError(t('manageMembers.errorDemoteSelf'));
       return;
     }
     if (newRole === 'owner') {
-      if (!confirm(`Transfer ownership to ${member.username}? You will be demoted to mapper.`)) {
+      if (!confirm(t('manageMembers.confirmTransfer', { username: member.username }))) {
         return;
       }
     }
     try {
       await updateRoleMutation.mutateAsync({ userId: member.user_id, role: newRole });
     } catch (err) {
-      setMemberError(errorMessage(err, 'Failed to update role.'));
+      setMemberError(errorMessage(err, t('manageMembers.errorUpdateRole')));
     }
   }
 
   async function handleRemove(member: MemberWithUser) {
     setMemberError(null);
-    if (!confirm(`Remove ${member.username} from this mapset?`)) return;
+    if (!confirm(t('manageMembers.confirmRemove', { username: member.username }))) return;
     try {
       await removeMutation.mutateAsync(member.user_id);
     } catch (err) {
-      setMemberError(errorMessage(err, 'Failed to remove member.'));
+      setMemberError(errorMessage(err, t('manageMembers.errorRemove')));
     }
   }
 
@@ -122,12 +122,12 @@ export default function ManageMembersModal({
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 id="manage-members-title" className="text-xl font-bold text-white">
-            Manage Members
+            {t('manageMembers.title')}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('manageMembers.closeAria')}
             className="text-gray-400 hover:text-white"
           >
             ✕
@@ -136,13 +136,13 @@ export default function ManageMembersModal({
 
         {isOwner && (
           <div className="bg-gray-900 border border-gray-600 rounded p-3 mb-4">
-            <p className="text-sm font-medium text-gray-300 mb-2">Mapset Passphrase</p>
+            <p className="text-sm font-medium text-gray-300 mb-2">{t('manageMembers.passphraseLabel')}</p>
             {cachedPassphrase ? (
               <>
                 <div className="flex items-center gap-2">
                   <code
                     className="flex-1 font-mono text-sm text-yellow-300 break-all select-all"
-                    aria-label="Mapset passphrase"
+                    aria-label={t('manageMembers.passphraseAria')}
                   >
                     {showPassphrase ? cachedPassphrase : '••••••••••••••••'}
                   </code>
@@ -151,24 +151,23 @@ export default function ManageMembersModal({
                     onClick={() => setShowPassphrase((v) => !v)}
                     className="shrink-0 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
                   >
-                    {showPassphrase ? 'Hide' : 'Show'}
+                    {showPassphrase ? t('common.hide') : t('common.show')}
                   </button>
                   <button
                     type="button"
                     onClick={handleCopyPassphrase}
                     className="shrink-0 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
                   >
-                    {copied ? 'Copied!' : 'Copy'}
+                    {copied ? t('common.copied') : t('common.copy')}
                   </button>
                 </div>
                 <p className="text-xs text-gray-400 mt-2">
-                  Share this passphrase with invited members so they can unlock the mapset.
+                  {t('manageMembers.shareHint')}
                 </p>
               </>
             ) : (
               <p className="text-xs text-gray-400">
-                Passphrase is not cached in this session. Reload-and-unlock to cache it again, or
-                share the one you saved when creating the mapset.
+                {t('manageMembers.notCached')}
               </p>
             )}
           </div>
@@ -177,12 +176,10 @@ export default function ManageMembersModal({
         {isOwner && onEmulateRole && (
           <div className="bg-gray-900 border border-gray-600 rounded p-3 mb-4">
             <label htmlFor="emulate-role" className="block text-sm font-medium text-gray-300 mb-1">
-              Preview as role
+              {t('manageMembers.previewLabel')}
             </label>
             <p className="text-xs text-gray-400 mb-2">
-              UI-only preview of what a lower role sees. The server still
-              authorizes you as owner, so this is not a security boundary —
-              don't rely on it to test access control.
+              {t('manageMembers.previewHint')}
             </p>
             <select
               id="emulate-role"
@@ -193,9 +190,9 @@ export default function ManageMembersModal({
               }}
               className="bg-gray-800 border border-gray-600 rounded text-white text-sm px-2 py-1"
             >
-              <option value="none">Owner (no preview)</option>
-              <option value="mapper">Mapper</option>
-              <option value="modder">Modder</option>
+              <option value="none">{t('manageMembers.previewOwnerOption')}</option>
+              <option value="mapper">{t('manageMembers.previewMapperOption')}</option>
+              <option value="modder">{t('manageMembers.previewModderOption')}</option>
             </select>
           </div>
         )}
@@ -203,7 +200,7 @@ export default function ManageMembersModal({
         {isOwner && (
           <form onSubmit={handleInvite} className="mb-4 space-y-2">
             <label htmlFor="invite-username" className="block text-sm font-medium text-gray-300">
-              Invite by osu! username
+              {t('manageMembers.inviteLabel')}
             </label>
             <div className="flex gap-2">
               <input
@@ -212,7 +209,7 @@ export default function ManageMembersModal({
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 maxLength={255}
-                placeholder="username"
+                placeholder={t('manageMembers.invitePlaceholder')}
                 className="flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
               />
               <button
@@ -220,7 +217,7 @@ export default function ManageMembersModal({
                 disabled={!username.trim() || inviteMutation.isPending}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded text-sm font-medium"
               >
-                {inviteMutation.isPending ? 'Inviting…' : 'Invite'}
+                {inviteMutation.isPending ? t('manageMembers.inviting') : t('manageMembers.invite')}
               </button>
             </div>
             {inviteError && (
@@ -232,9 +229,9 @@ export default function ManageMembersModal({
         )}
 
         <div>
-          <h3 className="text-sm font-medium text-gray-300 mb-2">Members</h3>
-          {isLoading && <p className="text-gray-400 text-sm">Loading members…</p>}
-          {isError && <p className="text-red-400 text-sm">Failed to load members.</p>}
+          <h3 className="text-sm font-medium text-gray-300 mb-2">{t('manageMembers.membersHeading')}</h3>
+          {isLoading && <p className="text-gray-400 text-sm">{t('manageMembers.membersLoading')}</p>}
+          {isError && <p className="text-red-400 text-sm">{t('manageMembers.membersError')}</p>}
           {memberError && (
             <p role="alert" className="text-red-400 text-sm mb-2">
               {memberError}
@@ -257,16 +254,16 @@ export default function ManageMembersModal({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white font-medium truncate">
                       {member.username}
-                      {isSelf && <span className="ml-1 text-gray-400 text-xs">(you)</span>}
+                      {isSelf && <span className="ml-1 text-gray-400 text-xs">{t('common.you')}</span>}
                     </p>
                     {!isOwner && (
-                      <p className="text-xs text-gray-400">{ROLE_LABELS[member.role]}</p>
+                      <p className="text-xs text-gray-400">{t(ROLE_LABEL_KEYS[member.role])}</p>
                     )}
                   </div>
                   {isOwner && (
                     <div className="flex items-center gap-2">
                       <label className="sr-only" htmlFor={`role-${member.user_id}`}>
-                        Role
+                        {t('manageMembers.roleSrLabel')}
                       </label>
                       <select
                         id={`role-${member.user_id}`}
@@ -283,7 +280,7 @@ export default function ManageMembersModal({
                             value={role}
                             disabled={isSelf && role !== 'owner'}
                           >
-                            {ROLE_LABELS[role]}
+                            {t(ROLE_LABEL_KEYS[role])}
                           </option>
                         ))}
                       </select>
@@ -294,7 +291,7 @@ export default function ManageMembersModal({
                           disabled={removeMutation.isPending}
                           className="text-xs text-red-400 hover:text-red-300"
                         >
-                          Remove
+                          {t('manageMembers.remove')}
                         </button>
                       )}
                     </div>
@@ -311,7 +308,7 @@ export default function ManageMembersModal({
             onClick={onClose}
             className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
           >
-            Close
+            {t('manageMembers.close')}
           </button>
         </div>
       </div>

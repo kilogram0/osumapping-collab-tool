@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../contexts/ToastContext';
 
 const TYPE_STYLES = {
@@ -8,6 +9,7 @@ const TYPE_STYLES = {
 } as const;
 
 export default function ToastContainer() {
+  const { t } = useTranslation();
   const { toasts, dismiss } = useToast();
 
   if (toasts.length === 0) return null;
@@ -15,7 +17,7 @@ export default function ToastContainer() {
   return (
     <div
       aria-live="polite"
-      aria-label="Notifications"
+      aria-label={t('toast.notifications')}
       className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm w-full"
     >
       {toasts.map((toast) => (
@@ -28,7 +30,7 @@ export default function ToastContainer() {
           <button
             type="button"
             onClick={() => dismiss(toast.id)}
-            aria-label="Dismiss notification"
+            aria-label={t('toast.dismiss')}
             className="shrink-0 opacity-70 hover:opacity-100 transition-opacity text-lg leading-none"
           >
             ×

@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import axios from 'axios';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   uploadSectionOsu,
@@ -47,6 +48,7 @@ export default function OsuUploadButton({
   role,
   sectionRange,
 }: OsuUploadButtonProps) {
+  const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
@@ -146,7 +148,7 @@ export default function OsuUploadButton({
         return true;
       } catch (err) {
         logger.warn('Upload failed:', err);
-        const message = err instanceof Error ? err.message : 'Upload failed';
+        const message = err instanceof Error ? err.message : t('osuUpload.errorUploadFailed');
         setUploadState({ loading: false, error: message, success: false, warning: null });
         return false;
       }
@@ -177,7 +179,7 @@ export default function OsuUploadButton({
 
         const key = await getKey(mapsetId);
         if (!key) {
-          setUploadState({ loading: false, error: 'Encryption key not found.', success: false, warning: null });
+          setUploadState({ loading: false, error: t('osuUpload.errorKeyMissing'), success: false, warning: null });
           return;
         }
 
@@ -213,12 +215,16 @@ export default function OsuUploadButton({
           } else if (report.notice.length > 0 || report.timingPointsChanged) {
             const ok = await performUpload(key, sectionText, candidateBase);
             if (ok) {
+              // notice entries come from the diff utility as .osu-section
+              // identifiers (e.g. "AudioFilename"); keep TimingPoints as the
+              // same kind of identifier so the message stays consistent rather
+              // than mixing translated UI text with untranslated field names.
               const parts = [...report.notice];
               if (report.timingPointsChanged) parts.push('TimingPoints');
               setUploadState((s) => ({
                 ...s,
                 loading: false,
-                warning: parts.length > 0 ? `Notice: ${parts.join(', ')}` : null,
+                warning: parts.length > 0 ? t('osuUpload.noticePrefix', { parts: parts.join(', ') }) : null,
               }));
             }
           } else {
@@ -227,11 +233,11 @@ export default function OsuUploadButton({
         }
       } catch (err) {
         logger.warn('Upload failed:', err);
-        const message = err instanceof Error ? err.message : 'Upload failed';
+        const message = err instanceof Error ? err.message : t('osuUpload.errorUploadFailed');
         setUploadState({ loading: false, error: message, success: false, warning: null });
       }
     },
-    [difficultyId, mapsetId, getKey, performUpload, role],
+    [difficultyId, mapsetId, getKey, performUpload, role, t],
   );
 
   const handleFileSelect = useCallback(
@@ -242,7 +248,7 @@ export default function OsuUploadButton({
       event.target.value = '';
 
       if (!unlocked) {
-        setUploadState({ loading: false, error: 'Mapset is locked. Enter the passphrase first.', success: false, warning: null });
+        setUploadState({ loading: false, error: t('osuUpload.errorLocked'), success: false, warning: null });
         return;
       }
 
@@ -251,7 +257,7 @@ export default function OsuUploadButton({
       if (file.size > MAX_OSU_BYTES) {
         setUploadState({
           loading: false,
-          error: `File too large (${file.size} bytes; max ${MAX_OSU_BYTES}).`,
+          error: t('osuUpload.errorFileTooLarge', { size: file.size, max: MAX_OSU_BYTES }),
           success: false,
           warning: null,
         });
@@ -295,11 +301,11 @@ export default function OsuUploadButton({
         await proceedAfterSanitize(text, text);
       } catch (err) {
         logger.warn('Upload failed:', err);
-        const message = err instanceof Error ? err.message : 'Upload failed';
+        const message = err instanceof Error ? err.message : t('osuUpload.errorUploadFailed');
         setUploadState({ loading: false, error: message, success: false, warning: null });
       }
     },
-    [unlocked, sectionRange, proceedAfterSanitize],
+    [unlocked, sectionRange, proceedAfterSanitize, t],
   );
 
   const handleConfirmSanitize = useCallback(async () => {
@@ -317,7 +323,7 @@ export default function OsuUploadButton({
 
     const key = await getKey(mapsetId);
     if (!key) {
-      setUploadState({ loading: false, error: 'Encryption key not found.', success: false, warning: null });
+      setUploadState({ loading: false, error: t('osuUpload.errorKeyMissing'), success: false, warning: null });
       return;
     }
 
@@ -344,7 +350,7 @@ export default function OsuUploadButton({
     setPendingUpload(null);
     setDiffReport(null);
     setNormalizeCritical(false);
-  }, [pendingUpload, mapsetId, getKey, performUpload, modalMode, normalizeCritical]);
+  }, [pendingUpload, mapsetId, getKey, performUpload, modalMode, normalizeCritical, t]);
 
   const handleCancelModal = useCallback(() => {
     setModalOpen(false);
@@ -360,21 +366,19 @@ export default function OsuUploadButton({
     if (modalMode === 'sanitize') {
       if (!sanitizeReport) return null;
       const items: string[] = [];
-      if (sanitizeReport.hitObjects > 0) items.push(`${sanitizeReport.hitObjects} hit object${sanitizeReport.hitObjects === 1 ? '' : 's'}`);
-      if (sanitizeReport.timingPoints > 0) items.push(`${sanitizeReport.timingPoints} timing point${sanitizeReport.timingPoints === 1 ? '' : 's'}`);
-      if (sanitizeReport.breaks > 0) items.push(`${sanitizeReport.breaks} break${sanitizeReport.breaks === 1 ? '' : 's'}`);
+      if (sanitizeReport.hitObjects > 0) items.push(t('osuUpload.hitObjects', { count: sanitizeReport.hitObjects }));
+      if (sanitizeReport.timingPoints > 0) items.push(t('osuUpload.timingPoints', { count: sanitizeReport.timingPoints }));
+      if (sanitizeReport.breaks > 0) items.push(t('osuUpload.breaks', { count: sanitizeReport.breaks }));
       return (
         <>
           <h3 id="upload-confirm-title" className="text-lg font-semibold text-white mb-3">
-            Trim content outside this section?
+            {t('osuUpload.sanitizeTitle')}
           </h3>
           <p className="text-sm text-gray-300 mb-4">
-            Your file contains content outside this section&apos;s time range. Uploading it
-            as-is would duplicate that content when the difficulty is merged. We can
-            drop it for you before uploading.
+            {t('osuUpload.sanitizeBody')}
           </p>
           <div className="mb-3">
-            <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">Will drop</p>
+            <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">{t('osuUpload.willDrop')}</p>
             <ul className="list-disc list-inside text-sm text-yellow-300">
               {items.map((s) => (
                 <li key={s}>{s}</li>
@@ -382,11 +386,7 @@ export default function OsuUploadButton({
             </ul>
           </div>
           <p className="text-xs text-gray-500 mb-4">
-            Anything sitting exactly on the section&apos;s end time is treated as belonging
-            to the next section and dropped. A break event whose start or end falls
-            outside this section&apos;s range is also dropped — including a long break
-            that <em>spans</em> the whole section. If you need that break, split it so
-            it fits within one section before uploading.
+            {t('osuUpload.sanitizeFootnote')}
           </p>
           <div className="flex gap-3 justify-end mt-5">
             <button
@@ -394,14 +394,14 @@ export default function OsuUploadButton({
               onClick={handleCancelModal}
               className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
               onClick={handleConfirmSanitize}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
             >
-              Upload trimmed
+              {t('osuUpload.uploadTrimmed')}
             </button>
           </div>
         </>
@@ -414,13 +414,13 @@ export default function OsuUploadButton({
       return (
         <>
           <h3 id="upload-confirm-title" className="text-lg font-semibold text-white mb-3">
-            CRITICAL: Are you sure?
+            {t('osuUpload.ownerTitle')}
           </h3>
           <p className="text-sm text-gray-300 mb-4">
-            You are about to change critical settings on the base. Every collaborator&apos;s section will use these settings going forward.
+            {t('osuUpload.ownerBody')}
           </p>
           <div className="mb-3">
-            <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">Critical Changes</p>
+            <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">{t('osuUpload.criticalChanges')}</p>
             <ul className="list-disc list-inside text-sm text-red-300">
               {diffReport.critical.map((c) => (
                 <li key={c}>{c}</li>
@@ -433,14 +433,14 @@ export default function OsuUploadButton({
               onClick={handleCancelModal}
               className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
               onClick={handleConfirmUpload}
               className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded transition-colors"
             >
-              Confirm
+              {t('common.confirm')}
             </button>
           </div>
         </>
@@ -451,13 +451,13 @@ export default function OsuUploadButton({
       return (
         <>
           <h3 id="upload-confirm-title" className="text-lg font-semibold text-white mb-3">
-            Differs from Base
+            {t('osuUpload.mapperTitle')}
           </h3>
           <p className="text-sm text-gray-300 mb-4">
-            Your diff&apos;s critical settings differ from the active base. Make sure you&apos;re uploading the correct difficulty.
+            {t('osuUpload.mapperBody')}
           </p>
           <div className="mb-3">
-            <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">Differences</p>
+            <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">{t('osuUpload.differences')}</p>
             <ul className="list-disc list-inside text-sm text-red-300">
               {diffReport.critical.map((c) => (
                 <li key={c}>{c}</li>
@@ -465,7 +465,7 @@ export default function OsuUploadButton({
             </ul>
           </div>
           <p className="text-sm text-gray-400 mb-4">
-            Clicking &quot;I&apos;m aware&quot; will normalize your file&apos;s critical lines to match the base before uploading.
+            {t('osuUpload.mapperFootnote')}
           </p>
           <div className="flex gap-3 justify-end mt-5">
             <button
@@ -473,14 +473,14 @@ export default function OsuUploadButton({
               onClick={handleCancelModal}
               className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
               onClick={handleConfirmUpload}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
             >
-              I&apos;m aware
+              {t('osuUpload.imAware')}
             </button>
           </div>
         </>
@@ -491,15 +491,15 @@ export default function OsuUploadButton({
     return (
       <>
         <h3 id="upload-confirm-title" className="text-lg font-semibold text-white mb-3">
-          Upload Confirmation
+          {t('osuUpload.legacyTitle')}
         </h3>
         <p className="text-sm text-gray-300 mb-4">
-          The uploaded file differs from the active base. Review the changes below:
+          {t('osuUpload.legacyBody')}
         </p>
 
         {diffReport.critical.length > 0 && (
           <div className="mb-3">
-            <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">Critical Changes</p>
+            <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">{t('osuUpload.criticalChanges')}</p>
             <ul className="list-disc list-inside text-sm text-red-300">
               {diffReport.critical.map((c) => (
                 <li key={c}>{c}</li>
@@ -512,14 +512,14 @@ export default function OsuUploadButton({
                 onChange={(e) => setNormalizeCritical(e.target.checked)}
                 className="rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500"
               />
-              Normalize critical lines to match active base
+              {t('osuUpload.normalize')}
             </label>
           </div>
         )}
 
         {diffReport.notice.length > 0 && (
           <div className="mb-3">
-            <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">Notice Changes</p>
+            <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">{t('osuUpload.noticeChanges')}</p>
             <ul className="list-disc list-inside text-sm text-yellow-300">
               {diffReport.notice.map((n) => (
                 <li key={n}>{n}</li>
@@ -534,14 +534,14 @@ export default function OsuUploadButton({
             onClick={handleCancelModal}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"
             onClick={handleConfirmUpload}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
           >
-            Upload Anyway
+            {t('osuUpload.uploadAnyway')}
           </button>
         </div>
       </>
@@ -556,7 +556,7 @@ export default function OsuUploadButton({
         accept=".osu"
         className="hidden"
         onChange={handleFileSelect}
-        aria-label="Upload .osu file"
+        aria-label={t('osuUpload.ariaLabel')}
       />
       <button
         type="button"
@@ -564,7 +564,7 @@ export default function OsuUploadButton({
         disabled={uploadState.loading}
         className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-medium rounded transition-colors"
       >
-        {uploadState.loading ? 'Uploading…' : 'Upload .osu'}
+        {uploadState.loading ? t('osuUpload.uploading') : t('osuUpload.upload')}
       </button>
 
       {uploadState.error && (
@@ -574,7 +574,7 @@ export default function OsuUploadButton({
       )}
       {uploadState.success && (
         <p className="text-xs text-green-400" role="status">
-          Upload successful!
+          {t('osuUpload.success')}
         </p>
       )}
       {uploadState.warning && (

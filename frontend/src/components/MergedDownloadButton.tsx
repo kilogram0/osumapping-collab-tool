@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   downloadBaseOsu,
   downloadSectionOsu,
@@ -32,6 +33,7 @@ export default function MergedDownloadButton({
   sections,
   difficultyName,
 }: MergedDownloadButtonProps) {
+  const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
   const [loading, setLoading] = useState(false);
   const unlocked = isUnlocked(mapsetId);
@@ -116,9 +118,9 @@ export default function MergedDownloadButton({
       onClick={handleDownload}
       disabled={!unlocked || loading || sections.length === 0}
       className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 text-white text-sm font-medium rounded transition-colors"
-      title={!unlocked ? 'Unlock mapset to download' : sections.length === 0 ? 'No sections to merge' : 'Download merged .osu'}
+      title={!unlocked ? t('mergedDownload.titleLocked') : sections.length === 0 ? t('mergedDownload.titleEmpty') : t('mergedDownload.titleDownload')}
     >
-      {loading ? 'Assembling…' : 'Download Full Difficulty (.osu)'}
+      {loading ? t('mergedDownload.assembling') : t('mergedDownload.button')}
     </button>
   );
 }

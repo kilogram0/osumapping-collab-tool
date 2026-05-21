@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useToast } from '../contexts/ToastContext';
 import {
@@ -44,6 +45,7 @@ function makeClampedOnChange(
 }
 
 export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetModalProps) {
+  const { t } = useTranslation();
   const { unlockWithKey } = useEncryption();
   const { showToast } = useToast();
   const createMapset = useCreateMapset();
@@ -93,7 +95,7 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
     try {
       const result = await parseOszFile(f);
       if (result.difficulties.length === 0) {
-        throw new Error('No valid .osu files found in this .osz archive.');
+        throw new Error(t('createMapsetModal.errorOszEmpty'));
       }
       setOszFile(f);
       setParsedOsz(result);
@@ -112,7 +114,7 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
     } catch (err) {
       setOszFile(null);
       setParsedOsz(null);
-      setOszError(err instanceof Error ? err.message : 'Failed to parse .osz file.');
+      setOszError(err instanceof Error ? err.message : t('createMapsetModal.errorOszGeneric'));
       e.target.value = '';
     } finally {
       setOszParsing(false);
@@ -155,16 +157,16 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
         });
 
         if (result.total === 0) {
-          summaries.push(`"${diffName}" (no sections)`);
+          summaries.push(t('createMapsetModal.diffNoSections', { name: diffName }));
         } else if (result.error) {
-          summaries.push(`"${diffName}" (${result.created}/${result.total} sections)`);
+          summaries.push(t('createMapsetModal.diffPartial', { name: diffName, created: result.created, total: result.total }));
         } else {
-          summaries.push(`"${diffName}" (${result.created} section${result.created === 1 ? '' : 's'})`);
+          summaries.push(t('createMapsetModal.diffOk', { name: diffName, count: result.created }));
         }
       } catch (err) {
         failedCount++;
         summaries.push(
-          `"${diffName}" (failed: ${err instanceof Error ? err.message : 'unknown error'})`,
+          t('createMapsetModal.diffFailed', { name: diffName, message: err instanceof Error ? err.message : t('createMapsetModal.unknownError') }),
         );
       }
     }
@@ -173,8 +175,8 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
     const ok = total - failedCount;
     const header =
       failedCount > 0
-        ? `Mapset created. ${ok}/${total} difficulties imported`
-        : `Mapset created with ${total} difficult${total === 1 ? 'y' : 'ies'}`;
+        ? t('createMapsetModal.importHeaderPartial', { ok, total })
+        : t('createMapsetModal.importHeader', { count: total });
     return `${header}: ${summaries.join(', ')}.`;
   }
 
@@ -223,14 +225,14 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
           const message = await importDifficultiesFromOsz(key, id, totalMs);
           if (message) showToast(message, 'success');
         } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Failed to import difficulties.';
-          showToast(`Mapset created, but difficulty import failed: ${msg}`, 'warning');
+          const msg = err instanceof Error ? err.message : t('createMapsetModal.importFailureGeneric');
+          showToast(t('createMapsetModal.importFailure', { message: msg }), 'warning');
         }
       }
 
       onSuccess();
     } catch {
-      setError('Failed to create mapset. Please try again.');
+      setError(t('createMapsetModal.errorGeneric'));
     } finally {
       setSubmitting(false);
     }
@@ -245,13 +247,13 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
     >
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
         <h2 id="create-mapset-modal-title" className="text-xl font-bold text-white mb-4">
-          Create Mapset
+          {t('createMapsetModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="mapset-title" className="block text-sm font-medium text-gray-300 mb-1">
-              Title <span className="text-red-400">*</span>
+              {t('createMapsetModal.titleLabel')} <span className="text-red-400">{t('common.required')}</span>
             </label>
             <input
               id="mapset-title"
@@ -261,16 +263,16 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
               required
               maxLength={255}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder="Mapset title"
+              placeholder={t('createMapsetModal.titlePlaceholder')}
             />
             <p className="text-xs text-yellow-500 mt-1">
-              The title will be visible to anyone who sees the invitation link or has database access. It is not encrypted — do not include private information.
+              {t('createMapsetModal.titleWarning')}
             </p>
           </div>
 
           <div>
             <label htmlFor="mapset-description" className="block text-sm font-medium text-gray-300 mb-1">
-              Description
+              {t('createMapsetModal.descriptionLabel')}
             </label>
             <textarea
               id="mapset-description"
@@ -278,15 +280,15 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 resize-none"
-              placeholder="Optional description"
+              placeholder={t('createMapsetModal.descriptionPlaceholder')}
             />
           </div>
 
           <div>
-            <span className="block text-sm font-medium text-gray-300 mb-1">Song Length</span>
+            <span className="block text-sm font-medium text-gray-300 mb-1">{t('createMapsetModal.songLengthLabel')}</span>
             <div className="flex gap-2">
               <div className="flex-1">
-                <label htmlFor="mapset-song-minutes" className="sr-only">Minutes</label>
+                <label htmlFor="mapset-song-minutes" className="sr-only">{t('createMapsetModal.minutes')}</label>
                 <input
                   id="mapset-song-minutes"
                   type="number"
@@ -296,10 +298,10 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
                   className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                   placeholder="0"
                 />
-                <span className="text-xs text-gray-400 mt-1 block">Minutes</span>
+                <span className="text-xs text-gray-400 mt-1 block">{t('createMapsetModal.minutes')}</span>
               </div>
               <div className="flex-1">
-                <label htmlFor="mapset-song-seconds" className="sr-only">Seconds</label>
+                <label htmlFor="mapset-song-seconds" className="sr-only">{t('createMapsetModal.seconds')}</label>
                 <input
                   id="mapset-song-seconds"
                   type="number"
@@ -310,14 +312,14 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
                   className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                   placeholder="0"
                 />
-                <span className="text-xs text-gray-400 mt-1 block">Seconds</span>
+                <span className="text-xs text-gray-400 mt-1 block">{t('createMapsetModal.seconds')}</span>
               </div>
             </div>
           </div>
 
           <div>
             <label htmlFor="mapset-osz" className="block text-sm font-medium text-gray-300 mb-1">
-              Optionally start from a .osz file
+              {t('createMapsetModal.oszLabel')}
             </label>
             <input
               ref={fileInputRef}
@@ -329,16 +331,15 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
               className="block w-full text-sm text-gray-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-purple-600 file:text-white hover:file:bg-purple-500 disabled:opacity-60"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Auto-fills title and song length, then creates one difficulty per .osu file inside
-              the archive, with sections from <code>[Editor] Bookmarks</code> pre-populated. Max 100 MB; not uploaded.
+              {t('createMapsetModal.oszHelpPrefix')}<code>[Editor] Bookmarks</code>{t('createMapsetModal.oszHelpSuffix')}
             </p>
             {oszParsing && (
-              <p className="text-xs text-blue-400 mt-1">Reading archive…</p>
+              <p className="text-xs text-blue-400 mt-1">{t('createMapsetModal.readingArchive')}</p>
             )}
             {oszFile && parsedOsz && !oszError && !oszParsing && (
               <div className="mt-2 space-y-1">
                 <p className="text-xs text-green-400">
-                  Found {parsedOsz.difficulties.length} difficult{parsedOsz.difficulties.length === 1 ? 'y' : 'ies'}:
+                  {t('createMapsetModal.foundDifficulties', { count: parsedOsz.difficulties.length })}
                 </p>
                 <ul className="text-xs text-gray-400 list-disc list-inside space-y-0.5">
                   {parsedOsz.difficulties.map((d) => (
@@ -353,24 +354,24 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
           </div>
 
           <div className="bg-gray-900 border border-gray-600 rounded p-4 space-y-3">
-            <p className="text-sm font-medium text-gray-300">Your Passphrase</p>
+            <p className="text-sm font-medium text-gray-300">{t('createMapsetModal.passphraseLabel')}</p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 font-mono text-sm text-yellow-300 break-all select-all" aria-label="Generated passphrase">
+              <code className="flex-1 font-mono text-sm text-yellow-300 break-all select-all" aria-label={t('createMapsetModal.passphraseAria')}>
                 {passphrase}
               </code>
               <button
                 type="button"
                 onClick={handleCopy}
                 className="shrink-0 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition-colors"
-                aria-label="Copy passphrase to clipboard"
+                aria-label={t('createMapsetModal.passphraseCopyAria')}
               >
-                {copied ? 'Copied!' : 'Copy'}
+                {copied ? t('common.copied') : t('common.copy')}
               </button>
             </div>
           </div>
 
           <div className="bg-red-950 border border-red-800 rounded p-3 text-sm text-red-300">
-            <strong>Warning:</strong> If you lose this passphrase and no other member has it, all mapset data is permanently unrecoverable. There is no server-side recovery.
+            <strong>{t('createMapsetModal.warningPrefix')}</strong>{t('createMapsetModal.warningBody')}
           </div>
 
           <label className="flex items-start gap-2 cursor-pointer">
@@ -379,10 +380,10 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
               className="mt-0.5 accent-blue-500"
-              aria-label="I have saved this passphrase"
+              aria-label={t('createMapsetModal.confirmSavedAria')}
             />
             <span className="text-sm text-gray-300">
-              I have saved this passphrase in a secure location.
+              {t('createMapsetModal.confirmSavedLabel')}
             </span>
           </label>
 
@@ -398,14 +399,14 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
               onClick={onCancel}
               className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={!title || !confirmed || submitting}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
             >
-              {submitting ? 'Creating…' : 'Create Mapset'}
+              {submitting ? t('createMapsetModal.submitting') : t('createMapsetModal.submit')}
             </button>
           </div>
         </form>

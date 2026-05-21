@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Mapset } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 
@@ -9,6 +10,7 @@ interface PassphraseModalProps {
 }
 
 export default function PassphraseModal({ mapset, onSuccess, onCancel }: PassphraseModalProps) {
+  const { t } = useTranslation();
   const { unlockMapset } = useEncryption();
   const [passphrase, setPassphrase] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +24,7 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
       await unlockMapset(mapset.id, passphrase, mapset.passphrase_salt, mapset.encrypted_verification);
       onSuccess();
     } catch {
-      setError('Incorrect passphrase. Please try again.');
+      setError(t('passphraseModal.incorrect'));
     } finally {
       setLoading(false);
     }
@@ -37,16 +39,16 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
     >
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl">
         <h2 id="passphrase-modal-title" className="text-xl font-bold text-white mb-2">
-          Unlock Mapset
+          {t('passphraseModal.title')}
         </h2>
         <p className="text-gray-400 text-sm mb-4">
-          This mapset is end-to-end encrypted. Enter the passphrase to unlock it.
+          {t('passphraseModal.intro')}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="passphrase-input" className="block text-sm font-medium text-gray-300 mb-1">
-              Passphrase
+              {t('passphraseModal.label')}
             </label>
             <input
               id="passphrase-input"
@@ -54,7 +56,7 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder="Enter mapset passphrase"
+              placeholder={t('passphraseModal.placeholder')}
               autoComplete="off"
               autoFocus
             />
@@ -73,7 +75,7 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
                 onClick={onCancel}
                 className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
             )}
             <button
@@ -81,7 +83,7 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
               disabled={loading || !passphrase}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
             >
-              {loading ? 'Unlocking…' : 'Unlock'}
+              {loading ? t('passphraseModal.submitting') : t('passphraseModal.submit')}
             </button>
           </div>
         </form>

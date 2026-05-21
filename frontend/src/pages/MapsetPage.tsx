@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import BaseVersionHistory from '../components/BaseVersionHistory';
 import CreateDifficultyModal from '../components/CreateDifficultyModal';
@@ -7,6 +8,7 @@ import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyTabs from '../components/DifficultyTabs';
 import EditSectionModal from '../components/EditSectionModal';
 import ImportBookmarksButton from '../components/ImportBookmarksButton';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 import ManageMembersModal from '../components/ManageMembersModal';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
@@ -42,6 +44,7 @@ import type { DecryptedPost } from '../types';
 const EMPTY_SECTIONS: Section[] = [];
 
 export default function MapsetPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const mapsetId = id ?? '';
   const { data: mapset, isLoading: mapsetLoading, isError: mapsetError } = useMapset(mapsetId);
@@ -387,9 +390,9 @@ export default function MapsetPage() {
       await createPostMutation.mutateAsync(payload);
       setReplyingTo(null);
       setShowCreateForm(false);
-      showToast('Post created.', 'success');
+      showToast(t('mapsetPage.toastPostCreated'), 'success');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to create post.', 'error');
+      showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedCreatePost'), 'error');
       // Re-throw so CreatePostForm can keep its draft state on failure.
       throw err;
     }
@@ -405,21 +408,21 @@ export default function MapsetPage() {
       await updatePostMutation.mutateAsync({ postId: payload.id, payload: { encrypted_body: payload.encrypted_body } });
       setEditingPost(null);
       setEditingPostBody('');
-      showToast('Post updated.', 'success');
+      showToast(t('mapsetPage.toastPostUpdated'), 'success');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to update post.', 'error');
+      showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedUpdatePost'), 'error');
       // Re-throw so CreatePostForm can keep its draft state on failure.
       throw err;
     }
   }
 
   async function handleDeletePost(postId: string) {
-    if (!confirm('Are you sure you want to delete this post?')) return;
+    if (!confirm(t('mapsetPage.confirmDeletePost'))) return;
     try {
       await deletePostMutation.mutateAsync(postId);
-      showToast('Post deleted.', 'success');
+      showToast(t('mapsetPage.toastPostDeleted'), 'success');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to delete post.', 'error');
+      showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedDeletePost'), 'error');
     }
   }
 
@@ -427,9 +430,9 @@ export default function MapsetPage() {
     try {
       await deleteSectionMutation.mutateAsync(section.id);
       setSelectedSectionId((current) => (current === section.id ? null : current));
-      showToast('Section deleted.', 'success');
+      showToast(t('mapsetPage.toastSectionDeleted'), 'success');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to delete section.', 'error');
+      showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedDeleteSection'), 'error');
     }
   }
 
@@ -438,9 +441,9 @@ export default function MapsetPage() {
       await deleteDifficultyMutation.mutateAsync(selectedDifficultyId);
       setSelectedDifficultyId(null);
       setShowDeleteDifficultyConfirm(false);
-      showToast('Difficulty deleted.', 'success');
+      showToast(t('mapsetPage.toastDifficultyDeleted'), 'success');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to delete difficulty.', 'error');
+      showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedDeleteDifficulty'), 'error');
     }
   }
 
@@ -479,9 +482,9 @@ export default function MapsetPage() {
   }
 
   if (!id) return null;
-  if (mapsetLoading) return <div className="min-h-screen bg-gray-900 text-white p-8">Loading…</div>;
+  if (mapsetLoading) return <div className="min-h-screen bg-gray-900 text-white p-8">{t('mapsetPage.loading')}</div>;
   if (mapsetError || !mapset) {
-    return <div className="min-h-screen bg-gray-900 text-white p-8 text-red-400">Mapset not found.</div>;
+    return <div className="min-h-screen bg-gray-900 text-white p-8 text-red-400">{t('mapsetPage.notFound')}</div>;
   }
 
   if (!unlocked) {
@@ -502,29 +505,30 @@ export default function MapsetPage() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-6xl mx-auto">
-        <button
-          type="button"
-          onClick={() => navigate('/dashboard')}
-          className="mb-4 inline-flex items-center gap-1.5 text-sm text-gray-300 hover:text-white transition-colors"
-        >
-          <span aria-hidden="true">←</span> Back to Dashboard
-        </button>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            className="inline-flex items-center gap-1.5 text-sm text-gray-300 hover:text-white transition-colors"
+          >
+            <span aria-hidden="true">←</span> {t('mapsetPage.back')}
+          </button>
+          <LanguageSwitcher />
+        </div>
         {actualIsOwner && emulatedRole && (
           <div
             role="status"
             className="mb-4 bg-yellow-900/40 border border-yellow-700 rounded p-3 flex items-center justify-between gap-3"
           >
             <p className="text-sm text-yellow-200">
-              Previewing this mapset as <strong>{emulatedRole}</strong>. UI gating only —
-              the server still treats you as owner, and any post you write is still authored
-              by you.
+              {t('mapsetPage.previewingPrefix')}<strong>{emulatedRole}</strong>{t('mapsetPage.previewingSuffix')}
             </p>
             <button
               type="button"
               onClick={() => setEmulatedRole(null)}
               className="shrink-0 px-3 py-1 bg-yellow-700 hover:bg-yellow-600 text-white text-xs font-medium rounded"
             >
-              Exit preview
+              {t('mapsetPage.exitPreview')}
             </button>
           </div>
         )}
@@ -544,7 +548,7 @@ export default function MapsetPage() {
               disabled={!selectedDifficultyId}
               className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white text-sm font-medium rounded transition-colors"
             >
-              Download Base Template
+              {t('mapsetPage.downloadBase')}
             </button>
             <MergedDownloadButton
               difficultyId={selectedDifficultyId ?? ''}
@@ -558,7 +562,7 @@ export default function MapsetPage() {
               onClick={() => setShowBaseHistory(true)}
               className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
             >
-              Base History
+              {t('mapsetPage.baseHistory')}
             </button>
             {myMembership && (
               <button
@@ -566,7 +570,7 @@ export default function MapsetPage() {
                 onClick={() => setShowManageMembers(true)}
                 className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
               >
-                {actualIsOwner ? 'Manage Members' : 'View Members'}
+                {actualIsOwner ? t('mapsetPage.manageMembers') : t('mapsetPage.viewMembers')}
               </button>
             )}
           </div>
@@ -574,19 +578,19 @@ export default function MapsetPage() {
 
         {/* Difficulties */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-200">Difficulties</h2>
+          <h2 className="text-lg font-semibold text-gray-200">{t('mapsetPage.difficultiesHeading')}</h2>
           {canEditStructure && (
             <button
               type="button"
               onClick={() => setShowCreateDifficulty(true)}
               className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
             >
-              Add Difficulty
+              {t('mapsetPage.addDifficulty')}
             </button>
           )}
         </div>
 
-        {difficultiesLoading && <p className="text-gray-400">Loading difficulties…</p>}
+        {difficultiesLoading && <p className="text-gray-400">{t('mapsetPage.loadingDifficulties')}</p>}
 
         {difficulties && difficulties.length > 0 && (
           <div className="mb-6">
@@ -601,7 +605,7 @@ export default function MapsetPage() {
         )}
 
         {difficulties && difficulties.length === 0 && !difficultiesLoading && (
-          <p className="text-gray-400 italic mb-6">No difficulties yet.</p>
+          <p className="text-gray-400 italic mb-6">{t('mapsetPage.noDifficulties')}</p>
         )}
 
         {selectedDifficultyId && (
@@ -639,7 +643,7 @@ export default function MapsetPage() {
                     onClick={() => setShowCreateSection(true)}
                     className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
                   >
-                    Add Section
+                    {t('mapsetPage.addSection')}
                   </button>
                 )}
                 {canEditStructure && selectedDifficultyId && (
@@ -651,8 +655,8 @@ export default function MapsetPage() {
                     onSuccess={(count, prepopulated) =>
                       showToast(
                         prepopulated
-                          ? `Imported ${count} section${count === 1 ? '' : 's'} with content from bookmarks.`
-                          : `Imported ${count} section${count === 1 ? '' : 's'} from bookmarks. (Base history exists, so section content was not pre-filled.)`,
+                          ? t('mapsetPage.toastImported', { count })
+                          : t('mapsetPage.toastImportedNoPrefill', { count }),
                         'success',
                       )
                     }
@@ -665,7 +669,7 @@ export default function MapsetPage() {
                     onClick={() => setShowRenameDifficulty(true)}
                     className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
                   >
-                    Rename Difficulty
+                    {t('mapsetPage.renameDifficulty')}
                   </button>
                 )}
                 {isOwner && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
@@ -674,7 +678,7 @@ export default function MapsetPage() {
                     onClick={() => setShowDeleteDifficultyConfirm(true)}
                     className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded transition-colors"
                   >
-                    Delete Difficulty
+                    {t('mapsetPage.deleteDifficulty')}
                   </button>
                 )}
               </div>
@@ -691,7 +695,7 @@ export default function MapsetPage() {
                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                 >
-                  Section View
+                  {t('mapsetPage.sectionView')}
                 </button>
                 <button
                   type="button"
@@ -705,7 +709,7 @@ export default function MapsetPage() {
                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                 >
-                  Show All Posts
+                  {t('mapsetPage.showAllPosts')}
                 </button>
               </div>
             </div>
@@ -741,17 +745,17 @@ export default function MapsetPage() {
             )}
 
             {!showAllPosts && !selectedSection && decryptedSections.length > 0 && (
-              <p className="text-gray-400 italic">Select a section from the timeline above to view its details and posts.</p>
+              <p className="text-gray-400 italic">{t('mapsetPage.selectSection')}</p>
             )}
 
             {!showAllPosts && decryptedSections.length === 0 && !detailLoading && (
-              <p className="text-gray-400 italic">No sections yet.</p>
+              <p className="text-gray-400 italic">{t('mapsetPage.noSectionsYet')}</p>
             )}
 
             {showAllPosts && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-200">All Posts</h2>
+                  <h2 className="text-lg font-semibold text-gray-200">{t('mapsetPage.allPostsHeading')}</h2>
                   <button
                     type="button"
                     onClick={() => {
@@ -761,7 +765,7 @@ export default function MapsetPage() {
                     }}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
                   >
-                    {showCreateForm ? 'Hide Form' : 'New Post'}
+                    {showCreateForm ? t('mapsetPage.hideForm') : t('mapsetPage.newPost')}
                   </button>
                 </div>
 
@@ -776,14 +780,14 @@ export default function MapsetPage() {
                   </div>
                 )}
 
-                {detailLoading && <p className="text-gray-400">Loading posts…</p>}
+                {detailLoading && <p className="text-gray-400">{t('mapsetPage.loadingPosts')}</p>}
 
                 <div className="space-y-4">
                   {globalPostTree.topLevel.map((post) => renderGlobalPostNode(post, 0))}
                 </div>
 
                 {decryptedPosts.length === 0 && !detailLoading && (
-                  <p className="text-gray-400 italic">No posts yet. Be the first to post!</p>
+                  <p className="text-gray-400 italic">{t('mapsetPage.noPostsYet')}</p>
                 )}
               </div>
             )}
@@ -868,15 +872,15 @@ export default function MapsetPage() {
         >
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm shadow-xl">
             <h2 id="delete-difficulty-modal-title" className="text-lg font-bold text-white mb-3">
-              Delete Difficulty
+              {t('mapsetPage.deleteDifficultyTitle')}
             </h2>
             <p className="text-sm text-gray-300 mb-5">
-              Delete{' '}
+              {t('mapsetPage.deleteDifficultyBodyPrefix')}
               <strong className="text-white">
                 {difficultyNames[selectedDifficultyId]}
               </strong>
-              ? This will permanently remove all its sections, posts, and uploaded .osu versions.{' '}
-              <span className="text-red-400">This cannot be undone.</span>
+              {t('mapsetPage.deleteDifficultyBodySuffix')}
+              <span className="text-red-400">{t('mapsetPage.deleteUndoneWarning')}</span>
             </p>
             <div className="flex gap-3 justify-end">
               <button
@@ -885,7 +889,7 @@ export default function MapsetPage() {
                 disabled={deleteDifficultyMutation.isPending}
                 className="px-4 py-2 text-gray-300 hover:text-white transition-colors disabled:opacity-50"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -893,7 +897,7 @@ export default function MapsetPage() {
                 disabled={deleteDifficultyMutation.isPending}
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded transition-colors"
               >
-                {deleteDifficultyMutation.isPending ? 'Deleting…' : 'Delete'}
+                {deleteDifficultyMutation.isPending ? t('common.deleting') : t('common.delete')}
               </button>
             </div>
           </div>

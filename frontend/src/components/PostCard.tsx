@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Post, PostTag } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { decrypt, postFieldAad } from '../utils/crypto';
@@ -29,12 +30,12 @@ const TAG_COLORS: Record<PostTag, string> = {
   praise: 'bg-green-500',
 };
 
-const TAG_LABELS: Record<PostTag, string> = {
-  general: 'General',
-  suggestion: 'Suggestion',
-  problem: 'Problem',
-  praise: 'Praise',
-};
+const TAG_LABEL_KEYS = {
+  general: 'postCard.tagGeneral',
+  suggestion: 'postCard.tagSuggestion',
+  problem: 'postCard.tagProblem',
+  praise: 'postCard.tagPraise',
+} as const satisfies Record<PostTag, string>;
 
 function storageKey(userId: string, postId: string): string {
   return `post-collapsed:${userId}:${postId}`;
@@ -52,6 +53,7 @@ export default function PostCard({
   onEdit,
   onDelete,
 }: PostCardProps) {
+  const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
   const unlocked = isUnlocked(mapsetId);
   const [decryptedBody, setDecryptedBody] = useState<string | null>(propDecryptedBody ?? null);
@@ -146,8 +148,8 @@ export default function PostCard({
     return <p className="text-gray-200 whitespace-pre-wrap">{parts}</p>;
   }
 
-  const resolvedName = author?.username ?? `User ${post.author_id.slice(0, 8)}`;
-  const authorLabel = isAuthor ? `${resolvedName} (you)` : resolvedName;
+  const resolvedName = author?.username ?? t('postCard.userPrefix', { id: post.author_id.slice(0, 8) });
+  const authorLabel = isAuthor ? `${resolvedName} ${t('postCard.youSuffix')}` : resolvedName;
 
   const isEdited = post.created_at !== post.updated_at;
 
@@ -172,7 +174,7 @@ export default function PostCard({
             <span className="text-sm font-semibold text-gray-200">{authorLabel}</span>
             {!post.parent_id && (
               <span className={`text-xs px-2 py-0.5 rounded-full text-white ${TAG_COLORS[post.tag]}`}>
-                {TAG_LABELS[post.tag]}
+                {t(TAG_LABEL_KEYS[post.tag])}
               </span>
             )}
             {primaryTimestamp && (
@@ -187,7 +189,7 @@ export default function PostCard({
             )}
             <span className="text-xs text-gray-500 ml-auto">
               {new Date(post.created_at).toLocaleString()}
-              {isEdited && <span className="ml-1 text-gray-400">(edited)</span>}
+              {isEdited && <span className="ml-1 text-gray-400">{t('postCard.edited')}</span>}
             </span>
           </div>
 
@@ -195,10 +197,10 @@ export default function PostCard({
             <div className="mt-2">{renderBody(decryptedBody)}</div>
           )}
           {!isCollapsed && decryptedBody === null && unlocked && (
-            <p className="mt-2 text-red-400 text-sm">Failed to decrypt post</p>
+            <p className="mt-2 text-red-400 text-sm">{t('postCard.failedDecrypt')}</p>
           )}
           {!isCollapsed && !unlocked && (
-            <p className="mt-2 text-gray-500 text-sm italic">🔒 Encrypted post</p>
+            <p className="mt-2 text-gray-500 text-sm italic">{t('postCard.encrypted')}</p>
           )}
 
           {!isCollapsed && (
@@ -209,7 +211,7 @@ export default function PostCard({
                   onClick={() => onReply(post)}
                   className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
                 >
-                  Reply
+                  {t('postCard.reply')}
                 </button>
               )}
               {canEdit && onEdit && (
@@ -218,7 +220,7 @@ export default function PostCard({
                   onClick={() => onEdit(post)}
                   className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
                 >
-                  Edit
+                  {t('postCard.edit')}
                 </button>
               )}
               {canDelete && onDelete && (
@@ -227,7 +229,7 @@ export default function PostCard({
                   onClick={() => onDelete(post.id)}
                   className="text-xs text-red-400 hover:text-red-300 transition-colors"
                 >
-                  Delete
+                  {t('postCard.delete')}
                 </button>
               )}
             </div>
@@ -237,8 +239,8 @@ export default function PostCard({
           type="button"
           onClick={toggleCollapse}
           className="shrink-0 text-gray-500 hover:text-gray-300 transition-colors"
-          aria-label={isCollapsed ? 'Expand post' : 'Collapse post'}
-          title={isCollapsed ? 'Expand post' : 'Collapse post'}
+          aria-label={isCollapsed ? t('postCard.expand') : t('postCard.collapse')}
+          title={isCollapsed ? t('postCard.expand') : t('postCard.collapse')}
         >
           {isCollapsed ? '▼' : '▲'}
         </button>

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useToast } from '../contexts/ToastContext';
@@ -25,6 +26,7 @@ export default function CreateDifficultyModal({
   onSuccess,
   onCancel,
 }: CreateDifficultyModalProps) {
+  const { t } = useTranslation();
   const { getKey } = useEncryption();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
@@ -51,7 +53,7 @@ export default function CreateDifficultyModal({
     if (f.size > MAX_OSU_BYTES) {
       setOsuFile(null);
       setParsedOsu(null);
-      setParseError(`File too large (${f.size} bytes; max ${MAX_OSU_BYTES}).`);
+      setParseError(t('createDifficultyModal.fileTooLarge', { size: f.size, max: MAX_OSU_BYTES }));
       e.target.value = '';
       return;
     }
@@ -70,7 +72,7 @@ export default function CreateDifficultyModal({
     } catch (err) {
       setOsuFile(null);
       setParsedOsu(null);
-      setParseError(err instanceof Error ? err.message : 'Invalid .osu file.');
+      setParseError(err instanceof Error ? err.message : t('createDifficultyModal.errorInvalidOsu'));
       e.target.value = '';
     }
   }
@@ -104,7 +106,7 @@ export default function CreateDifficultyModal({
     try {
       const key = await getKey(mapsetId);
       if (!key) {
-        setError('Encryption key not found. Please unlock the mapset first.');
+        setError(t('createDifficultyModal.errorKeyMissing'));
         setSubmitting(false);
         return;
       }
@@ -126,34 +128,27 @@ export default function CreateDifficultyModal({
         const result = await importBookmarks(key, id);
         if (result.error) {
           if (result.created > 0) {
-            // Partial success: a base version + some sections were created,
-            // so the next Import Bookmarks click on this difficulty will skip
-            // pre-population (history is no longer empty). Heads-up the user
-            // so they know retrying won't fill the rest with .osu content.
             showToast(
-              `Difficulty created. Imported ${result.created} of ${result.total} sections before failing: ${result.error}. Re-running Import Bookmarks will create the remaining sections but won't pre-fill their content (base history now exists).`,
+              t('createDifficultyModal.toastBookmarkPartial', { created: result.created, total: result.total, message: result.error }),
               'warning',
             );
           } else {
-            showToast(`Difficulty created, but bookmark import failed: ${result.error}`, 'warning');
+            showToast(t('createDifficultyModal.toastBookmarkFailure', { message: result.error }), 'warning');
           }
         } else {
-          showToast(`Difficulty created with ${result.created} imported section${result.created === 1 ? '' : 's'}.`, 'success');
+          showToast(t('createDifficultyModal.toastBookmarkOk', { count: result.created }), 'success');
         }
         queryClient.invalidateQueries({ queryKey: ['sections', id] });
         queryClient.invalidateQueries({ queryKey: ['difficulty-detail', id] });
       } else {
-        showToast('Difficulty created.', 'success');
+        showToast(t('createDifficultyModal.toastDifficultyCreated'), 'success');
       }
 
       onSuccess(newDifficultyId);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create difficulty';
+      const message = err instanceof Error ? err.message : t('createDifficultyModal.errorGeneric');
       if (newDifficultyId) {
-        // Should not happen — only the difficulty mutation path throws here,
-        // and we set newDifficultyId only after it resolves. But surface it
-        // explicitly if it ever does.
-        showToast(`Difficulty created, but a follow-up step failed: ${message}`, 'warning');
+        showToast(t('createDifficultyModal.toastFollowupFailed', { message }), 'warning');
         onSuccess(newDifficultyId);
       } else {
         setError(message);
@@ -175,13 +170,13 @@ export default function CreateDifficultyModal({
     >
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl">
         <h2 id="create-difficulty-title" className="text-xl font-bold text-white mb-4">
-          Add Difficulty
+          {t('createDifficultyModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="difficulty-name" className="block text-sm font-medium text-gray-300 mb-1">
-              Name <span className="text-red-400">*</span>
+              {t('createDifficultyModal.nameLabel')} <span className="text-red-400">{t('common.required')}</span>
             </label>
             <input
               id="difficulty-name"
@@ -191,13 +186,13 @@ export default function CreateDifficultyModal({
               required
               maxLength={255}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder="e.g. Hard"
+              placeholder={t('createDifficultyModal.namePlaceholder')}
             />
           </div>
 
           <div>
             <label htmlFor="difficulty-osu" className="block text-sm font-medium text-gray-300 mb-1">
-              Optionally import sections from .osu bookmarks
+              {t('createDifficultyModal.osuLabel')}
             </label>
             <input
               ref={fileInputRef}
@@ -208,10 +203,10 @@ export default function CreateDifficultyModal({
               className="block w-full text-sm text-gray-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-purple-600 file:text-white hover:file:bg-purple-500"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Reads <code>[Editor] Bookmarks</code> client-side. Max 1 MB; the file itself is not uploaded.
+              {t('createDifficultyModal.osuHelpPrefix')}<code>[Editor] Bookmarks</code>{t('createDifficultyModal.osuHelpSuffix')}
             </p>
             {osuFile && !parseError && (
-              <p className="text-xs text-green-400 mt-1">Selected: {osuFile.name}</p>
+              <p className="text-xs text-green-400 mt-1">{t('createDifficultyModal.selectedFile', { name: osuFile.name })}</p>
             )}
             {parseError && (
               <p role="alert" className="text-xs text-red-400 mt-1">{parseError}</p>
@@ -230,14 +225,14 @@ export default function CreateDifficultyModal({
               onClick={onCancel}
               className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={!name.trim() || submitting}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
             >
-              {submitting ? 'Creating…' : 'Add Difficulty'}
+              {submitting ? t('createDifficultyModal.submitting') : t('createDifficultyModal.submit')}
             </button>
           </div>
         </form>

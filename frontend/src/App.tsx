@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
@@ -8,10 +9,11 @@ import ToastContainer from './components/ToastContainer'
 import { useAuth } from './hooks/useAuth'
 
 function AuthLoading() {
+  const { t } = useTranslation()
   return (
     <div
       role="status"
-      aria-label="Loading"
+      aria-label={t('auth.loading')}
       className="min-h-screen bg-gray-900 flex items-center justify-center"
     >
       <div className="h-10 w-10 border-2 border-gray-600 border-t-blue-400 rounded-full animate-spin" />

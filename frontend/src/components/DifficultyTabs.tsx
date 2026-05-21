@@ -1,4 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Difficulty } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { decrypt, difficultyFieldAad } from '../utils/crypto';
@@ -20,6 +21,7 @@ interface DifficultyTabsProps {
 }
 
 export default function DifficultyTabs({ difficulties, selectedId, onSelect, mapsetId, onDecrypted }: DifficultyTabsProps) {
+  const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
   const [names, setNames] = useState<Record<string, string>>({});
   const unlocked = isUnlocked(mapsetId);
@@ -58,15 +60,16 @@ export default function DifficultyTabs({ difficulties, selectedId, onSelect, map
 
   if (difficulties.length === 0) {
     return (
-      <p className="text-sm text-gray-500 italic">No difficulties yet.</p>
+      <p className="text-sm text-gray-500 italic">{t('difficultyTabs.noDifficulties')}</p>
     );
   }
 
   return (
-    <div className="flex flex-wrap gap-2" role="tablist" aria-label="Difficulties">
+    <div className="flex flex-wrap gap-2" role="tablist" aria-label={t('difficultyTabs.ariaLabel')}>
       {difficulties.map((d) => {
         const isSelected = d.id === selectedId;
-        const name = unlocked ? (names[d.id] ?? '🔒 Encrypted Difficulty') : '🔒 Encrypted Difficulty';
+        const encryptedLabel = t('difficultyTabs.encrypted');
+        const name = unlocked ? (names[d.id] ?? encryptedLabel) : encryptedLabel;
         return (
           <button
             key={d.id}

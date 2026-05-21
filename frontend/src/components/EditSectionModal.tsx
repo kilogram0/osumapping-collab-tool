@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, sectionFieldAad } from '../utils/crypto';
 import { useUpdateSection } from '../hooks/useDifficulty';
@@ -34,6 +35,7 @@ export default function EditSectionModal({
   onSuccess,
   onCancel,
 }: EditSectionModalProps) {
+  const { t } = useTranslation();
   const { getKey } = useEncryption();
   const updateSection = useUpdateSection(difficultyId);
 
@@ -56,14 +58,14 @@ export default function EditSectionModal({
     try {
       const key = await getKey(mapsetId);
       if (!key) {
-        setError('Encryption key not found. Please unlock the mapset first.');
+        setError(t('editSectionModal.errorKeyMissing'));
         setSubmitting(false);
         return;
       }
 
       const parsed = parseTimestampString(endTimeInput);
       if (!parsed) {
-        setError('Invalid end time format. Use MM:SS:MMM (e.g. 00:30:000).');
+        setError(t('editSectionModal.errorInvalidFormat'));
         setSubmitting(false);
         return;
       }
@@ -71,9 +73,7 @@ export default function EditSectionModal({
       const endMs = parsed.ms;
 
       if (endMs < initialStartTimeMs + MIN_SECTION_MS) {
-        setError(
-          `End time must be at least 1 second after the section start time (${formatTimestamp(initialStartTimeMs)}).`,
-        );
+        setError(t('editSectionModal.errorTooEarly', { time: formatTimestamp(initialStartTimeMs) }));
         setSubmitting(false);
         return;
       }
@@ -83,17 +83,13 @@ export default function EditSectionModal({
         nextSectionEndTimeMs !== undefined &&
         endMs > nextSectionEndTimeMs - MIN_SECTION_MS
       ) {
-        setError(
-          `End time must be at least 1 second before the next section's end time (${formatTimestamp(nextSectionEndTimeMs)}). Editing past it would shrink the next section below 1 second.`,
-        );
+        setError(t('editSectionModal.errorPastNext', { time: formatTimestamp(nextSectionEndTimeMs) }));
         setSubmitting(false);
         return;
       }
 
       if (songLengthMs !== null && songLengthMs !== undefined && endMs > songLengthMs) {
-        setError(
-          `End time may not exceed the song length (${formatTimestamp(songLengthMs)}).`,
-        );
+        setError(t('editSectionModal.errorPastSong', { time: formatTimestamp(songLengthMs) }));
         setSubmitting(false);
         return;
       }
@@ -111,7 +107,7 @@ export default function EditSectionModal({
 
       onSuccess();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update section';
+      const message = err instanceof Error ? err.message : t('editSectionModal.errorGeneric');
       setError(message);
     } finally {
       setSubmitting(false);
@@ -130,13 +126,13 @@ export default function EditSectionModal({
     >
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
         <h2 id="edit-section-title" className="text-xl font-bold text-white mb-4">
-          Edit Section
+          {t('editSectionModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="edit-section-name" className="block text-sm font-medium text-gray-300 mb-1">
-              Name <span className="text-red-400">*</span>
+              {t('editSectionModal.nameLabel')} <span className="text-red-400">{t('common.required')}</span>
             </label>
             <input
               id="edit-section-name"
@@ -150,15 +146,15 @@ export default function EditSectionModal({
           </div>
 
           <div>
-            <span className="block text-sm font-medium text-gray-300 mb-1">Start Time</span>
+            <span className="block text-sm font-medium text-gray-300 mb-1">{t('editSectionModal.startTimeLabel')}</span>
             <p className="text-sm text-gray-400">
-              {formatTimestamp(initialStartTimeMs)} <span className="text-xs text-gray-500">(computed from previous section)</span>
+              {formatTimestamp(initialStartTimeMs)} <span className="text-xs text-gray-500">{t('editSectionModal.startTimeHint')}</span>
             </p>
           </div>
 
           <div>
             <label htmlFor="edit-section-end-time" className="block text-sm font-medium text-gray-300 mb-1">
-              End Time <span className="text-red-400">*</span>
+              {t('editSectionModal.endTimeLabel')} <span className="text-red-400">{t('common.required')}</span>
             </label>
             <input
               id="edit-section-end-time"
@@ -166,10 +162,10 @@ export default function EditSectionModal({
               value={endTimeInput}
               onChange={(e) => setEndTimeInput(e.target.value)}
               required
-              placeholder="00:30:000"
+              placeholder={t('editSectionModal.endTimePlaceholder')}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 font-mono"
             />
-            <p className="text-xs text-gray-500 mt-1">Format: MM:SS:MMM (e.g. 01:15:250)</p>
+            <p className="text-xs text-gray-500 mt-1">{t('editSectionModal.endTimeFormatHint')}</p>
           </div>
 
           {error && (
@@ -184,14 +180,14 @@ export default function EditSectionModal({
               onClick={onCancel}
               className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={!name.trim() || submitting}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
             >
-              {submitting ? 'Saving…' : 'Save Changes'}
+              {submitting ? t('editSectionModal.submitting') : t('editSectionModal.submit')}
             </button>
           </div>
         </form>

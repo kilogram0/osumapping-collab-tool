@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
 import { formatTimestamp } from '../utils/extractTimestamp';
@@ -39,6 +40,7 @@ export default function Timeline({
   onSelectSection,
   onJumpToPost,
 }: TimelineProps) {
+  const { t } = useTranslation();
   const [tooltip, setTooltip] = useState<{
     x: number;
     y: number;
@@ -58,7 +60,7 @@ export default function Timeline({
   if (songLengthMs <= 0) {
     return (
       <div className="w-full h-16 bg-gray-800 border border-gray-700 rounded-lg flex items-center justify-center">
-        <p className="text-sm text-gray-500">No timeline available</p>
+        <p className="text-sm text-gray-500">{t('timeline.unavailable')}</p>
       </div>
     );
   }
@@ -135,7 +137,7 @@ export default function Timeline({
               data-testid={`timeline-marker-${post.id}`}
               className="absolute top-1 w-3 h-3 bg-white rounded-full border-2 border-gray-900 shadow hover:scale-125 transition-transform z-20"
               style={{ left: `calc(${leftPercent}% - 6px)` }}
-              title={`Post at ${formatTimestamp(post.extractedMs ?? 0)}`}
+              title={t('timeline.postAt', { time: formatTimestamp(post.extractedMs ?? 0) })}
               onClick={(e) => {
                 e.stopPropagation();
                 handleMarkerClick(post.id);
@@ -146,7 +148,7 @@ export default function Timeline({
                   y: e.clientY,
                   content: (
                     <div>
-                      <p className="font-semibold">Post</p>
+                      <p className="font-semibold">{t('timeline.postLabel')}</p>
                       <p className="text-xs text-gray-300">
                         {formatTimestamp(post.extractedMs ?? 0)}
                       </p>

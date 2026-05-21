@@ -1,15 +1,16 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Post, PostTag } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, postFieldAad } from '../utils/crypto';
 import { logger } from '../utils/logger';
 
-const TAG_OPTIONS: { value: PostTag; label: string }[] = [
-  { value: 'general', label: 'General' },
-  { value: 'suggestion', label: 'Suggestion' },
-  { value: 'problem', label: 'Problem' },
-  { value: 'praise', label: 'Praise' },
-];
+const TAG_OPTIONS = [
+  { value: 'general', labelKey: 'createPostForm.tagGeneral' },
+  { value: 'suggestion', labelKey: 'createPostForm.tagSuggestion' },
+  { value: 'problem', labelKey: 'createPostForm.tagProblem' },
+  { value: 'praise', labelKey: 'createPostForm.tagPraise' },
+] as const satisfies ReadonlyArray<{ value: PostTag; labelKey: string }>;
 
 interface CreatePostFormProps {
   mapsetId: string;
@@ -31,13 +32,14 @@ interface CreatePostFormProps {
 
 export default function CreatePostForm({
   mapsetId,
-  difficultyId,
+  difficultyId: _difficultyId,
   onSubmit,
   onCancel,
   parentPost,
   editingPost,
   initialBody = '',
 }: CreatePostFormProps) {
+  const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
   const [tag, setTag] = useState<PostTag>(editingPost?.tag ?? 'general');
   const [body, setBody] = useState(initialBody);
@@ -53,12 +55,12 @@ export default function CreatePostForm({
     setError(null);
 
     if (!body.trim()) {
-      setError('Post body cannot be empty.');
+      setError(t('createPostForm.errorEmpty'));
       return;
     }
 
     if (!unlocked) {
-      setError('Mapset is locked. Please unlock it first.');
+      setError(t('createPostForm.errorLocked'));
       return;
     }
 
@@ -66,7 +68,7 @@ export default function CreatePostForm({
     try {
       const key = await getKey(mapsetId);
       if (!key) {
-        setError('Encryption key not available.');
+        setError(t('createPostForm.errorKeyMissing'));
         setIsSubmitting(false);
         return;
       }
@@ -87,7 +89,7 @@ export default function CreatePostForm({
       }
     } catch (err) {
       logger.warn('Failed to submit post:', err);
-      setError('Failed to submit post. Please try again.');
+      setError(t('createPostForm.errorGeneric'));
     } finally {
       setIsSubmitting(false);
     }
@@ -98,7 +100,7 @@ export default function CreatePostForm({
       {!isEdit && !isReply && (
         <div className="mb-3">
           <label htmlFor="post-tag" className="block text-sm font-medium text-gray-300 mb-1">
-            Tag
+            {t('createPostForm.tagLabel')}
           </label>
           <select
             id="post-tag"
@@ -108,7 +110,7 @@ export default function CreatePostForm({
           >
             {TAG_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
-                {opt.label}
+                {t(opt.labelKey)}
               </option>
             ))}
           </select>
@@ -118,9 +120,9 @@ export default function CreatePostForm({
       {isReply && parentPost && (
         <div className="mb-3 text-sm text-gray-400">
           <p>
-            Replying to post by{' '}
+            {t('createPostForm.replyingTo')}{' '}
             <span className="text-gray-300 font-medium">
-              User {parentPost.author_id.slice(0, 8)}
+              {t('createPostForm.userPrefix', { id: parentPost.author_id.slice(0, 8) })}
             </span>
           </p>
         </div>
@@ -128,14 +130,14 @@ export default function CreatePostForm({
 
       <div className="mb-3">
         <label htmlFor="post-body" className="block text-sm font-medium text-gray-300 mb-1">
-          {isEdit ? 'Edit post' : isReply ? 'Reply' : 'New post'}
+          {isEdit ? t('createPostForm.editPost') : isReply ? t('createPostForm.reply') : t('createPostForm.newPost')}
         </label>
         <textarea
           id="post-body"
           rows={4}
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          placeholder="Write your post here... e.g. 00:46:140 (2,3,4) - these are too close"
+          placeholder={t('createPostForm.bodyPlaceholder')}
           className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
           disabled={isSubmitting}
         />
@@ -151,7 +153,13 @@ export default function CreatePostForm({
           disabled={isSubmitting}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
         >
-          {isSubmitting ? 'Submitting...' : isEdit ? 'Save Changes' : isReply ? 'Reply' : 'Post'}
+          {isSubmitting
+            ? t('createPostForm.submitting')
+            : isEdit
+              ? t('createPostForm.submitEdit')
+              : isReply
+                ? t('createPostForm.submitReply')
+                : t('createPostForm.submitNew')}
         </button>
         {onCancel && (
           <button
@@ -160,10 +168,11 @@ export default function CreatePostForm({
             disabled={isSubmitting}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         )}
       </div>
     </form>
   );
 }
+

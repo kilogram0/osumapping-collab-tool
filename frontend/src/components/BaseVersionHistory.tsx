@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useBaseOsuVersions, useActivateBaseOsuVersion } from '../hooks/useDifficulty';
 
 interface BaseVersionHistoryProps {
@@ -7,6 +8,7 @@ interface BaseVersionHistoryProps {
 }
 
 export default function BaseVersionHistory({ difficultyId, onClose }: BaseVersionHistoryProps) {
+  const { t } = useTranslation();
   const { data: versions, isLoading, error } = useBaseOsuVersions(difficultyId);
   const activateMutation = useActivateBaseOsuVersion(difficultyId);
   const [justActivated, setJustActivated] = useState<string | null>(null);
@@ -40,15 +42,15 @@ export default function BaseVersionHistory({ difficultyId, onClose }: BaseVersio
         className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl max-h-[80vh] flex flex-col"
       >
         <h3 id="base-version-history-title" className="text-lg font-semibold text-white mb-4">
-          Base Version History
+          {t('baseHistory.title')}
         </h3>
 
-        {isLoading && <p className="text-sm text-gray-400">Loading versions…</p>}
-        {error && <p className="text-sm text-red-400">Failed to load version history.</p>}
+        {isLoading && <p className="text-sm text-gray-400">{t('baseHistory.loading')}</p>}
+        {error && <p className="text-sm text-red-400">{t('baseHistory.error')}</p>}
 
         <div className="overflow-y-auto flex-1 space-y-2">
           {versions && versions.length === 0 && (
-            <p className="text-sm text-gray-400 italic">No base versions yet.</p>
+            <p className="text-sm text-gray-400 italic">{t('baseHistory.empty')}</p>
           )}
           {versions?.map((v) => (
             <div
@@ -64,7 +66,7 @@ export default function BaseVersionHistory({ difficultyId, onClose }: BaseVersio
                 <p className="text-sm font-medium text-white">
                   v{v.version}
                   {v.is_active && (
-                    <span className="ml-2 text-xs text-blue-400 font-semibold">ACTIVE</span>
+                    <span className="ml-2 text-xs text-blue-400 font-semibold">{t('baseHistory.active')}</span>
                   )}
                 </p>
                 <p className="text-xs text-gray-500">
@@ -79,10 +81,10 @@ export default function BaseVersionHistory({ difficultyId, onClose }: BaseVersio
                   className="px-3 py-1.5 min-w-[5.5rem] bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-medium rounded transition-colors shrink-0 ml-2"
                 >
                   {activateMutation.isPending && justActivated !== v.id
-                    ? 'Activating…'
+                    ? t('baseHistory.activating')
                     : justActivated === v.id
-                      ? 'Activated!'
-                      : 'Activate'}
+                      ? t('baseHistory.activated')
+                      : t('baseHistory.activate')}
                 </button>
               )}
             </div>
@@ -95,7 +97,7 @@ export default function BaseVersionHistory({ difficultyId, onClose }: BaseVersio
             onClick={onClose}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
           >
-            Close
+            {t('baseHistory.close')}
           </button>
         </div>
       </div>

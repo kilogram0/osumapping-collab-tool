@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Post, MemberWithUser } from '../api/endpoints';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
@@ -78,6 +79,7 @@ export default function SectionDetailPanel({
   onEditSection,
   onDeleteSection,
 }: SectionDetailPanelProps) {
+  const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
   const unlocked = isUnlocked(mapsetId);
   const [showHistory, setShowHistory] = useState(false);
@@ -269,7 +271,7 @@ export default function SectionDetailPanel({
                   onClick={() => onEditSection(section)}
                   className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
                 >
-                  Edit
+                  {t('sectionDetail.edit')}
                 </button>
               )}
             </>
@@ -278,14 +280,12 @@ export default function SectionDetailPanel({
             <button
               type="button"
               onClick={() => {
-                const ok = window.confirm(
-                  `Delete section "${section.name}"? This permanently removes the section and all of its posts and uploaded .osu versions. This cannot be undone.`,
-                );
+                const ok = window.confirm(t('sectionDetail.deleteConfirm', { name: section.name }));
                 if (ok) void onDeleteSection(section);
               }}
               className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded transition-colors"
             >
-              Delete
+              {t('sectionDetail.delete')}
             </button>
           )}
           <button
@@ -293,14 +293,14 @@ export default function SectionDetailPanel({
             onClick={handleDownload}
             className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
           >
-            Download .osu
+            {t('sectionDetail.downloadOsu')}
           </button>
           <button
             type="button"
             onClick={() => setShowHistory(true)}
             className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
           >
-            Version History
+            {t('sectionDetail.versionHistory')}
           </button>
         </div>
       </div>
@@ -309,7 +309,7 @@ export default function SectionDetailPanel({
       <div className="mb-4">
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-medium text-gray-300">
-            Posts ({sectionPosts.length})
+            {t('sectionDetail.posts', { count: sectionPosts.length })}
           </h4>
           <button
             type="button"
@@ -320,7 +320,7 @@ export default function SectionDetailPanel({
             }}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded transition-colors"
           >
-            {showCreateForm ? 'Hide Form' : 'New Post'}
+            {showCreateForm ? t('sectionDetail.hideForm') : t('sectionDetail.newPost')}
           </button>
         </div>
 
@@ -341,7 +341,7 @@ export default function SectionDetailPanel({
 
         {sectionPosts.length === 0 && (
           <p className="text-sm text-gray-500 italic">
-            No posts for this section yet.
+            {t('sectionDetail.empty')}
           </p>
         )}
       </div>

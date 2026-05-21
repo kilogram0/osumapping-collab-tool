@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Section } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { decrypt, decodeJsonEnvelope, sectionFieldAad } from '../utils/crypto';
@@ -28,6 +29,7 @@ export interface DecryptedSection {
 }
 
 export default function SectionList({ sections, mapsetId, mapsetTitle, difficultyId, onEdit, onDecrypted, role }: SectionListProps) {
+  const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
   const [decrypted, setDecrypted] = useState<DecryptedSection[]>([]);
   const [historySectionId, setHistorySectionId] = useState<string | null>(null);
@@ -120,7 +122,7 @@ export default function SectionList({ sections, mapsetId, mapsetTitle, difficult
 
   if (sections.length === 0) {
     return (
-      <p className="text-sm text-gray-500 italic">No sections yet.</p>
+      <p className="text-sm text-gray-500 italic">{t('sectionList.empty')}</p>
     );
   }
 
@@ -141,13 +143,13 @@ export default function SectionList({ sections, mapsetId, mapsetTitle, difficult
 
   if (unlocked && decrypted.length === 0 && sections.length > 0) {
     return (
-      <ul className="space-y-2" aria-label="Sections">
+      <ul className="space-y-2" aria-label={t('sectionList.ariaLabel')}>
         {sections.map((s) => (
           <li
             key={s.id}
             className="bg-gray-800 border border-gray-700 rounded-lg p-3"
           >
-            <p className="text-red-400 font-medium text-sm">Failed to decrypt section</p>
+            <p className="text-red-400 font-medium text-sm">{t('sectionList.failedDecrypt')}</p>
           </li>
         ))}
       </ul>
@@ -160,7 +162,7 @@ export default function SectionList({ sections, mapsetId, mapsetTitle, difficult
   // sortOrder" at the OsuUploadButton + handleDownload call sites.
   if (!unlocked) {
     return (
-      <ul className="space-y-2" aria-label="Sections">
+      <ul className="space-y-2" aria-label={t('sectionList.ariaLabel')}>
         {sections.map((s) => (
           <li
             key={s.id}
@@ -168,7 +170,7 @@ export default function SectionList({ sections, mapsetId, mapsetTitle, difficult
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-white font-medium text-sm">🔒 Encrypted Section</p>
+                <p className="text-white font-medium text-sm">{t('sectionList.encrypted')}</p>
               </div>
             </div>
           </li>
@@ -179,7 +181,7 @@ export default function SectionList({ sections, mapsetId, mapsetTitle, difficult
 
   return (
     <>
-      <ul className="space-y-2" aria-label="Sections">
+      <ul className="space-y-2" aria-label={t('sectionList.ariaLabel')}>
         {decrypted.map((s) => (
           <li
             key={s.id}
@@ -205,14 +207,14 @@ export default function SectionList({ sections, mapsetId, mapsetTitle, difficult
                   onClick={() => handleDownload(s.id, s.name, s.sortOrder)}
                   className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
                 >
-                  Download .osu
+                  {t('sectionList.downloadOsu')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setHistorySectionId(s.id)}
                   className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
                 >
-                  Version History
+                  {t('sectionList.versionHistory')}
                 </button>
                 {onEdit && (
                   <button
@@ -220,7 +222,7 @@ export default function SectionList({ sections, mapsetId, mapsetTitle, difficult
                     onClick={() => onEdit(s)}
                     className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
                   >
-                    Edit
+                    {t('sectionList.edit')}
                   </button>
                 )}
               </div>

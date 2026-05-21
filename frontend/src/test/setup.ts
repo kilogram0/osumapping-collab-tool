@@ -1,4 +1,10 @@
 import '@testing-library/jest-dom/vitest';
+import i18n from '../i18n';
+
+// Force English in tests so existing string assertions match the source strings.
+// Skips the LanguageDetector lookup (localStorage / navigator) which would
+// otherwise leak state between tests.
+void i18n.changeLanguage('en');
 
 // Polyfill File.prototype.text for jsdom
 if (!File.prototype.text) {

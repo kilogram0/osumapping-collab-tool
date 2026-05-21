@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, sectionFieldAad } from '../utils/crypto';
 import { useCreateSection } from '../hooks/useDifficulty';
@@ -27,6 +28,7 @@ export default function CreateSectionModal({
   onSuccess,
   onCancel,
 }: CreateSectionModalProps) {
+  const { t } = useTranslation();
   const { getKey } = useEncryption();
   const createSection = useCreateSection(difficultyId);
 
@@ -49,14 +51,14 @@ export default function CreateSectionModal({
     try {
       const key = await getKey(mapsetId);
       if (!key) {
-        setError('Encryption key not found. Please unlock the mapset first.');
+        setError(t('createSectionModal.errorKeyMissing'));
         setSubmitting(false);
         return;
       }
 
       const parsed = parseTimestampString(endTimeInput);
       if (!parsed) {
-        setError('Invalid end time format. Use MM:SS:MMM (e.g. 00:30:000).');
+        setError(t('createSectionModal.errorInvalidFormat'));
         setSubmitting(false);
         return;
       }
@@ -64,17 +66,13 @@ export default function CreateSectionModal({
       const endMs = parsed.ms;
 
       if (endMs < startMs + 1000) {
-        setError(
-          `End time must be at least 1 second after the automatically computed start time (${formatTimestamp(startMs)}).`,
-        );
+        setError(t('createSectionModal.errorTooEarly', { time: formatTimestamp(startMs) }));
         setSubmitting(false);
         return;
       }
 
       if (songLengthMs !== null && songLengthMs !== undefined && endMs > songLengthMs) {
-        setError(
-          `End time may not exceed the song length (${formatTimestamp(songLengthMs)}).`,
-        );
+        setError(t('createSectionModal.errorPastSong', { time: formatTimestamp(songLengthMs) }));
         setSubmitting(false);
         return;
       }
@@ -102,7 +100,7 @@ export default function CreateSectionModal({
 
       onSuccess();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create section';
+      const message = err instanceof Error ? err.message : t('createSectionModal.errorGeneric');
       setError(message);
     } finally {
       setSubmitting(false);
@@ -121,13 +119,13 @@ export default function CreateSectionModal({
     >
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
         <h2 id="create-section-title" className="text-xl font-bold text-white mb-4">
-          Add Section
+          {t('createSectionModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="section-name" className="block text-sm font-medium text-gray-300 mb-1">
-              Name <span className="text-red-400">*</span>
+              {t('createSectionModal.nameLabel')} <span className="text-red-400">{t('common.required')}</span>
             </label>
             <input
               id="section-name"
@@ -137,20 +135,20 @@ export default function CreateSectionModal({
               required
               maxLength={255}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder="e.g. Kiai 1"
+              placeholder={t('createSectionModal.namePlaceholder')}
             />
           </div>
 
           <div>
-            <span className="block text-sm font-medium text-gray-300 mb-1">Start Time</span>
+            <span className="block text-sm font-medium text-gray-300 mb-1">{t('createSectionModal.startTimeLabel')}</span>
             <p className="text-sm text-gray-400">
-              {formatTimestamp(startMs)} <span className="text-xs text-gray-500">(computed automatically from previous section)</span>
+              {formatTimestamp(startMs)} <span className="text-xs text-gray-500">{t('createSectionModal.startTimeHint')}</span>
             </p>
           </div>
 
           <div>
             <label htmlFor="section-end-time" className="block text-sm font-medium text-gray-300 mb-1">
-              End Time <span className="text-red-400">*</span>
+              {t('createSectionModal.endTimeLabel')} <span className="text-red-400">{t('common.required')}</span>
             </label>
             <input
               id="section-end-time"
@@ -158,10 +156,10 @@ export default function CreateSectionModal({
               value={endTimeInput}
               onChange={(e) => setEndTimeInput(e.target.value)}
               required
-              placeholder="00:30:000"
+              placeholder={t('createSectionModal.endTimePlaceholder')}
               className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 font-mono"
             />
-            <p className="text-xs text-gray-500 mt-1">Format: MM:SS:MMM (e.g. 01:15:250)</p>
+            <p className="text-xs text-gray-500 mt-1">{t('createSectionModal.endTimeFormatHint')}</p>
           </div>
 
           {error && (
@@ -176,14 +174,14 @@ export default function CreateSectionModal({
               onClick={onCancel}
               className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={!name.trim() || submitting}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
             >
-              {submitting ? 'Creating…' : 'Add Section'}
+              {submitting ? t('createSectionModal.submitting') : t('createSectionModal.submit')}
             </button>
           </div>
         </form>

@@ -13,7 +13,9 @@
       "Read(//tmp/**)",
       "Bash(npx tsc *)",
       "Bash(docker exec *)",
-      "Bash(grep -n \" |$\\\\|encrypted_title\" SPECIFICATION.md)"
+      "Bash(grep -n \" |$\\\\|encrypted_title\" SPECIFICATION.md)",
+      "Bash(python3 -c ' *)",
+      "Bash(git stash *)"
     ],
     "additionalDirectories": [
       "/tmp"

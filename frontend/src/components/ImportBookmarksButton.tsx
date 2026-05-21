@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { parseOsuFile, MAX_OSU_BYTES } from '../utils/osuParser';
@@ -23,6 +24,7 @@ export default function ImportBookmarksButton({
   onSuccess,
   onError,
 }: ImportBookmarksButtonProps) {
+  const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const { getKey } = useEncryption();
@@ -34,7 +36,7 @@ export default function ImportBookmarksButton({
     e.target.value = '';
 
     if (file.size > MAX_OSU_BYTES) {
-      onError(`File too large (${file.size} bytes; max ${MAX_OSU_BYTES}).`);
+      onError(t('importBookmarks.fileTooLarge', { size: file.size, max: MAX_OSU_BYTES }));
       return;
     }
 
@@ -45,7 +47,7 @@ export default function ImportBookmarksButton({
 
       const key = await getKey(mapsetId);
       if (!key) {
-        onError('Encryption key not found. Please unlock the mapset first.');
+        onError(t('importBookmarks.errorKeyMissing'));
         return;
       }
 
@@ -78,7 +80,7 @@ export default function ImportBookmarksButton({
       if (result.error) {
         onError(
           result.created > 0
-            ? `Imported ${result.created} of ${result.total} sections before failing: ${result.error}`
+            ? t('importBookmarks.partial', { created: result.created, total: result.total, message: result.error })
             : result.error,
         );
         return;
@@ -86,7 +88,7 @@ export default function ImportBookmarksButton({
 
       onSuccess(result.created, canPrepopulate);
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Failed to import bookmarks.');
+      onError(err instanceof Error ? err.message : t('importBookmarks.errorGeneric'));
     } finally {
       setImporting(false);
     }
@@ -100,7 +102,7 @@ export default function ImportBookmarksButton({
         accept=".osu"
         className="hidden"
         onChange={handleFileSelect}
-        aria-label="Import sections from .osu bookmarks"
+        aria-label={t('importBookmarks.ariaLabel')}
       />
       <button
         type="button"
@@ -108,7 +110,7 @@ export default function ImportBookmarksButton({
         disabled={importing}
         className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
       >
-        {importing ? 'Importing…' : 'Import Bookmarks'}
+        {importing ? t('importBookmarks.importing') : t('importBookmarks.button')}
       </button>
     </>
   );

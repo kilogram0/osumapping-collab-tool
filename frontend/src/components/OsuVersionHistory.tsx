@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSectionOsuVersions, useActivateSectionOsuVersion, useBaseOsuVersions } from '../hooks/useDifficulty';
 
 interface OsuVersionHistoryProps {
@@ -8,6 +9,7 @@ interface OsuVersionHistoryProps {
 }
 
 export default function OsuVersionHistory({ difficultyId, sectionId, onClose }: OsuVersionHistoryProps) {
+  const { t } = useTranslation();
   const { data: versions, isLoading, error } = useSectionOsuVersions(difficultyId, sectionId);
   const { data: baseVersions } = useBaseOsuVersions(difficultyId);
   const activateMutation = useActivateSectionOsuVersion(difficultyId, sectionId);
@@ -52,15 +54,15 @@ export default function OsuVersionHistory({ difficultyId, sectionId, onClose }: 
         className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl max-h-[80vh] flex flex-col"
       >
         <h3 id="osu-version-history-title" className="text-lg font-semibold text-white mb-4">
-          Section Version History
+          {t('sectionHistory.title')}
         </h3>
 
-        {isLoading && <p className="text-sm text-gray-400">Loading versions…</p>}
-        {error && <p className="text-sm text-red-400">Failed to load version history.</p>}
+        {isLoading && <p className="text-sm text-gray-400">{t('sectionHistory.loading')}</p>}
+        {error && <p className="text-sm text-red-400">{t('sectionHistory.error')}</p>}
 
         <div className="overflow-y-auto flex-1 space-y-2">
           {versions && versions.length === 0 && (
-            <p className="text-sm text-gray-400 italic">No versions uploaded yet.</p>
+            <p className="text-sm text-gray-400 italic">{t('sectionHistory.empty')}</p>
           )}
           {versions?.map((v) => (
             <div
@@ -76,11 +78,11 @@ export default function OsuVersionHistory({ difficultyId, sectionId, onClose }: 
                 <p className="text-sm font-medium text-white">
                   v{v.version}
                   {v.is_active && (
-                    <span className="ml-2 text-xs text-blue-400 font-semibold">ACTIVE</span>
+                    <span className="ml-2 text-xs text-blue-400 font-semibold">{t('sectionHistory.active')}</span>
                   )}
                   {sourceBaseMap.has(v.id) && (
-                    <span className="ml-2 text-xs text-yellow-400 font-semibold" title={`Originally created Base v${sourceBaseMap.get(v.id)} on upload`}>
-                      ⚠️ Created base v{sourceBaseMap.get(v.id)}
+                    <span className="ml-2 text-xs text-yellow-400 font-semibold" title={t('sectionHistory.createdBaseTitle', { version: sourceBaseMap.get(v.id) })}>
+                      {t('sectionHistory.createdBase', { version: sourceBaseMap.get(v.id) })}
                     </span>
                   )}
                 </p>
@@ -96,10 +98,10 @@ export default function OsuVersionHistory({ difficultyId, sectionId, onClose }: 
                   className="px-3 py-1.5 min-w-[5.5rem] bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-medium rounded transition-colors shrink-0 ml-2"
                 >
                   {activateMutation.isPending && justActivated !== v.id
-                    ? 'Activating…'
+                    ? t('sectionHistory.activating')
                     : justActivated === v.id
-                      ? 'Activated!'
-                      : 'Activate'}
+                      ? t('sectionHistory.activated')
+                      : t('sectionHistory.activate')}
                 </button>
               )}
             </div>
@@ -112,7 +114,7 @@ export default function OsuVersionHistory({ difficultyId, sectionId, onClose }: 
             onClick={onClose}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
           >
-            Close
+            {t('sectionHistory.close')}
           </button>
         </div>
       </div>

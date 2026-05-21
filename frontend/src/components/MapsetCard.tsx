@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { Mapset } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
@@ -11,6 +12,7 @@ interface MapsetCardProps {
 }
 
 export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
+  const { t } = useTranslation();
   const { isUnlocked } = useEncryption();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -90,14 +92,14 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
             {new Date(mapset.created_at).toLocaleDateString()}
           </p>
           <span className="text-xs text-gray-400 bg-gray-700 px-1.5 py-0.5 rounded">
-            {mapset.difficulty_count} {mapset.difficulty_count === 1 ? 'diff' : 'diffs'}
+            {t('mapsetCard.diff', { count: mapset.difficulty_count })}
           </span>
         </div>
         {isPendingDeletion && (
           <p className="text-xs text-red-400 mt-1">
             {daysLeft === 0
-              ? 'Deletion imminent'
-              : `Scheduled for deletion in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}
+              ? t('mapsetCard.deletionImminent')
+              : t('mapsetCard.scheduledDeletion', { count: daysLeft ?? 0 })}
           </p>
         )}
       </div>
@@ -107,9 +109,9 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
           <button
             onClick={handleUnlock}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors"
-            aria-label="Unlock mapset"
+            aria-label={t('mapsetCard.unlockAria')}
           >
-            Unlock
+            {t('mapsetCard.unlock')}
           </button>
         )}
 
@@ -118,7 +120,7 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
             <button
               onClick={handleMenuToggle}
               className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
-              aria-label="Mapset options"
+              aria-label={t('mapsetCard.menuAria')}
               data-testid="mapset-menu-button"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -139,7 +141,7 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
                     className="w-full text-left px-4 py-2 text-sm text-green-400 hover:bg-gray-700 transition-colors"
                     data-testid="cancel-delete-button"
                   >
-                    Cancel deletion
+                    {t('mapsetCard.cancelDeletion')}
                   </button>
                 ) : (
                   <button
@@ -147,7 +149,7 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
                     className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700 transition-colors"
                     data-testid="schedule-delete-button"
                   >
-                    Delete
+                    {t('mapsetCard.delete')}
                   </button>
                 )}
               </div>
