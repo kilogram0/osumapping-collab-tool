@@ -121,6 +121,7 @@ export interface DifficultyDetail {
   encrypted_name: string;
   created_at: string;
   updated_at: string;
+  delete_at: string | null;
   sections: Section[];
   posts: Post[];
 }
@@ -231,10 +232,17 @@ export interface Difficulty {
   encrypted_name: string;
   created_at: string;
   updated_at: string;
+  delete_at: string | null;
 }
 
-export async function fetchDifficulties(mapsetId: string): Promise<Difficulty[]> {
-  const { data } = await client.get<Difficulty[]>(`/mapsets/${mapsetId}/difficulties`);
+export async function fetchDifficulties(
+  mapsetId: string,
+  options?: { includePending?: boolean },
+): Promise<Difficulty[]> {
+  const url = options?.includePending
+    ? `/mapsets/${mapsetId}/difficulties?include_pending=true`
+    : `/mapsets/${mapsetId}/difficulties`;
+  const { data } = await client.get<Difficulty[]>(url);
   return data;
 }
 
@@ -263,8 +271,14 @@ export async function updateDifficulty(
   return data;
 }
 
-export async function deleteDifficulty(difficultyId: string): Promise<void> {
-  await client.delete(`/difficulties/${difficultyId}`);
+export async function deleteDifficulty(difficultyId: string): Promise<Difficulty> {
+  const { data } = await client.delete<Difficulty>(`/difficulties/${difficultyId}`);
+  return data;
+}
+
+export async function restoreDifficulty(difficultyId: string): Promise<Difficulty> {
+  const { data } = await client.post<Difficulty>(`/difficulties/${difficultyId}/restore`);
+  return data;
 }
 
 export interface Section {

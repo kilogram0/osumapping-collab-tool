@@ -142,6 +142,7 @@ class DifficultyRead(BaseModel):
     encrypted_name: str
     created_at: datetime
     updated_at: datetime
+    delete_at: datetime | None = None
 
 
 class SectionCreate(BaseModel):
@@ -363,5 +364,6 @@ class DifficultyDetailRead(BaseModel):
     encrypted_name: str
     created_at: datetime
     updated_at: datetime
+    delete_at: datetime | None = None
     sections: list[SectionRead]
     posts: list[PostRead]

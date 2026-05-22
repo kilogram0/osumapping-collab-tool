@@ -12,15 +12,17 @@ import {
   fetchDifficulties,
   fetchDifficultyDetail,
   fetchSectionOsuVersions,
+  restoreDifficulty,
   updateDifficulty,
   updatePost,
   updateSection,
 } from '../api/endpoints';
 
-export function useDifficulties(mapsetId: string) {
+export function useDifficulties(mapsetId: string, options?: { includePending?: boolean }) {
+  const includePending = !!options?.includePending;
   return useQuery({
-    queryKey: ['difficulties', mapsetId],
-    queryFn: () => fetchDifficulties(mapsetId),
+    queryKey: ['difficulties', mapsetId, includePending ? 'with-pending' : 'active'],
+    queryFn: () => fetchDifficulties(mapsetId, { includePending }),
     enabled: !!mapsetId,
   });
 }
@@ -61,6 +63,19 @@ export function useDeleteDifficulty(mapsetId: string) {
     mutationFn: (difficultyId: string) => deleteDifficulty(difficultyId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+      queryClient.invalidateQueries({ queryKey: ['quota'] });
+    },
+  });
+}
+
+export function useRestoreDifficulty(mapsetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (difficultyId: string) => restoreDifficulty(difficultyId),
+    onSuccess: (_data, difficultyId) => {
+      queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
       queryClient.invalidateQueries({ queryKey: ['quota'] });
     },

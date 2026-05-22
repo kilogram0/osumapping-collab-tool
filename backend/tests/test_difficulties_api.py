@@ -342,6 +342,52 @@ async def test_get_difficulty_rejects_unauthenticated(client: AsyncClient):
     assert resp.status_code == 401
 
 
+@pytest.mark.asyncio
+async def test_get_difficulty_returns_404_for_non_owner_on_pending_row(
+    client: AsyncClient,
+):
+    """A non-owner active member cannot see a pending-deletion difficulty via GET."""
+    owner = await _seed_user(70015)
+    mapper_user = await _seed_user(70016)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    # Soft-delete the difficulty.
+    await client.delete(f"/api/difficulties/{diff['id']}", headers=CSRF_HEADERS)
+
+    # Owner can still GET the pending row.
+    owner_resp = await client.get(f"/api/difficulties/{diff['id']}")
+    assert owner_resp.status_code == 200
+    assert owner_resp.json()["delete_at"] is not None
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    # Mapper gets 404 — pending rows are invisible to non-owners.
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    mapper_resp = await client.get(f"/api/difficulties/{diff['id']}")
+    assert mapper_resp.status_code == 404
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
 # ---------------------------------------------------------------------------
 # PATCH /difficulties/{id}
 # ---------------------------------------------------------------------------
@@ -490,9 +536,11 @@ async def test_patch_difficulty_rejects_unauthenticated(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_delete_difficulty_owner_can_delete(
+async def test_delete_difficulty_owner_schedules_purge(
     client: AsyncClient, authed_user_with_mapset
 ):
+    """DELETE soft-deletes by setting delete_at; the row is hidden from the
+    default list but still exists in the DB until the background purge fires."""
     _, mapset_id = authed_user_with_mapset
     payload = _difficulty_payload()
     await client.post(
@@ -502,16 +550,27 @@ async def test_delete_difficulty_owner_can_delete(
     resp = await client.delete(
         f"/api/difficulties/{payload['id']}", headers=CSRF_HEADERS
     )
-    assert resp.status_code == 204
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == payload["id"]
+    assert body["delete_at"] is not None
 
-    get_resp = await client.get(f"/api/difficulties/{payload['id']}")
-    assert get_resp.status_code == 404
+    # Default list excludes the pending row.
+    list_resp = await client.get(f"/api/mapsets/{mapset_id}/difficulties")
+    assert [d["id"] for d in list_resp.json()] == []
+
+    # Owner can still re-list it via include_pending.
+    list_with_pending = await client.get(
+        f"/api/mapsets/{mapset_id}/difficulties?include_pending=true"
+    )
+    assert [d["id"] for d in list_with_pending.json()] == [payload["id"]]
 
 
 @pytest.mark.asyncio
-async def test_delete_difficulty_cascades_to_sections(
+async def test_delete_difficulty_does_not_cascade_until_purge(
     client: AsyncClient, authed_user_with_mapset
 ):
+    """Soft-delete leaves sections intact until the background purge fires."""
     _, mapset_id = authed_user_with_mapset
     diff = _difficulty_payload()
     await client.post(
@@ -544,7 +603,9 @@ async def test_delete_difficulty_cascades_to_sections(
                 )
             )
         ).scalars().all()
-    assert sections == []
+    # Sections persist during the grace period — cascade only fires when the
+    # purge job hard-deletes the difficulty.
+    assert len(sections) == 1
 
 
 @pytest.mark.asyncio
@@ -891,3 +952,430 @@ async def test_difficulty_cap_charges_mapset_owner_not_mapper(client: AsyncClien
 
     await _delete_user_and_mapsets(owner.id)
     await _delete_user_and_mapsets(mapper_user.id)
+
+
+# ---------------------------------------------------------------------------
+# Soft-delete: pending-deletion buffer, restore, include_pending toggle
+# ---------------------------------------------------------------------------
+
+
+async def _seed_difficulties_pending(
+    mapset_id: UUID, count: int, delete_at_offset_days: float = 7.0
+) -> list[UUID]:
+    """Insert ``count`` Difficulty rows with delete_at set to (now + offset days)."""
+    from datetime import datetime, timedelta, timezone
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    ids: list[UUID] = []
+    async with factory() as session:
+        for _ in range(count):
+            d = Difficulty(
+                id=uuid4(),
+                mapset_id=mapset_id,
+                encrypted_name="encrypted:pending",
+                delete_at=now_naive + timedelta(days=delete_at_offset_days),
+            )
+            session.add(d)
+            ids.append(d.id)
+        await session.commit()
+    return ids
+
+
+@pytest.mark.asyncio
+async def test_delete_difficulty_sets_delete_at(
+    client: AsyncClient, authed_user_with_mapset
+):
+    """DELETE returns a 200 body with delete_at set ~7 days in the future."""
+    from datetime import datetime, timedelta, timezone
+
+    _, mapset_id = authed_user_with_mapset
+    payload = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties", json=payload, headers=CSRF_HEADERS
+    )
+
+    resp = await client.delete(
+        f"/api/difficulties/{payload['id']}", headers=CSRF_HEADERS
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    delete_at = datetime.fromisoformat(body["delete_at"])
+    expected = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=7)
+    # Allow a generous skew for slow CI.
+    assert abs((delete_at - expected).total_seconds()) < 60
+
+
+@pytest.mark.asyncio
+async def test_delete_difficulty_is_idempotent_when_already_pending(
+    client: AsyncClient, authed_user_with_mapset
+):
+    _, mapset_id = authed_user_with_mapset
+    payload = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties", json=payload, headers=CSRF_HEADERS
+    )
+    first = await client.delete(
+        f"/api/difficulties/{payload['id']}", headers=CSRF_HEADERS
+    )
+    assert first.status_code == 200
+    first_at = first.json()["delete_at"]
+
+    second = await client.delete(
+        f"/api/difficulties/{payload['id']}", headers=CSRF_HEADERS
+    )
+    assert second.status_code == 200
+    # Idempotent — the timestamp doesn't reset.
+    assert second.json()["delete_at"] == first_at
+
+
+@pytest.mark.asyncio
+async def test_delete_difficulty_frees_active_quota_slot(client: AsyncClient):
+    """Scheduling deletion immediately frees an active slot so a new diff can be created."""
+    owner = await _seed_user(79100)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    await _seed_difficulties(UUID(ms["id"]), 50)
+
+    blocked = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert blocked.status_code == 409
+
+    list_resp = await client.get(f"/api/mapsets/{ms['id']}/difficulties")
+    diff_id = list_resp.json()[0]["id"]
+    await client.delete(f"/api/difficulties/{diff_id}", headers=CSRF_HEADERS)
+
+    freed = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert freed.status_code == 201, freed.text
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_delete_difficulty_rejects_when_buffer_full(client: AsyncClient):
+    """409 + buffer-full detail when the owner has 50 pending-deletion slots."""
+    owner = await _seed_user(79101)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    await _seed_difficulties_pending(UUID(ms["id"]), 50)
+
+    # Create an additional active diff so we have something to soft-delete.
+    new_diff = _difficulty_payload()
+    create = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=new_diff,
+        headers=CSRF_HEADERS,
+    )
+    assert create.status_code == 201
+
+    resp = await client.delete(
+        f"/api/difficulties/{new_diff['id']}", headers=CSRF_HEADERS
+    )
+    assert resp.status_code == 409
+    assert "Pending-deletion limit reached" in resp.json()["detail"]
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_list_difficulties_excludes_pending_by_default(
+    client: AsyncClient, authed_user_with_mapset
+):
+    _, mapset_id = authed_user_with_mapset
+    payload = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties", json=payload, headers=CSRF_HEADERS
+    )
+    await client.delete(
+        f"/api/difficulties/{payload['id']}", headers=CSRF_HEADERS
+    )
+
+    resp = await client.get(f"/api/mapsets/{mapset_id}/difficulties")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_difficulties_include_pending_owner_only(client: AsyncClient):
+    """include_pending=true is honored for owners, ignored for non-owners."""
+    owner = await _seed_user(79102)
+    mapper_user = await _seed_user(79103)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    await client.delete(
+        f"/api/difficulties/{diff['id']}", headers=CSRF_HEADERS
+    )
+
+    # Owner sees the pending row with the toggle on.
+    owner_resp = await client.get(
+        f"/api/mapsets/{ms['id']}/difficulties?include_pending=true"
+    )
+    assert [d["id"] for d in owner_resp.json()] == [diff["id"]]
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    mapper_resp = await client.get(
+        f"/api/mapsets/{ms['id']}/difficulties?include_pending=true"
+    )
+    # Mapper's include_pending request is silently downgraded to active-only.
+    assert mapper_resp.json() == []
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_restore_difficulty_clears_delete_at(
+    client: AsyncClient, authed_user_with_mapset
+):
+    _, mapset_id = authed_user_with_mapset
+    payload = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties", json=payload, headers=CSRF_HEADERS
+    )
+    await client.delete(
+        f"/api/difficulties/{payload['id']}", headers=CSRF_HEADERS
+    )
+
+    resp = await client.post(
+        f"/api/difficulties/{payload['id']}/restore", headers=CSRF_HEADERS
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["delete_at"] is None
+
+    # Restored row shows up in the default list again.
+    list_resp = await client.get(f"/api/mapsets/{mapset_id}/difficulties")
+    assert [d["id"] for d in list_resp.json()] == [payload["id"]]
+
+
+@pytest.mark.asyncio
+async def test_restore_difficulty_rejects_when_active_quota_full(client: AsyncClient):
+    """If restoring would push the owner past the active quota, return 409."""
+    owner = await _seed_user(79104)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+
+    # 49 active diffs in the mapset.
+    await _seed_difficulties(UUID(ms["id"]), 49)
+    # One pending diff in the same mapset (quota = 49, pending = 1).
+    pending_ids = await _seed_difficulties_pending(UUID(ms["id"]), 1)
+    # Fill quota to 50 by adding one more active diff (49 + 1 = 50).
+    await _seed_difficulties(UUID(ms["id"]), 1)
+
+    resp = await client.post(
+        f"/api/difficulties/{pending_ids[0]}/restore", headers=CSRF_HEADERS
+    )
+    assert resp.status_code == 409
+    assert "Active difficulty limit reached" in resp.json()["detail"]
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_restore_difficulty_rejects_non_owner(client: AsyncClient):
+    owner = await _seed_user(79105)
+    mapper_user = await _seed_user(79106)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    await client.delete(
+        f"/api/difficulties/{diff['id']}", headers=CSRF_HEADERS
+    )
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    resp = await client.post(
+        f"/api/difficulties/{diff['id']}/restore", headers=CSRF_HEADERS
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_restore_difficulty_returns_404_for_unknown(
+    client: AsyncClient, authed_user: User
+):
+    resp = await client.post(
+        f"/api/difficulties/{uuid4()}/restore", headers=CSRF_HEADERS
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_difficulty_ghost_cannot_read_post_kick_posts(
+    client: AsyncClient,
+):
+    """Ghost member must not receive posts created after their kick time."""
+    from datetime import datetime, timezone
+
+    owner = await _seed_user(79107)
+    ghost_user = await _seed_user(79108)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    kick_time = datetime.now(timezone.utc).replace(tzinfo=None)
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=ghost_user.id,
+                role=MapsetRole.mapper,
+                kicked_at=kick_time,
+            )
+        )
+        await session.commit()
+
+    # Post created after kick — ghost must not see it.
+    post_after = {
+        "id": str(uuid4()),
+        "tag": "general",
+        "encrypted_body": "encrypted:secret-after-kick",
+    }
+    await client.post(
+        f"/api/difficulties/{diff['id']}/posts", json=post_after, headers=CSRF_HEADERS
+    )
+
+    client.cookies.set(settings.cookie_name, create_access_token(ghost_user.id))
+    resp = await client.get(f"/api/difficulties/{diff['id']}")
+    assert resp.status_code == 200
+    assert all(p["id"] != post_after["id"] for p in resp.json()["posts"])
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(ghost_user.id)
+
+
+@pytest.mark.asyncio
+async def test_purge_expired_difficulties_deletes_past_due_rows(
+    client: AsyncClient, authed_user_with_mapset
+):
+    """_purge_expired_difficulties hard-deletes rows whose delete_at has passed."""
+    from datetime import timedelta
+
+    from app.main import _purge_expired_difficulties
+
+    _, mapset_id = authed_user_with_mapset
+    payload = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties", json=payload, headers=CSRF_HEADERS
+    )
+    await client.delete(
+        f"/api/difficulties/{payload['id']}", headers=CSRF_HEADERS
+    )
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        diff = await session.get(Difficulty, UUID(payload["id"]))
+        assert diff is not None
+        diff.delete_at = diff.created_at - timedelta(seconds=1)
+        await session.commit()
+
+    await _purge_expired_difficulties(test_engine)
+
+    get = await client.get(f"/api/difficulties/{payload['id']}")
+    assert get.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_purge_expired_difficulties_keeps_future_rows(
+    client: AsyncClient, authed_user_with_mapset
+):
+    from app.main import _purge_expired_difficulties
+
+    _, mapset_id = authed_user_with_mapset
+    payload = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties", json=payload, headers=CSRF_HEADERS
+    )
+    await client.delete(
+        f"/api/difficulties/{payload['id']}", headers=CSRF_HEADERS
+    )
+
+    await _purge_expired_difficulties(test_engine)
+
+    # Still fetchable while the grace period is in the future.
+    get = await client.get(f"/api/difficulties/{payload['id']}")
+    assert get.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_purge_expired_difficulties_leaves_active_rows(
+    client: AsyncClient, authed_user_with_mapset
+):
+    from app.main import _purge_expired_difficulties
+
+    _, mapset_id = authed_user_with_mapset
+    payload = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{mapset_id}/difficulties", json=payload, headers=CSRF_HEADERS
+    )
+
+    # Active row (delete_at IS NULL) must survive the purge.
+    await _purge_expired_difficulties(test_engine)
+    get = await client.get(f"/api/difficulties/{payload['id']}")
+    assert get.status_code == 200

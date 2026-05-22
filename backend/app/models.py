@@ -191,6 +191,7 @@ class Difficulty(SQLModel, table=True):
 
     __table_args__ = (
         sa.Index("ix_difficulty_mapset_id", "mapset_id"),
+        sa.Index("ix_difficulty_mapset_delete_at", "mapset_id", "delete_at"),
     )
 
     # Why no server_default=gen_random_uuid() like User? Per the E2EE spec, every
@@ -220,6 +221,11 @@ class Difficulty(SQLModel, table=True):
             "server_default": func.now(),
             "onupdate": func.clock_timestamp(),
         },
+    )
+    # NULL = active. Non-NULL = pending hard deletion at this timestamp.
+    delete_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={"nullable": True},
     )
 
     # Relationships

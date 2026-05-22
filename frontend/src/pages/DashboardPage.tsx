@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { Mapset } from '../api/endpoints';
@@ -20,6 +20,15 @@ export default function DashboardPage() {
   const quotaPct = quota ? Math.min((quota.used / quota.limit) * 100, 100) : 0;
   const quotaColor =
     quotaPct >= 90 ? 'bg-red-500' : quotaPct >= 70 ? 'bg-yellow-400' : 'bg-green-500';
+
+  const { activeMapsets, toBeDeletedMapsets } = useMemo(() => {
+    const active: Mapset[] = [];
+    const toBeDeleted: Mapset[] = [];
+    for (const m of mapsets ?? []) {
+      (m.delete_at ? toBeDeleted : active).push(m);
+    }
+    return { activeMapsets: active, toBeDeletedMapsets: toBeDeleted };
+  }, [mapsets]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20">
@@ -62,15 +71,32 @@ export default function DashboardPage() {
           <p className="text-gray-400">{t('dashboard.emptyState')}</p>
         )}
 
-        {mapsets && mapsets.length > 0 && (
+        {activeMapsets.length > 0 && (
           <div className="grid gap-3 sm:grid-cols-2">
-            {mapsets.map((mapset) => (
+            {activeMapsets.map((mapset) => (
               <MapsetCard
                 key={mapset.id}
                 mapset={mapset}
                 onUnlock={(m) => setUnlockTarget(m)}
               />
             ))}
+          </div>
+        )}
+
+        {toBeDeletedMapsets.length > 0 && (
+          <div className="mt-8" data-testid="to-be-deleted-section">
+            <h2 className="text-lg font-semibold text-gray-400 mb-3">
+              {t('dashboard.toBeDeletedHeading')}
+            </h2>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {toBeDeletedMapsets.map((mapset) => (
+                <MapsetCard
+                  key={mapset.id}
+                  mapset={mapset}
+                  onUnlock={(m) => setUnlockTarget(m)}
+                />
+              ))}
+            </div>
           </div>
         )}
 

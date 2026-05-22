@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.config import settings
 from app.database import engine
-from app.models import Mapset, MapsetMember
+from app.models import Difficulty, Mapset, MapsetMember
 from app.queries import GHOST_GRACE_DAYS
 from app.routers import auth, difficulties, mapsets, members, posts, sections
 
@@ -41,6 +41,22 @@ async def _purge_expired_mapsets(db_engine: AsyncEngine | None = None) -> None:
         await session.commit()
 
 
+async def _purge_expired_difficulties(db_engine: AsyncEngine | None = None) -> None:
+    """Delete all difficulties whose delete_at has passed.
+
+    Same single-worker assumption as ``_purge_expired_mapsets``. Timestamps
+    are naive UTC. Sections, posts, and version rows cascade via FK.
+    """
+    async with AsyncSession(db_engine or engine) as session:
+        await session.execute(
+            sa_delete(Difficulty).where(
+                Difficulty.delete_at.is_not(None),
+                Difficulty.delete_at <= datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+        )
+        await session.commit()
+
+
 async def _purge_expired_ghost_memberships(db_engine: AsyncEngine | None = None) -> None:
     """Delete MapsetMember rows whose kicked grace period has expired."""
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=GHOST_GRACE_DAYS)
@@ -58,6 +74,7 @@ async def _cleanup_expired_mapsets() -> None:
     while True:
         try:
             await _purge_expired_mapsets()
+            await _purge_expired_difficulties()
             await _purge_expired_ghost_memberships()
         except Exception:
             logger.exception("Error during scheduled mapset cleanup")

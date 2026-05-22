@@ -12,6 +12,7 @@ import TopBar from '../components/TopBar';
 import ManageMembersModal from '../components/ManageMembersModal';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
+import PendingDifficultyList from '../components/PendingDifficultyList';
 import PostCard from '../components/PostCard';
 import RenameDifficultyModal from '../components/RenameDifficultyModal';
 import SectionDetailPanel from '../components/SectionDetailPanel';
@@ -26,10 +27,12 @@ import {
   useDeleteSection,
   useDifficultyDetail,
   useDifficulties,
+  useRestoreDifficulty,
   useUpdatePost,
 } from '../hooks/useDifficulty';
 import { useMapset, useMembers, useMyMembership } from '../hooks/useMapset';
 import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad } from '../utils/crypto';
+import { extractApiErrorMessage } from '../utils/errors';
 import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
 import { downloadBaseOsu } from '../api/endpoints';
@@ -55,7 +58,10 @@ export default function MapsetPage() {
     for (const m of members ?? []) map.set(m.user_id, m);
     return map;
   }, [members]);
-  const { data: difficulties, isLoading: difficultiesLoading } = useDifficulties(mapsetId);
+  const [showPendingDifficulties, setShowPendingDifficulties] = useState(false);
+  const { data: difficulties, isLoading: difficultiesLoading } = useDifficulties(mapsetId, {
+    includePending: showPendingDifficulties,
+  });
   const [selectedDifficultyId, setSelectedDifficultyId] = useState<string | null>(null);
   const { data: difficultyDetail, isLoading: detailLoading } = useDifficultyDetail(selectedDifficultyId);
   const { isUnlocked, getKey } = useEncryption();
@@ -69,6 +75,7 @@ export default function MapsetPage() {
   const deletePostMutation = useDeletePost(selectedDifficultyId ?? '');
   const deleteSectionMutation = useDeleteSection(selectedDifficultyId ?? '');
   const deleteDifficultyMutation = useDeleteDifficulty(mapsetId);
+  const restoreDifficultyMutation = useRestoreDifficulty(mapsetId);
 
   const [showCreateDifficulty, setShowCreateDifficulty] = useState(false);
   const [showRenameDifficulty, setShowRenameDifficulty] = useState(false);
@@ -121,11 +128,26 @@ export default function MapsetPage() {
     }
   }, [actualIsOwner, emulatedRole, emulateGhost]);
 
-  useEffect(() => {
-    if (difficulties && difficulties.length > 0 && selectedDifficultyId === null) {
-      setSelectedDifficultyId(difficulties[0].id);
+  const { activeDifficulties, pendingDifficulties } = useMemo(() => {
+    const active: NonNullable<typeof difficulties> = [];
+    const pending: NonNullable<typeof difficulties> = [];
+    for (const d of difficulties ?? []) {
+      (d.delete_at ? pending : active).push(d);
     }
-  }, [difficulties, selectedDifficultyId]);
+    return { activeDifficulties: active, pendingDifficulties: pending };
+  }, [difficulties]);
+
+  // Keep the selection pointing at a valid active difficulty. Handles three
+  // cases in one pass: no selection yet → pick first; selected diff was
+  // soft-deleted → pick first (or clear if none left); selection already valid → no-op.
+  useEffect(() => {
+    const isCurrentActive =
+      selectedDifficultyId !== null &&
+      activeDifficulties.some((d) => d.id === selectedDifficultyId);
+    if (!isCurrentActive) {
+      setSelectedDifficultyId(activeDifficulties[0]?.id ?? null);
+    }
+  }, [activeDifficulties, selectedDifficultyId]);
 
   // Clear transient forum states when switching difficulties
   useEffect(() => {
@@ -494,13 +516,29 @@ export default function MapsetPage() {
   }
 
   async function handleDeleteDifficulty() {
+    if (!selectedDifficultyId) return;
     try {
       await deleteDifficultyMutation.mutateAsync(selectedDifficultyId);
       setSelectedDifficultyId(null);
       setShowDeleteDifficultyConfirm(false);
       showToast(t('mapsetPage.toastDifficultyDeleted'), 'success');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedDeleteDifficulty'), 'error');
+      showToast(
+        extractApiErrorMessage(err, t('mapsetPage.toastFailedDeleteDifficulty')),
+        'error',
+      );
+    }
+  }
+
+  async function handleRestoreDifficulty(difficultyId: string) {
+    try {
+      await restoreDifficultyMutation.mutateAsync(difficultyId);
+      showToast(t('mapsetPage.toastDifficultyRestored'), 'success');
+    } catch (err) {
+      showToast(
+        extractApiErrorMessage(err, t('mapsetPage.toastFailedRestoreDifficulty')),
+        'error',
+      );
     }
   }
 
@@ -659,25 +697,43 @@ export default function MapsetPage() {
         </div>
 
         {/* Difficulties */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <h2 className="text-lg font-semibold text-gray-200">{t('mapsetPage.difficultiesHeading')}</h2>
-          {canEditStructure && (
-            <button
-              type="button"
-              onClick={() => setShowCreateDifficulty(true)}
-              className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
-            >
-              {t('mapsetPage.addDifficulty')}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setShowPendingDifficulties((v) => !v)}
+                aria-pressed={showPendingDifficulties}
+                className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                  showPendingDifficulties
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {showPendingDifficulties
+                  ? t('mapsetPage.hidePendingDifficulties')
+                  : t('mapsetPage.showPendingDifficulties')}
+              </button>
+            )}
+            {canEditStructure && (
+              <button
+                type="button"
+                onClick={() => setShowCreateDifficulty(true)}
+                className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
+              >
+                {t('mapsetPage.addDifficulty')}
+              </button>
+            )}
+          </div>
         </div>
 
         {difficultiesLoading && <p className="text-gray-400">{t('mapsetPage.loadingDifficulties')}</p>}
 
-        {difficulties && difficulties.length > 0 && (
+        {activeDifficulties.length > 0 && (
           <div className="mb-6">
             <DifficultyTabs
-              difficulties={difficulties}
+              difficulties={activeDifficulties}
               selectedId={selectedDifficultyId}
               onSelect={setSelectedDifficultyId}
               mapsetId={mapsetId}
@@ -686,8 +742,26 @@ export default function MapsetPage() {
           </div>
         )}
 
-        {difficulties && difficulties.length === 0 && !difficultiesLoading && (
+        {activeDifficulties.length === 0 && !difficultiesLoading && (
           <p className="text-gray-400 italic mb-6">{t('mapsetPage.noDifficulties')}</p>
+        )}
+
+        {isOwner && showPendingDifficulties && (
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-gray-300 mb-2">
+              {t('mapsetPage.pendingDifficultiesHeading')}
+            </h3>
+            <PendingDifficultyList
+              difficulties={pendingDifficulties}
+              mapsetId={mapsetId}
+              onRestore={handleRestoreDifficulty}
+              restoringId={
+                restoreDifficultyMutation.isPending
+                  ? (restoreDifficultyMutation.variables ?? null)
+                  : null
+              }
+            />
+          </div>
         )}
 
         {selectedDifficultyId && (

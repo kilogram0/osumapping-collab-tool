@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import func, literal, select
+from sqlalchemy import and_, func, literal, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Difficulty, Mapset, MapsetMember
@@ -30,10 +30,20 @@ def classify_membership(member: MapsetMember | None) -> MembershipKind:
     return MembershipKind.NONE
 
 # Difficulty slots a user may occupy across all their owned mapsets.
-# Each mapset consumes max(its difficulty count, 1) slots — an empty mapset
-# still takes one slot to prevent quota abuse via many empty mapsets.
+# Each mapset consumes max(its active difficulty count, 1) slots — an empty
+# mapset still takes one slot to prevent quota abuse via many empty mapsets.
+# Difficulties pending deletion (delete_at IS NOT NULL) do not consume active
+# slots — they're counted against the pending-deletion buffer instead.
 # func.greatest is Postgres-specific; this project requires Postgres.
 MAX_DIFFICULTY_SLOTS_PER_OWNER = 50
+
+# Per-owner cap on items sitting in pending-deletion limbo. Prevents a single
+# user from filling the table with soft-deleted rows that will hold disk space
+# for the full grace window.
+MAX_PENDING_DELETION_SLOTS_PER_OWNER = 50
+
+# Days a soft-deleted difficulty lingers before hard deletion.
+DIFFICULTY_DELETION_GRACE_DAYS = 7
 
 
 async def get_mapset_membership(
@@ -51,18 +61,72 @@ async def get_mapset_membership(
 
 
 async def get_owner_quota_used(db: AsyncSession, owner_id: UUID) -> int:
-    """Return the total difficulty slots consumed by ``owner_id``.
+    """Return the total active difficulty slots consumed by ``owner_id``.
 
-    Sums max(diff_count, 1) across every mapset owned by the user.
-    func.sum over no rows returns None; ``or 0`` converts that to int.
+    Sums max(active_diff_count, 1) across every active (non-pending-deletion)
+    mapset owned by the user. Mapsets and difficulties with ``delete_at IS NOT
+    NULL`` are both excluded — scheduling deletion frees the active slot
+    immediately. ``func.sum`` over no rows returns None; ``or 0`` converts that
+    to int.
     """
     diff_per_mapset = (
         select(func.greatest(func.count(Difficulty.id), literal(1)).label("q"))
         .select_from(Mapset)
-        .outerjoin(Difficulty, Difficulty.mapset_id == Mapset.id)
-        .where(Mapset.owner_id == owner_id)
+        .outerjoin(
+            Difficulty,
+            and_(
+                Difficulty.mapset_id == Mapset.id,
+                Difficulty.delete_at.is_(None),
+            ),
+        )
+        .where(Mapset.owner_id == owner_id, Mapset.delete_at.is_(None))
         .group_by(Mapset.id)
         .subquery()
     )
     result = await db.execute(select(func.sum(diff_per_mapset.c.q)))
     return result.scalar_one() or 0
+
+
+async def count_pending_deletion_slots(db: AsyncSession, owner_id: UUID) -> int:
+    """Return the pending-deletion buffer slots in use by ``owner_id``.
+
+    Slot cost:
+      - Each difficulty with ``delete_at IS NOT NULL`` in any owned mapset = 1.
+      - Each mapset with ``delete_at IS NOT NULL`` and zero active difficulties = 1.
+        (An empty mapset in pending deletion still occupies one slot — otherwise
+        scheduling deletion of an empty mapset would be "free" from the buffer
+        perspective and let a user park unlimited empty mapsets in limbo.)
+    """
+    diff_count_result = await db.execute(
+        select(func.count(Difficulty.id))
+        .select_from(Difficulty)
+        .join(Mapset, Difficulty.mapset_id == Mapset.id)
+        .where(
+            Mapset.owner_id == owner_id,
+            Difficulty.delete_at.is_not(None),
+        )
+    )
+    diff_count = diff_count_result.scalar_one()
+
+    # A mapset has an "active difficulty" iff it has any Difficulty row with
+    # delete_at IS NULL. Use NOT EXISTS so an empty mapset (no diffs at all)
+    # also matches "zero active difficulties".
+    has_active_diff = (
+        select(literal(1))
+        .select_from(Difficulty)
+        .where(
+            Difficulty.mapset_id == Mapset.id,
+            Difficulty.delete_at.is_(None),
+        )
+        .exists()
+    )
+    empty_pending_result = await db.execute(
+        select(func.count(Mapset.id)).where(
+            Mapset.owner_id == owner_id,
+            Mapset.delete_at.is_not(None),
+            not_(has_active_diff),
+        )
+    )
+    empty_pending = empty_pending_result.scalar_one()
+
+    return diff_count + empty_pending

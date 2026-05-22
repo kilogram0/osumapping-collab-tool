@@ -179,6 +179,8 @@ const mockCreatePost = vi.fn().mockResolvedValue({});
 const mockUpdatePost = vi.fn().mockResolvedValue({});
 const mockDeletePost = vi.fn().mockResolvedValue({});
 const mockDeleteDifficulty = vi.fn().mockResolvedValue({});
+const mockRestoreDifficulty = vi.fn().mockResolvedValue({});
+const mockUseDifficulties = vi.fn(() => ({ data: MOCK_DIFFICULTIES, isLoading: false }));
 
 vi.mock('../hooks/useMapset', () => ({
   useMapset: () => ({
@@ -200,10 +202,8 @@ vi.mock('../hooks/useMapset', () => ({
 }));
 
 vi.mock('../hooks/useDifficulty', () => ({
-  useDifficulties: () => ({
-    data: MOCK_DIFFICULTIES,
-    isLoading: false,
-  }),
+  useDifficulties: (mapsetId: string, options?: { includePending?: boolean }) =>
+    mockUseDifficulties(mapsetId, options),
   useDifficultyDetail: () => ({
     data: MOCK_DIFFICULTY_DETAIL,
     isLoading: false,
@@ -232,6 +232,11 @@ vi.mock('../hooks/useDifficulty', () => ({
   useDeleteDifficulty: () => ({
     mutateAsync: mockDeleteDifficulty,
     isPending: false,
+  }),
+  useRestoreDifficulty: () => ({
+    mutateAsync: mockRestoreDifficulty,
+    isPending: false,
+    variables: undefined,
   }),
 }));
 
@@ -262,6 +267,8 @@ describe('MapsetPage', () => {
     mockUpdatePost.mockClear();
     mockDeletePost.mockClear();
     mockDeleteDifficulty.mockClear();
+    mockRestoreDifficulty.mockClear();
+    mockUseDifficulties.mockReturnValue({ data: MOCK_DIFFICULTIES, isLoading: false });
     mockUseMyMembership.mockReturnValue({
       data: {
         id: 'member-1',
@@ -715,6 +722,149 @@ describe('MapsetPage', () => {
         expect(screen.getByText('Server error')).toBeInTheDocument();
       });
       expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('Pending-deletion toggle', () => {
+    const PENDING_DIFF = {
+      id: 'd-pending',
+      mapset_id: 'ms1',
+      encrypted_name: 'enc:Insane',
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+      delete_at: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+    };
+    // Stable array reference — returning a new spread each call would defeat
+    // the useMemo split inside MapsetPage and trigger re-render storms in
+    // downstream decrypt effects.
+    const WITH_PENDING = [...MOCK_DIFFICULTIES, PENDING_DIFF];
+
+    it('shows Show-deleted toggle for owner only', async () => {
+      renderPage();
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /Show deleted difficulties/i }),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('hides Show-deleted toggle for mapper role', async () => {
+      mockUseMyMembership.mockReturnValue({
+        data: {
+          id: 'member-1',
+          mapset_id: 'ms1',
+          user_id: 'current-user-uuid',
+          role: 'mapper',
+          created_at: '',
+          updated_at: '',
+        },
+        isLoading: false,
+      });
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText('Test Mapset')).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByRole('button', { name: /Show deleted difficulties/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('calls useDifficulties with include_pending=true when toggle is on', async () => {
+      // First render — toggle off, includePending should be false (default).
+      mockUseDifficulties.mockImplementation(
+        (_mapsetId: string, options?: { includePending?: boolean }) => {
+          // When the toggle is on, return the pending row alongside active.
+          if (options?.includePending) {
+            return { data: WITH_PENDING, isLoading: false };
+          }
+          return { data: MOCK_DIFFICULTIES, isLoading: false };
+        },
+      );
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /Show deleted difficulties/i }),
+        ).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Show deleted difficulties/i }));
+
+      await waitFor(() => {
+        const calls = mockUseDifficulties.mock.calls;
+        expect(
+          calls.some(([, opts]) => opts?.includePending === true),
+        ).toBe(true);
+      });
+    });
+
+    it('renders pending difficulties with a Restore button', async () => {
+      mockUseDifficulties.mockImplementation(
+        (_mapsetId: string, options?: { includePending?: boolean }) =>
+          options?.includePending
+            ? { data: WITH_PENDING, isLoading: false }
+            : { data: MOCK_DIFFICULTIES, isLoading: false },
+      );
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /Show deleted difficulties/i }),
+        ).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Show deleted difficulties/i }));
+
+      const pendingList = await screen.findByTestId('pending-difficulty-list');
+      expect(within(pendingList).getByRole('button', { name: /Restore/i })).toBeInTheDocument();
+    });
+
+    it('calls restore mutation and shows success toast on click', async () => {
+      mockUseDifficulties.mockImplementation(
+        (_mapsetId: string, options?: { includePending?: boolean }) =>
+          options?.includePending
+            ? { data: WITH_PENDING, isLoading: false }
+            : { data: MOCK_DIFFICULTIES, isLoading: false },
+      );
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /Show deleted difficulties/i }),
+        ).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Show deleted difficulties/i }));
+      const pendingList = await screen.findByTestId('pending-difficulty-list');
+      await user.click(within(pendingList).getByRole('button', { name: /Restore/i }));
+
+      await waitFor(() => {
+        expect(mockRestoreDifficulty).toHaveBeenCalledWith(PENDING_DIFF.id);
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/Difficulty restored/i)).toBeInTheDocument();
+      });
+    });
+
+    it('surfaces buffer-full 409 detail when DELETE fails', async () => {
+      const axiosError = Object.assign(new Error('Request failed'), {
+        isAxiosError: true,
+        response: {
+          status: 409,
+          data: { detail: 'Pending-deletion limit reached (50 slots).' },
+        },
+      });
+      mockDeleteDifficulty.mockRejectedValueOnce(axiosError);
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      const dialog = await screen.findByRole('dialog', { name: /Delete Difficulty/i });
+      await user.click(within(dialog).getByRole('button', { name: /^Delete$/i }));
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Pending-deletion limit reached/i),
+        ).toBeInTheDocument();
+      });
     });
   });
 });

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -10,6 +10,7 @@ import { ToastProvider } from '../contexts/ToastContext';
 
 vi.mock('../api/endpoints', () => ({
   fetchMapsets: vi.fn(),
+  fetchKickedMapsets: vi.fn().mockResolvedValue([]),
   fetchQuota: vi.fn().mockResolvedValue({ used: 0, limit: 50 }),
   fetchCurrentUser: vi.fn().mockResolvedValue(null),
   logout: vi.fn().mockResolvedValue(undefined),
@@ -105,5 +106,29 @@ describe('DashboardPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /create mapset/i }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /create mapset/i })).toBeInTheDocument();
+  });
+
+  it('splits soft-deleted mapsets into the "To be deleted" sub-section', async () => {
+    const { fetchMapsets } = await import('../api/endpoints');
+    const active: Mapset = { ...MAPSET, id: 'active-1', title: 'Active Set' };
+    const pending: Mapset = {
+      ...MAPSET,
+      id: 'pending-1',
+      title: 'Pending Set',
+      delete_at: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+    };
+    vi.mocked(fetchMapsets).mockResolvedValue([active, pending]);
+    renderDashboard();
+    const section = await screen.findByTestId('to-be-deleted-section');
+    expect(within(section).getAllByTestId('mapset-card')).toHaveLength(1);
+    expect(screen.getByText(/To be deleted/i)).toBeInTheDocument();
+  });
+
+  it('omits the "To be deleted" sub-section when no mapsets are pending', async () => {
+    const { fetchMapsets } = await import('../api/endpoints');
+    vi.mocked(fetchMapsets).mockResolvedValue([MAPSET]);
+    renderDashboard();
+    await waitFor(() => expect(screen.getAllByTestId('mapset-card')).toHaveLength(1));
+    expect(screen.queryByTestId('to-be-deleted-section')).not.toBeInTheDocument();
   });
 });
