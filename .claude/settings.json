@@ -15,7 +15,11 @@
       "Bash(docker exec *)",
       "Bash(grep -n \" |$\\\\|encrypted_title\" SPECIFICATION.md)",
       "Bash(python3 -c ' *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(list\\(d.keys\\(\\)\\), indent=2\\)\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k: list\\(v.keys\\(\\)\\) for k,v in d.items\\(\\)}, indent=2\\)\\)\")",
+      "Bash(python3 -c \"import uuid; print\\(uuid.uuid4\\(\\).hex[:12]\\)\")",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/home/potato/Documents/Repositories/osu-modding-project/frontend/src/i18n/locales/ca.json'\\)\\); print\\(json.dumps\\({k: list\\(v.keys\\(\\)\\) for k,v in d.items\\(\\)}, indent=2\\)\\)\")"
     ],
     "additionalDirectories": [
       "/tmp"

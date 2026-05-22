@@ -39,7 +39,13 @@
     "difficultySlots": "Espais de dificultat",
     "loadingMapsets": "S'estan carregant els mapsets…",
     "failedToLoadMapsets": "No s'han pogut carregar els mapsets.",
-    "emptyState": "Encara no hi ha cap mapset. Crea'n un per començar."
+    "emptyState": "Encara no hi ha cap mapset. Crea'n un per començar.",
+    "removedFromHeading": "Eliminat de",
+    "removedBadge": "Eliminat",
+    "accessExpiresIn_one": "{{count}} dia d'accés restant",
+    "accessExpiresIn_other": "{{count}} dies d'accés restants",
+    "accessImminent": "L'accés expira aviat",
+    "viewMapset": "Veure"
   },
   "mapsetCard": {
     "unlock": "Desbloqueja",
@@ -245,6 +251,7 @@
     "previewOwnerOption": "Propietari (sense previsualització)",
     "previewMapperOption": "Mapper",
     "previewModderOption": "Modder",
+    "previewGhostOption": "Membre fantasma (només lectura, eliminat)",
     "inviteLabel": "Convida pel nom d'usuari d'osu!",
     "invitePlaceholder": "nom d'usuari",
     "invite": "Convida",
@@ -350,6 +357,7 @@
     "back": "Torna al tauler",
     "previewingPrefix": "Previsualitzant aquest mapset com a ",
     "previewingSuffix": ". Només restriccions de la interfície — el servidor encara et tracta com a propietari, i qualsevol publicació que escriguis encara és teva.",
+    "previewingGhost": "Previsualitzant aquest mapset com a membre fantasma (només lectura). Només restriccions de la interfície — el servidor encara et tracta com a propietari.",
     "exitPreview": "Surt de la previsualització",
     "downloadBase": "Descarrega la plantilla base",
     "baseHistory": "Historial de la base",
@@ -389,6 +397,8 @@
     "toastImported_one": "S'ha importat {{count}} secció amb contingut dels marcadors.",
     "toastImported_other": "S'han importat {{count}} seccions amb contingut dels marcadors.",
     "toastImportedNoPrefill_one": "S'ha importat {{count}} secció dels marcadors. (Ja hi ha historial de base, per això no s'ha preomplert el contingut.)",
-    "toastImportedNoPrefill_other": "S'han importat {{count}} seccions dels marcadors. (Ja hi ha historial de base, per això no s'ha preomplert el contingut.)"
+    "toastImportedNoPrefill_other": "S'han importat {{count}} seccions dels marcadors. (Ja hi ha historial de base, per això no s'ha preomplert el contingut.)",
+    "ghostBanner": "Has estat eliminat d'aquest mapset. L'accés de només lectura expira el {{date}}.",
+    "ghostBannerDismiss": "Tanca"
   }
 }

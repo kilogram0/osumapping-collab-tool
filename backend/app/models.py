@@ -140,6 +140,7 @@ class MapsetMember(SQLModel, table=True):
 
     __table_args__ = (
         sa.UniqueConstraint("mapset_id", "user_id", name="uq_mapset_member"),
+        sa.Index("ix_mapset_member_user_kicked", "user_id", "kicked_at"),
     )
 
     id: UUID = Field(primary_key=True)
@@ -156,6 +157,11 @@ class MapsetMember(SQLModel, table=True):
     role: MapsetRole = Field(
         default=MapsetRole.modder,
         sa_column=sa.Column(sa.Enum(MapsetRole), nullable=False),
+    )
+    # NULL = active member. Non-NULL = kicked; grace period active until kicked_at + 7 days.
+    kicked_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={"nullable": True},
     )
     created_at: datetime | None = Field(
         default=None,

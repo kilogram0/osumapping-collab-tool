@@ -1,11 +1,33 @@
 """Shared DB query helpers used across multiple routers."""
 
+from datetime import datetime, timedelta
+from enum import Enum
 from uuid import UUID
 
 from sqlalchemy import func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Difficulty, Mapset, MapsetMember
+
+GHOST_GRACE_DAYS = 7
+
+
+class MembershipKind(Enum):
+    ACTIVE = "active"
+    GHOST = "ghost"   # kicked, grace period still active
+    NONE = "none"
+
+
+def classify_membership(member: MapsetMember | None) -> MembershipKind:
+    """Classify a raw MapsetMember row into ACTIVE, GHOST, or NONE."""
+    if member is None:
+        return MembershipKind.NONE
+    if member.kicked_at is None:
+        return MembershipKind.ACTIVE
+    if member.kicked_at + timedelta(days=GHOST_GRACE_DAYS) > datetime.utcnow():
+        return MembershipKind.GHOST
+    # Row exists but grace period has expired — treat as no membership until purged.
+    return MembershipKind.NONE
 
 # Difficulty slots a user may occupy across all their owned mapsets.
 # Each mapset consumes max(its difficulty count, 1) slots — an empty mapset

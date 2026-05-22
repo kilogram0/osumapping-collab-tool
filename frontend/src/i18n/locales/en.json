@@ -39,7 +39,13 @@
     "difficultySlots": "Difficulty slots",
     "loadingMapsets": "Loading mapsets…",
     "failedToLoadMapsets": "Failed to load mapsets.",
-    "emptyState": "No mapsets yet. Create one to get started."
+    "emptyState": "No mapsets yet. Create one to get started.",
+    "removedFromHeading": "Removed from",
+    "removedBadge": "Removed",
+    "accessExpiresIn_one": "{{count}} day of access left",
+    "accessExpiresIn_other": "{{count}} days of access left",
+    "accessImminent": "Access expiring soon",
+    "viewMapset": "View"
   },
   "mapsetCard": {
     "unlock": "Unlock",
@@ -245,6 +251,7 @@
     "previewOwnerOption": "Owner (no preview)",
     "previewMapperOption": "Mapper",
     "previewModderOption": "Modder",
+    "previewGhostOption": "Ghost member (read-only, removed)",
     "inviteLabel": "Invite by osu! username",
     "invitePlaceholder": "username",
     "invite": "Invite",
@@ -350,6 +357,7 @@
     "back": "Back to Dashboard",
     "previewingPrefix": "Previewing this mapset as ",
     "previewingSuffix": ". UI gating only — the server still treats you as owner, and any post you write is still authored by you.",
+    "previewingGhost": "Previewing this mapset as a ghost member (read-only). UI gating only — the server still treats you as owner.",
     "exitPreview": "Exit preview",
     "downloadBase": "Download Base Template",
     "baseHistory": "Base History",
@@ -389,6 +397,8 @@
     "toastImported_one": "Imported {{count}} section with content from bookmarks.",
     "toastImported_other": "Imported {{count}} sections with content from bookmarks.",
     "toastImportedNoPrefill_one": "Imported {{count}} section from bookmarks. (Base history exists, so section content was not pre-filled.)",
-    "toastImportedNoPrefill_other": "Imported {{count}} sections from bookmarks. (Base history exists, so section content was not pre-filled.)"
+    "toastImportedNoPrefill_other": "Imported {{count}} sections from bookmarks. (Base history exists, so section content was not pre-filled.)",
+    "ghostBanner": "You were removed from this mapset. Read-only access expires on {{date}}.",
+    "ghostBannerDismiss": "Dismiss"
   }
 }

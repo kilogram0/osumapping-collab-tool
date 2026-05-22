@@ -169,8 +169,19 @@ export interface MapsetMember {
   mapset_id: string;
   user_id: string;
   role: MapsetRole;
+  kicked_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface KickedMapset extends Mapset {
+  kicked_at: string;
+  access_expires_at: string;
+}
+
+export async function fetchKickedMapsets(): Promise<KickedMapset[]> {
+  const { data } = await client.get<KickedMapset[]>('/mapsets/kicked');
+  return data;
 }
 
 export interface MemberWithUser extends MapsetMember {

@@ -5,18 +5,19 @@ call).  Ownership transfer is atomic: demoting the previous owner and
 promoting the new one happen in the same transaction.
 """
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete as sa_delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Mapset, MapsetMember, MapsetRole, User
-from app.queries import get_mapset_membership
+from app.queries import MembershipKind, classify_membership, get_mapset_membership
 from app.schemas import (
     MemberInviteRequest,
     MemberRoleUpdate,
@@ -45,6 +46,7 @@ def _build_member_with_user(member: MapsetMember, user: User) -> MemberWithUserR
         mapset_id=member.mapset_id,
         user_id=member.user_id,
         role=member.role,
+        kicked_at=member.kicked_at,
         created_at=member.created_at,
         updated_at=member.updated_at,
         username=user.username,
@@ -67,14 +69,17 @@ async def list_members(
     await _get_mapset_or_404(db, mapset_id)
 
     caller_membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if caller_membership is None:
+    if classify_membership(caller_membership) == MembershipKind.NONE:
         raise _forbidden()
 
     rows = (
         await db.execute(
             select(MapsetMember, User)
             .join(User, User.id == MapsetMember.user_id)
-            .where(MapsetMember.mapset_id == mapset_id)
+            .where(
+                MapsetMember.mapset_id == mapset_id,
+                MapsetMember.kicked_at.is_(None),
+            )
         )
     ).all()
 
@@ -103,7 +108,10 @@ async def invite_member(
     await _get_mapset_or_404(db, mapset_id)
 
     caller_membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if caller_membership is None or caller_membership.role != MapsetRole.owner:
+    if (
+        classify_membership(caller_membership) != MembershipKind.ACTIVE
+        or caller_membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     # osu! usernames are case-insensitive on the platform, so match likewise.
@@ -116,6 +124,29 @@ async def invite_member(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+
+    # Check for an existing row (active member or ghost in grace period).
+    existing = (
+        await db.execute(
+            select(MapsetMember).where(
+                MapsetMember.mapset_id == mapset_id,
+                MapsetMember.user_id == target_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        if existing.kicked_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User is already a member",
+            )
+        # Ghost row: un-kick and restore as modder.
+        existing.kicked_at = None
+        existing.role = MapsetRole.modder
+        await db.commit()
+        await db.refresh(existing)
+        return _build_member_with_user(existing, target_user)
 
     new_member = MapsetMember(
         id=uuid4(),
@@ -164,11 +195,14 @@ async def update_member_role(
     mapset = await _get_mapset_or_404(db, mapset_id)
 
     caller_membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if caller_membership is None or caller_membership.role != MapsetRole.owner:
+    if (
+        classify_membership(caller_membership) != MembershipKind.ACTIVE
+        or caller_membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     target_membership = await get_mapset_membership(db, mapset_id, user_id)
-    if target_membership is None:
+    if target_membership is None or target_membership.kicked_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
         )
@@ -214,15 +248,20 @@ async def remove_member(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    """Remove a member from a mapset.
+    """Kick a member from a mapset, entering a 7-day read-only grace period.
 
     Owner-only.  The owner cannot remove themselves — returns ``409``.
     The path param is ``User.id`` (not ``MapsetMember.id``).
+    The member row is soft-deleted: ``kicked_at`` is set rather than hard-deleting
+    the row, granting read-only access until the grace period expires.
     """
     await _get_mapset_or_404(db, mapset_id)
 
     caller_membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if caller_membership is None or caller_membership.role != MapsetRole.owner:
+    if (
+        classify_membership(caller_membership) != MembershipKind.ACTIVE
+        or caller_membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     if user_id == current_user.id:
@@ -232,13 +271,11 @@ async def remove_member(
         )
 
     target_membership = await get_mapset_membership(db, mapset_id, user_id)
-    if target_membership is None:
+    if target_membership is None or target_membership.kicked_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
         )
 
-    await db.execute(
-        sa_delete(MapsetMember).where(MapsetMember.id == target_membership.id)
-    )
+    target_membership.kicked_at = datetime.utcnow()
     await db.commit()
     return None

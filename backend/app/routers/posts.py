@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Difficulty, MapsetRole, Post, User
-from app.queries import get_mapset_membership
+from app.queries import MembershipKind, classify_membership, get_mapset_membership
 from app.schemas import PostCreate, PostRead, PostUpdate
 
 router = APIRouter(tags=["posts"])
@@ -77,7 +77,7 @@ async def create_post(
     membership = await get_mapset_membership(
         db, difficulty.mapset_id, current_user.id
     )
-    if membership is None:
+    if classify_membership(membership) != MembershipKind.ACTIVE:
         raise _forbidden()
 
     # Verify parent exists and belongs to the same difficulty.
@@ -145,7 +145,7 @@ async def update_post(
     post, mapset_id = await _get_post(db, difficulty_id, post_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None:
+    if classify_membership(membership) != MembershipKind.ACTIVE:
         raise _forbidden()
 
     if post.author_id != current_user.id:
@@ -176,10 +176,13 @@ async def delete_post(
     post, mapset_id = await _get_post(db, difficulty_id, post_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
-
-    if post.author_id != current_user.id and membership.role != MapsetRole.owner:
+    if kind == MembershipKind.GHOST or (
+        post.author_id != current_user.id
+        and membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     await db.execute(sa_delete(Post).where(Post.id == post_id))

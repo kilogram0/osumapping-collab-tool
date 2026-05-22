@@ -22,7 +22,7 @@ from app.models import (
     SectionOsuVersion,
     User,
 )
-from app.queries import get_mapset_membership
+from app.queries import MembershipKind, classify_membership, get_mapset_membership
 from app.schemas import (
     BaseOsuRead,
     BaseOsuVersionListItem,
@@ -89,7 +89,10 @@ async def create_section(
     difficulty = await _get_difficulty(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     section = Section(
@@ -129,12 +132,14 @@ async def list_sections(
     difficulty = await _get_difficulty(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
 
-    result = await db.execute(
-        select(Section).where(Section.difficulty_id == difficulty_id)
-    )
+    query = select(Section).where(Section.difficulty_id == difficulty_id)
+    if kind == MembershipKind.GHOST:
+        query = query.where(Section.created_at <= membership.kicked_at)  # type: ignore[union-attr]
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 
@@ -156,8 +161,12 @@ async def get_section(
     section, mapset_id = await _get_section(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
+
+    if kind == MembershipKind.GHOST and section.created_at > membership.kicked_at:  # type: ignore[operator]
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
 
     return section
 
@@ -181,7 +190,10 @@ async def update_section(
     section, mapset_id = await _get_section(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     fields_set = payload.model_fields_set
@@ -218,7 +230,10 @@ async def delete_section(
     section, mapset_id = await _get_section(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role != MapsetRole.owner:
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     await db.execute(sa_delete(Section).where(Section.id == section_id))
@@ -257,7 +272,10 @@ async def upload_section_osu(
     _, mapset_id = await _get_section(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     # Compute next version number for this section.
@@ -349,18 +367,25 @@ async def download_section_osu(
 
     Returns ``404`` if no version has been uploaded yet.
     """
-    _, mapset_id = await _get_section(db, difficulty_id, section_id)
+    section, mapset_id = await _get_section(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
 
-    result = await db.execute(
-        select(SectionOsuVersion).where(
-            SectionOsuVersion.section_id == section_id,
-            SectionOsuVersion.is_active == True,  # noqa: E712
-        )
+    # Ghost members see only the section itself (if pre-kick) and only the
+    # active version that existed at kick time — not a newer activation.
+    if kind == MembershipKind.GHOST and section.created_at > membership.kicked_at:  # type: ignore[operator]
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
+
+    query = select(SectionOsuVersion).where(
+        SectionOsuVersion.section_id == section_id,
+        SectionOsuVersion.is_active == True,  # noqa: E712
     )
+    if kind == MembershipKind.GHOST:
+        query = query.where(SectionOsuVersion.created_at <= membership.kicked_at)  # type: ignore[union-attr]
+    result = await db.execute(query)
     active_version = result.scalar_one_or_none()
     if active_version is None:
         raise HTTPException(
@@ -387,15 +412,21 @@ async def download_base_osu(
     difficulty = await _get_difficulty(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
 
-    result = await db.execute(
-        select(DifficultyBaseOsuVersion).where(
-            DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
-            DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
-        )
+    # Ghost members see only the base version that was active at kick time.
+    if kind == MembershipKind.GHOST and difficulty.created_at > membership.kicked_at:  # type: ignore[operator]
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
+
+    query = select(DifficultyBaseOsuVersion).where(
+        DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
+        DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
     )
+    if kind == MembershipKind.GHOST:
+        query = query.where(DifficultyBaseOsuVersion.created_at <= membership.kicked_at)  # type: ignore[union-attr]
+    result = await db.execute(query)
     active_base = result.scalar_one_or_none()
     if active_base is None:
         raise HTTPException(
@@ -434,15 +465,19 @@ async def list_section_osu_versions(
     _, mapset_id = await _get_section(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
 
-    result = await db.execute(
+    query = (
         select(SectionOsuVersion)
         .where(SectionOsuVersion.section_id == section_id)
         .order_by(SectionOsuVersion.version.desc())
         .limit(500)
     )
+    if kind == MembershipKind.GHOST:
+        query = query.where(SectionOsuVersion.created_at <= membership.kicked_at)  # type: ignore[union-attr]
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 
@@ -469,7 +504,10 @@ async def activate_section_osu_version(
     _, mapset_id = await _get_section(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     # Verify the target version exists and belongs to this section.
@@ -540,15 +578,19 @@ async def list_base_osu_versions(
     difficulty = await _get_difficulty(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
 
-    result = await db.execute(
+    query = (
         select(DifficultyBaseOsuVersion)
         .where(DifficultyBaseOsuVersion.difficulty_id == difficulty_id)
         .order_by(DifficultyBaseOsuVersion.version.desc())
         .limit(500)
     )
+    if kind == MembershipKind.GHOST:
+        query = query.where(DifficultyBaseOsuVersion.created_at <= membership.kicked_at)  # type: ignore[union-attr]
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 
@@ -574,7 +616,10 @@ async def activate_base_osu_version(
     difficulty = await _get_difficulty(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     # Verify the target version exists and belongs to this difficulty.

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import FastAPI
@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.config import settings
 from app.database import engine
-from app.models import Mapset
+from app.models import Mapset, MapsetMember
+from app.queries import GHOST_GRACE_DAYS
 from app.routers import auth, difficulties, mapsets, members, posts, sections
 
 logger = logging.getLogger(__name__)
@@ -40,10 +41,24 @@ async def _purge_expired_mapsets(db_engine: AsyncEngine | None = None) -> None:
         await session.commit()
 
 
+async def _purge_expired_ghost_memberships(db_engine: AsyncEngine | None = None) -> None:
+    """Delete MapsetMember rows whose kicked grace period has expired."""
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=GHOST_GRACE_DAYS)
+    async with AsyncSession(db_engine or engine) as session:
+        await session.execute(
+            sa_delete(MapsetMember).where(
+                MapsetMember.kicked_at.is_not(None),
+                MapsetMember.kicked_at <= cutoff,
+            )
+        )
+        await session.commit()
+
+
 async def _cleanup_expired_mapsets() -> None:
     while True:
         try:
             await _purge_expired_mapsets()
+            await _purge_expired_ghost_memberships()
         except Exception:
             logger.exception("Error during scheduled mapset cleanup")
         await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)

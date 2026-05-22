@@ -277,8 +277,16 @@ class MapsetMemberRead(BaseModel):
     mapset_id: UUID
     user_id: UUID
     role: MapsetRole
+    kicked_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class KickedMapsetRead(MapsetRead):
+    """A mapset where the current user has an active ghost membership."""
+
+    kicked_at: datetime
+    access_expires_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +345,7 @@ class MemberWithUserRead(BaseModel):
     mapset_id: UUID
     user_id: UUID
     role: MapsetRole
+    kicked_at: datetime | None
     created_at: datetime
     updated_at: datetime
     username: str

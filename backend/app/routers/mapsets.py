@@ -17,10 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Difficulty, Mapset, MapsetMember, MapsetRole, User
-from app.queries import get_mapset_membership
-from app.schemas import MapsetCreate, MapsetMemberRead, MapsetRead, MapsetUpdate
+from app.queries import GHOST_GRACE_DAYS, MembershipKind, classify_membership, get_mapset_membership
+from app.schemas import KickedMapsetRead, MapsetCreate, MapsetMemberRead, MapsetRead, MapsetUpdate
 
 router = APIRouter(prefix="/mapsets", tags=["mapsets"])
+
+# Days a soft-deleted mapset lingers before hard deletion (separate from ghost grace).
+_DELETION_GRACE_DAYS = 7
 
 
 def _forbidden() -> HTTPException:
@@ -101,6 +104,65 @@ async def create_mapset(
     return _to_read(mapset, 0)
 
 
+@router.get("", response_model=list[MapsetRead])
+async def list_mapsets(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[MapsetRead]:
+    """List all mapsets where the current user is a member.
+
+    Returns encrypted fields only; the frontend decrypts titles for display
+    if the key is cached in ``sessionStorage``.
+    """
+    result = await db.execute(
+        select(Mapset, func.count(Difficulty.id).label("difficulty_count"))
+        .join(MapsetMember, MapsetMember.mapset_id == Mapset.id)
+        .outerjoin(Difficulty, Difficulty.mapset_id == Mapset.id)
+        .where(
+            MapsetMember.user_id == current_user.id,
+            MapsetMember.kicked_at.is_(None),
+        )
+        .group_by(Mapset.id)
+    )
+    return [_to_read(mapset, count) for mapset, count in result.all()]
+
+
+@router.get("/kicked", response_model=list[KickedMapsetRead])
+async def list_kicked_mapsets(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[KickedMapsetRead]:
+    """List mapsets where the current user has an active ghost (kicked) membership.
+
+    Returns mapsets the user was recently removed from, including ``kicked_at``
+    and a computed ``access_expires_at`` (kicked_at + 7 days).  Only active
+    grace periods are returned — expired ghost rows are filtered out here
+    (the background purge lags by up to one hour).
+    """
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=GHOST_GRACE_DAYS)
+    rows = await db.execute(
+        select(Mapset, MapsetMember, func.count(Difficulty.id).label("difficulty_count"))
+        .join(MapsetMember, MapsetMember.mapset_id == Mapset.id)
+        .outerjoin(Difficulty, Difficulty.mapset_id == Mapset.id)
+        .where(
+            MapsetMember.user_id == current_user.id,
+            MapsetMember.kicked_at.is_not(None),
+            MapsetMember.kicked_at > cutoff,
+        )
+        .group_by(Mapset.id, MapsetMember.id)
+    )
+    results: list[KickedMapsetRead] = []
+    for mapset, member, diff_count in rows.all():
+        results.append(
+            KickedMapsetRead(
+                **_to_read(mapset, diff_count).model_dump(),
+                kicked_at=member.kicked_at,
+                access_expires_at=member.kicked_at + timedelta(days=GHOST_GRACE_DAYS),
+            )
+        )
+    return results
+
+
 @router.get("/{mapset_id}", response_model=MapsetRead)
 async def get_mapset(
     mapset_id: UUID,
@@ -118,31 +180,11 @@ async def get_mapset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None:
+    if classify_membership(membership) == MembershipKind.NONE:
         raise _forbidden()
 
     diff_count = await _count_difficulties(db, mapset_id)
     return _to_read(mapset, diff_count)
-
-
-@router.get("", response_model=list[MapsetRead])
-async def list_mapsets(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> list[MapsetRead]:
-    """List all mapsets where the current user is a member.
-
-    Returns encrypted fields only; the frontend decrypts titles for display
-    if the key is cached in ``sessionStorage``.
-    """
-    result = await db.execute(
-        select(Mapset, func.count(Difficulty.id).label("difficulty_count"))
-        .join(MapsetMember, MapsetMember.mapset_id == Mapset.id)
-        .outerjoin(Difficulty, Difficulty.mapset_id == Mapset.id)
-        .where(MapsetMember.user_id == current_user.id)
-        .group_by(Mapset.id)
-    )
-    return [_to_read(mapset, count) for mapset, count in result.all()]
 
 
 @router.patch(
@@ -167,7 +209,10 @@ async def update_mapset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     # Use model_fields_set to distinguish "field omitted" from "field set to null".
@@ -205,7 +250,10 @@ async def delete_mapset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role != MapsetRole.owner:
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     # Use a raw DML DELETE so the DB-level CASCADE fires directly; the ORM
@@ -213,9 +261,6 @@ async def delete_mapset(
     # violates the NOT NULL constraint on MapsetMember.mapset_id.
     await db.execute(sa_delete(Mapset).where(Mapset.id == mapset_id))
     await db.commit()
-
-
-_DELETION_GRACE_DAYS = 7
 
 
 @router.post(
@@ -234,7 +279,10 @@ async def schedule_mapset_deletion(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role != MapsetRole.owner:
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     if mapset.delete_at is not None:
@@ -266,7 +314,10 @@ async def cancel_mapset_deletion(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role != MapsetRole.owner:
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     mapset.delete_at = None
@@ -290,7 +341,7 @@ async def get_my_membership(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None:
+    if classify_membership(membership) == MembershipKind.NONE:
         raise _forbidden()
 
     return membership

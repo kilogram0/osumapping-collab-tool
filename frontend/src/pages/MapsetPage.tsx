@@ -77,6 +77,7 @@ export default function MapsetPage() {
   const [showEditSection, setShowEditSection] = useState(false);
   const [showBaseHistory, setShowBaseHistory] = useState(false);
   const [showManageMembers, setShowManageMembers] = useState(false);
+  const [ghostBannerDismissed, setGhostBannerDismissed] = useState(false);
   const [difficultyNames, setDifficultyNames] = useState<Record<string, string>>({});
   const [editingSection, setEditingSection] = useState<DecryptedSection | null>(null);
   const [decryptedSections, setDecryptedSections] = useState<DecryptedSection[]>([]);
@@ -89,25 +90,29 @@ export default function MapsetPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showAllPosts, setShowAllPosts] = useState(false);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
-  // Owner-only role emulation: lets the owner preview the page as a mapper or
-  // modder. Stored in component state — resets when leaving the page. Only the
-  // owner's UI is affected; nothing is sent to the server.
+  // Owner-only role emulation: lets the owner preview the page as a mapper,
+  // modder, or ghost member. Stored in component state — resets when leaving
+  // the page. Only the owner's UI is affected; nothing is sent to the server.
   const [emulatedRole, setEmulatedRole] = useState<MapsetRole | null>(null);
+  const [emulateGhost, setEmulateGhost] = useState(false);
 
+  const realIsGhost = !!(myMembership?.kicked_at);
+  const isGhost = realIsGhost || emulateGhost;
   const actualRole = myMembership?.role ?? null;
-  const actualIsOwner = actualRole === 'owner';
-  const effectiveRole = actualIsOwner && emulatedRole ? emulatedRole : actualRole;
-  const isOwner = effectiveRole === 'owner';
-  const canEditStructure = isOwner || effectiveRole === 'mapper';
+  const actualIsOwner = !realIsGhost && actualRole === 'owner';
+  const effectiveRole = actualIsOwner && emulatedRole && !emulateGhost ? emulatedRole : actualRole;
+  const isOwner = !isGhost && effectiveRole === 'owner';
+  const canEditStructure = !isGhost && (isOwner || effectiveRole === 'mapper');
 
   // If the user loses ownership mid-session (e.g. transferred it to another
   // member), drop any active preview so it can't silently reactivate on a
   // future re-promotion.
   useEffect(() => {
-    if (!actualIsOwner && emulatedRole !== null) {
-      setEmulatedRole(null);
+    if (!actualIsOwner) {
+      if (emulatedRole !== null) setEmulatedRole(null);
+      if (emulateGhost) setEmulateGhost(false);
     }
-  }, [actualIsOwner, emulatedRole]);
+  }, [actualIsOwner, emulatedRole, emulateGhost]);
 
   useEffect(() => {
     if (difficulties && difficulties.length > 0 && selectedDifficultyId === null) {
@@ -515,20 +520,44 @@ export default function MapsetPage() {
           </button>
           <LanguageSwitcher />
         </div>
-        {actualIsOwner && emulatedRole && (
+        {actualIsOwner && (emulatedRole || emulateGhost) && (
           <div
             role="status"
             className="mb-4 bg-yellow-900/40 border border-yellow-700 rounded p-3 flex items-center justify-between gap-3"
           >
             <p className="text-sm text-yellow-200">
-              {t('mapsetPage.previewingPrefix')}<strong>{emulatedRole}</strong>{t('mapsetPage.previewingSuffix')}
+              {emulateGhost
+                ? t('mapsetPage.previewingGhost')
+                : <>{t('mapsetPage.previewingPrefix')}<strong>{emulatedRole}</strong>{t('mapsetPage.previewingSuffix')}</>
+              }
             </p>
             <button
               type="button"
-              onClick={() => setEmulatedRole(null)}
+              onClick={() => { setEmulatedRole(null); setEmulateGhost(false); }}
               className="shrink-0 px-3 py-1 bg-yellow-700 hover:bg-yellow-600 text-white text-xs font-medium rounded"
             >
               {t('mapsetPage.exitPreview')}
+            </button>
+          </div>
+        )}
+        {realIsGhost && !ghostBannerDismissed && myMembership?.kicked_at && (
+          <div
+            role="status"
+            className="mb-4 bg-orange-900/40 border border-orange-700 rounded p-3 flex items-center justify-between gap-3"
+          >
+            <p className="text-sm text-orange-200">
+              {t('mapsetPage.ghostBanner', {
+                date: new Date(
+                  new Date(myMembership.kicked_at).getTime() + 7 * 86_400_000,
+                ).toLocaleDateString(),
+              })}
+            </p>
+            <button
+              type="button"
+              onClick={() => setGhostBannerDismissed(true)}
+              className="shrink-0 px-3 py-1 bg-orange-700 hover:bg-orange-600 text-white text-xs font-medium rounded"
+            >
+              {t('mapsetPage.ghostBannerDismiss')}
             </button>
           </div>
         )}
@@ -564,7 +593,7 @@ export default function MapsetPage() {
             >
               {t('mapsetPage.baseHistory')}
             </button>
-            {myMembership && (
+            {myMembership && !isGhost && (
               <button
                 type="button"
                 onClick={() => setShowManageMembers(true)}
@@ -756,17 +785,19 @@ export default function MapsetPage() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-gray-200">{t('mapsetPage.allPostsHeading')}</h2>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReplyingTo(null);
-                      setEditingPost(null);
-                      setShowCreateForm((prev) => !prev);
-                    }}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
-                  >
-                    {showCreateForm ? t('mapsetPage.hideForm') : t('mapsetPage.newPost')}
-                  </button>
+                  {!isGhost && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReplyingTo(null);
+                        setEditingPost(null);
+                        setShowCreateForm((prev) => !prev);
+                      }}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
+                    >
+                      {showCreateForm ? t('mapsetPage.hideForm') : t('mapsetPage.newPost')}
+                    </button>
+                  )}
                 </div>
 
                 {showCreateForm && !replyingTo && !editingPost && (
@@ -911,6 +942,8 @@ export default function MapsetPage() {
           isOwner={actualIsOwner}
           emulatedRole={emulatedRole}
           onEmulateRole={setEmulatedRole}
+          emulateGhost={emulateGhost}
+          onEmulateGhost={setEmulateGhost}
           onClose={() => setShowManageMembers(false)}
         />
       )}

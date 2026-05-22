@@ -17,6 +17,9 @@ interface ManageMembersModalProps {
   /** When the owner is previewing the page as a lower role; null otherwise. */
   emulatedRole?: MapsetRole | null;
   onEmulateRole?: (role: MapsetRole | null) => void;
+  /** When the owner is previewing the page as a kicked ghost member. */
+  emulateGhost?: boolean;
+  onEmulateGhost?: (v: boolean) => void;
   onClose: () => void;
 }
 
@@ -42,6 +45,8 @@ export default function ManageMembersModal({
   isOwner,
   emulatedRole = null,
   onEmulateRole,
+  emulateGhost = false,
+  onEmulateGhost,
   onClose,
 }: ManageMembersModalProps) {
   const { t } = useTranslation();
@@ -173,7 +178,7 @@ export default function ManageMembersModal({
           </div>
         )}
 
-        {isOwner && onEmulateRole && (
+        {isOwner && (onEmulateRole || onEmulateGhost) && (
           <div className="bg-gray-900 border border-gray-600 rounded p-3 mb-4">
             <label htmlFor="emulate-role" className="block text-sm font-medium text-gray-300 mb-1">
               {t('manageMembers.previewLabel')}
@@ -183,16 +188,23 @@ export default function ManageMembersModal({
             </p>
             <select
               id="emulate-role"
-              value={emulatedRole ?? 'none'}
+              value={emulateGhost ? 'ghost' : (emulatedRole ?? 'none')}
               onChange={(e) => {
                 const val = e.target.value;
-                onEmulateRole(val === 'none' ? null : (val as MapsetRole));
+                if (val === 'ghost') {
+                  onEmulateGhost?.(true);
+                  onEmulateRole?.(null);
+                } else {
+                  onEmulateGhost?.(false);
+                  onEmulateRole?.(val === 'none' ? null : (val as MapsetRole));
+                }
               }}
               className="bg-gray-800 border border-gray-600 rounded text-white text-sm px-2 py-1"
             >
               <option value="none">{t('manageMembers.previewOwnerOption')}</option>
               <option value="mapper">{t('manageMembers.previewMapperOption')}</option>
               <option value="modder">{t('manageMembers.previewModderOption')}</option>
+              <option value="ghost">{t('manageMembers.previewGhostOption')}</option>
             </select>
           </div>
         )}

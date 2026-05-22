@@ -3,6 +3,7 @@ import {
   cancelMapsetDeletion,
   createMapset,
   deleteMapset,
+  fetchKickedMapsets,
   fetchMapset,
   fetchMapsets,
   fetchMembers,
@@ -29,6 +30,13 @@ export function useMapsets() {
   return useQuery({
     queryKey: ['mapsets'],
     queryFn: fetchMapsets,
+  });
+}
+
+export function useKickedMapsets() {
+  return useQuery({
+    queryKey: ['mapsets-kicked'],
+    queryFn: fetchKickedMapsets,
   });
 }
 

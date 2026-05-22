@@ -17,7 +17,13 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Difficulty, Mapset, MapsetRole, User
-from app.queries import MAX_DIFFICULTY_SLOTS_PER_OWNER, get_mapset_membership, get_owner_quota_used
+from app.queries import (
+    MAX_DIFFICULTY_SLOTS_PER_OWNER,
+    MembershipKind,
+    classify_membership,
+    get_mapset_membership,
+    get_owner_quota_used,
+)
 from app.schemas import (
     DifficultyCreate,
     DifficultyDetailRead,
@@ -53,7 +59,10 @@ async def create_difficulty(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     # Quota check: adding the first diff to a mapset costs 0 extra slots (the
@@ -109,12 +118,15 @@ async def list_difficulties(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
 
-    result = await db.execute(
-        select(Difficulty).where(Difficulty.mapset_id == mapset_id)
-    )
+    query = select(Difficulty).where(Difficulty.mapset_id == mapset_id)
+    if kind == MembershipKind.GHOST:
+        # Ghost members see only difficulties that existed at kick time.
+        query = query.where(Difficulty.created_at <= membership.kicked_at)  # type: ignore[union-attr]
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 
@@ -144,8 +156,26 @@ async def get_difficulty(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if membership is None:
+    kind = classify_membership(membership)
+    if kind == MembershipKind.NONE:
         raise _forbidden()
+
+    if kind == MembershipKind.GHOST:
+        kicked_at = membership.kicked_at  # type: ignore[union-attr]
+        if difficulty.created_at > kicked_at:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
+        # Explicit dict (not ORM mutation) keeps the filter from being
+        # inadvertently flushed and prevents newly-added response fields from
+        # silently bypassing the ghost cutoff.
+        return DifficultyDetailRead.model_validate({
+            "id": difficulty.id,
+            "mapset_id": difficulty.mapset_id,
+            "encrypted_name": difficulty.encrypted_name,
+            "created_at": difficulty.created_at,
+            "updated_at": difficulty.updated_at,
+            "sections": [s for s in difficulty.sections if s.created_at <= kicked_at],
+            "posts": list(difficulty.posts),
+        })
 
     return difficulty
 
@@ -170,7 +200,10 @@ async def update_difficulty(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if membership is None or membership.role not in (MapsetRole.owner, MapsetRole.mapper):
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     if "encrypted_name" in payload.model_fields_set:
@@ -201,7 +234,10 @@ async def delete_difficulty(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if membership is None or membership.role != MapsetRole.owner:
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
         raise _forbidden()
 
     await db.execute(sa_delete(Difficulty).where(Difficulty.id == difficulty_id))
