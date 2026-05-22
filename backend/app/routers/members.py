@@ -23,6 +23,16 @@ from app.schemas import (
     MemberRoleUpdate,
     MemberWithUserRead,
 )
+from app.services.auth_service import (
+    AuthServiceError,
+    lookup_osu_user_by_username,
+    upsert_user_by_osu_id,
+)
+from app.services.rate_limit import (
+    OsuApiBannedError,
+    OsuApiRateLimitedError,
+    check_and_record_osu_api_call,
+)
 
 router = APIRouter(tags=["members"])
 
@@ -120,10 +130,39 @@ async def invite_member(
             select(User).where(func.lower(User.username) == payload.username.lower())
         )
     ).scalar_one_or_none()
+
     if target_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+        # Gate the osu! API fallback behind per-user rate limiting.
+        try:
+            check_and_record_osu_api_call(current_user.id)
+        except OsuApiBannedError:
+            # Silent degradation: banned users see the same 404 as "user not found"
+            # so they can still invite anyone already in the local DB.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
+        except OsuApiRateLimitedError:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many username lookups. Try again later.",
+            )
+
+        try:
+            osu_payload = await lookup_osu_user_by_username(payload.username)
+        except AuthServiceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            ) from exc
+        if osu_payload is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
+        try:
+            target_user = await upsert_user_by_osu_id(db, osu_payload)
+        except AuthServiceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            ) from exc
 
     # Check for an existing row (active member or ghost in grace period).
     existing = (

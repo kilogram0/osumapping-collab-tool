@@ -1,8 +1,10 @@
 """Integration tests for osu! OAuth flow and session management."""
 
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import app.services.auth_service as _auth_svc
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -445,4 +447,219 @@ async def test_me_quota_counts_empty_mapset_as_one(client: AsyncClient):
 async def test_me_quota_rejects_unauthenticated(client: AsyncClient):
     resp = await client.get("/api/auth/me/quota")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by CC-token and lookup tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def reset_cc_cache():
+    """Wipe the module-level client-credentials token cache around a test."""
+    _auth_svc._cc_token = None
+    _auth_svc._cc_token_expires_at = None
+    yield
+    _auth_svc._cc_token = None
+    _auth_svc._cc_token_expires_at = None
+
+
+def _httpx_cls_mock(
+    status: int = 200,
+    json_body: dict | None = None,
+    raise_for_status_exc=None,
+    post_side_effect=None,
+    get_side_effect=None,
+):
+    """Return (cls_mock, inner_client_mock, response_mock) for patching httpx.AsyncClient."""
+    response = MagicMock()
+    response.status_code = status
+    response.json.return_value = json_body or {}
+    if raise_for_status_exc is not None:
+        response.raise_for_status.side_effect = raise_for_status_exc
+
+    inner = AsyncMock()
+    if post_side_effect is not None:
+        inner.post.side_effect = post_side_effect
+    else:
+        inner.post.return_value = response
+    if get_side_effect is not None:
+        inner.get.side_effect = get_side_effect
+    else:
+        inner.get.return_value = response
+
+    cls = MagicMock()
+    cls.return_value.__aenter__ = AsyncMock(return_value=inner)
+    cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    return cls, inner, response
+
+
+# ---------------------------------------------------------------------------
+# _fetch_client_credentials_token
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_cc_token_fetches_and_caches(reset_cc_cache):
+    """First call hits the token endpoint and caches the result."""
+    cls, inner, _ = _httpx_cls_mock(
+        200, {"access_token": "cc-tok-abc", "expires_in": 86400}
+    )
+    with patch("app.services.auth_service.httpx.AsyncClient", cls):
+        token = await _auth_svc._fetch_client_credentials_token()
+
+    assert token == "cc-tok-abc"
+    assert _auth_svc._cc_token == "cc-tok-abc"
+    inner.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_cc_token_reuses_cached_token(reset_cc_cache):
+    """Subsequent calls return the cached token without any network request."""
+    _auth_svc._cc_token = "cached-token"
+    _auth_svc._cc_token_expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
+
+    cls, inner, _ = _httpx_cls_mock()
+    with patch("app.services.auth_service.httpx.AsyncClient", cls):
+        token = await _auth_svc._fetch_client_credentials_token()
+
+    assert token == "cached-token"
+    inner.post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_cc_token_refreshes_expired_token(reset_cc_cache):
+    """An expired cached token is discarded and a fresh one is fetched."""
+    _auth_svc._cc_token = "old-token"
+    _auth_svc._cc_token_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+    cls, inner, _ = _httpx_cls_mock(
+        200, {"access_token": "new-token", "expires_in": 86400}
+    )
+    with patch("app.services.auth_service.httpx.AsyncClient", cls):
+        token = await _auth_svc._fetch_client_credentials_token()
+
+    assert token == "new-token"
+    inner.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_cc_token_raises_on_http_error(reset_cc_cache):
+    """An HTTP error from the token endpoint raises AuthServiceError."""
+    import httpx as _httpx
+
+    exc = _httpx.HTTPStatusError(
+        "400",
+        request=_httpx.Request("POST", "https://osu.ppy.sh/oauth/token"),
+        response=_httpx.Response(400),
+    )
+    cls, _, _ = _httpx_cls_mock(400, raise_for_status_exc=exc)
+    with patch("app.services.auth_service.httpx.AsyncClient", cls):
+        with pytest.raises(AuthServiceError, match="400"):
+            await _auth_svc._fetch_client_credentials_token()
+
+
+@pytest.mark.asyncio
+async def test_fetch_cc_token_raises_on_network_error(reset_cc_cache):
+    """A network error contacting the token endpoint raises AuthServiceError."""
+    import httpx as _httpx
+
+    cls, _, _ = _httpx_cls_mock(post_side_effect=_httpx.ConnectError("refused"))
+    with patch("app.services.auth_service.httpx.AsyncClient", cls):
+        with pytest.raises(AuthServiceError, match="refused"):
+            await _auth_svc._fetch_client_credentials_token()
+
+
+@pytest.mark.asyncio
+async def test_fetch_cc_token_raises_when_access_token_missing(reset_cc_cache):
+    """A response missing access_token raises AuthServiceError."""
+    cls, _, _ = _httpx_cls_mock(200, {"token_type": "Bearer"})
+    with patch("app.services.auth_service.httpx.AsyncClient", cls):
+        with pytest.raises(AuthServiceError, match="missing 'access_token'"):
+            await _auth_svc._fetch_client_credentials_token()
+
+
+# ---------------------------------------------------------------------------
+# lookup_osu_user_by_username
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_lookup_osu_user_returns_payload():
+    """A 200 response returns the user profile dict."""
+    payload = {"id": 12345, "username": "SomeUser", "avatar_url": "https://a.ppy.sh/12345"}
+    cls, inner, _ = _httpx_cls_mock(200, payload)
+    with (
+        patch(
+            "app.services.auth_service._fetch_client_credentials_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch("app.services.auth_service.httpx.AsyncClient", cls),
+    ):
+        result = await _auth_svc.lookup_osu_user_by_username("SomeUser")
+
+    assert result == payload
+    call_args = inner.get.call_args
+    assert "SomeUser" in call_args.args[0]
+    assert call_args.kwargs.get("params") == {"key": "username"}
+    assert call_args.kwargs["headers"]["Authorization"] == "Bearer fake-token"
+
+
+@pytest.mark.asyncio
+async def test_lookup_osu_user_returns_none_on_404():
+    """A 404 response returns None without raising."""
+    cls, _, _ = _httpx_cls_mock(404)
+    with (
+        patch(
+            "app.services.auth_service._fetch_client_credentials_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch("app.services.auth_service.httpx.AsyncClient", cls),
+    ):
+        result = await _auth_svc.lookup_osu_user_by_username("nobody")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_lookup_osu_user_raises_on_http_error():
+    """A non-404 HTTP error raises AuthServiceError."""
+    import httpx as _httpx
+
+    exc = _httpx.HTTPStatusError(
+        "503",
+        request=_httpx.Request("GET", "https://osu.ppy.sh/api/v2/users/test"),
+        response=_httpx.Response(503),
+    )
+    cls, _, _ = _httpx_cls_mock(503, raise_for_status_exc=exc)
+    with (
+        patch(
+            "app.services.auth_service._fetch_client_credentials_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch("app.services.auth_service.httpx.AsyncClient", cls),
+    ):
+        with pytest.raises(AuthServiceError, match="503"):
+            await _auth_svc.lookup_osu_user_by_username("test")
+
+
+@pytest.mark.asyncio
+async def test_lookup_osu_user_raises_on_network_error():
+    """A network-level failure raises AuthServiceError."""
+    import httpx as _httpx
+
+    cls, _, _ = _httpx_cls_mock(get_side_effect=_httpx.ConnectError("refused"))
+    with (
+        patch(
+            "app.services.auth_service._fetch_client_credentials_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch("app.services.auth_service.httpx.AsyncClient", cls),
+    ):
+        with pytest.raises(AuthServiceError, match="refused"):
+            await _auth_svc.lookup_osu_user_by_username("test")
 

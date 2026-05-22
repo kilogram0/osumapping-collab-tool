@@ -5,6 +5,7 @@ request/response objects.  Router handlers in :mod:`app.routers.auth` are
 responsible for HTTP concerns (cookies, redirects, status codes).
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -22,6 +23,14 @@ from app.models import User
 OSU_AUTHORIZE_URL = "https://osu.ppy.sh/oauth/authorize"
 OSU_TOKEN_URL = "https://osu.ppy.sh/oauth/token"
 OSU_API_ME_URL = "https://osu.ppy.sh/api/v2/me"
+OSU_API_USERS_URL = "https://osu.ppy.sh/api/v2/users"
+
+# ------------------------------------------------------------------
+# Client credentials token cache
+# ------------------------------------------------------------------
+_cc_lock = asyncio.Lock()
+_cc_token: str | None = None
+_cc_token_expires_at: datetime | None = None
 
 # ------------------------------------------------------------------
 # Token exchange
@@ -84,6 +93,75 @@ async def fetch_osu_user(access_token: str) -> dict:
             raise AuthServiceError(f"Failed to contact osu! API: {exc}") from exc
 
     return response.json()
+
+
+# ------------------------------------------------------------------
+# Client credentials (server-to-server) token
+# ------------------------------------------------------------------
+
+
+async def _fetch_client_credentials_token() -> str:
+    """Return a cached client credentials access token, refreshing when near expiry."""
+    global _cc_token, _cc_token_expires_at
+    async with _cc_lock:
+        now = datetime.now(timezone.utc)
+        if _cc_token and _cc_token_expires_at and now < _cc_token_expires_at:
+            return _cc_token
+
+        payload = {
+            "client_id": settings.OSU_CLIENT_ID,
+            "client_secret": settings.OSU_CLIENT_SECRET,
+            "grant_type": "client_credentials",
+            "scope": "public",
+        }
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                response = await client.post(OSU_TOKEN_URL, data=payload)
+                response.raise_for_status()
+                data = response.json()
+            except httpx.HTTPStatusError as exc:
+                raise AuthServiceError(
+                    f"osu! token endpoint returned {exc.response.status_code}"
+                ) from exc
+            except httpx.RequestError as exc:
+                raise AuthServiceError(
+                    f"Failed to contact osu! token endpoint: {exc}"
+                ) from exc
+
+        token = data.get("access_token")
+        if not token:
+            raise AuthServiceError("osu! token response missing 'access_token'")
+
+        expires_in = int(data.get("expires_in", 86400))
+        _cc_token = token
+        # Refresh 5 minutes before expiry to avoid using a stale token
+        _cc_token_expires_at = now + timedelta(seconds=expires_in - 300)
+        return _cc_token
+
+
+async def lookup_osu_user_by_username(username: str) -> dict | None:
+    """Look up any osu! user by username via the public API.
+
+    Uses client credentials so no user session is required.
+    Returns the raw profile payload, or ``None`` if the username does not exist.
+    Raises :class:`AuthServiceError` on unexpected API failures.
+    """
+    token = await _fetch_client_credentials_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{OSU_API_USERS_URL}/{username}"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(url, headers=headers, params={"key": "username"})
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            raise AuthServiceError(
+                f"osu! /api/v2/users returned {exc.response.status_code}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise AuthServiceError(f"Failed to contact osu! API: {exc}") from exc
 
 
 # ------------------------------------------------------------------

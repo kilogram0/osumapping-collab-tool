@@ -4,6 +4,7 @@ Covers GET/POST/PUT/DELETE /mapsets/{id}/members[/{user_id}].
 osu_ids in the 90100–90199 range to avoid collisions with other test files.
 """
 
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -200,12 +201,136 @@ async def test_invite_member_username_is_case_insensitive(
 @pytest.mark.asyncio
 async def test_invite_member_rejects_unknown_username(client: AsyncClient, owner_client):
     _, _, mapset_id = owner_client
-    resp = await client.post(
-        f"/api/mapsets/{mapset_id}/members",
-        json={"username": "this-user-does-not-exist"},
-        headers=CSRF_HEADERS,
-    )
+    with patch(
+        "app.routers.members.lookup_osu_user_by_username", new_callable=AsyncMock
+    ) as mock_lookup:
+        mock_lookup.return_value = None
+        resp = await client.post(
+            f"/api/mapsets/{mapset_id}/members",
+            json={"username": "this-user-does-not-exist"},
+            headers=CSRF_HEADERS,
+        )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_invite_member_via_osu_api_creates_stub_user(
+    client: AsyncClient, owner_client
+):
+    """Inviting a user not in the local DB falls back to the osu! API and creates a stub row."""
+    _, _, mapset_id = owner_client
+    osu_payload = {
+        "id": 90150,
+        "username": "OsuOnlyUser",
+        "avatar_url": "https://a.ppy.sh/90150",
+    }
+    with patch(
+        "app.routers.members.lookup_osu_user_by_username", new_callable=AsyncMock
+    ) as mock_lookup:
+        mock_lookup.return_value = osu_payload
+        resp = await client.post(
+            f"/api/mapsets/{mapset_id}/members",
+            json={"username": "OsuOnlyUser"},
+            headers=CSRF_HEADERS,
+        )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["role"] == "modder"
+    assert body["username"] == "OsuOnlyUser"
+    assert body["osu_id"] == 90150
+    mock_lookup.assert_called_once_with("OsuOnlyUser")
+
+    stub_id = UUID(body["user_id"])
+    await _delete_user_and_mapsets(stub_id)
+
+
+@pytest.mark.asyncio
+async def test_invite_member_returns_429_when_rate_limited(
+    client: AsyncClient, owner_client
+):
+    """Exceeding the osu! API lookup rate limit returns 429."""
+    from app.services.rate_limit import OsuApiRateLimitedError
+
+    _, _, mapset_id = owner_client
+    with patch(
+        "app.routers.members.check_and_record_osu_api_call",
+        side_effect=OsuApiRateLimitedError(),
+    ):
+        resp = await client.post(
+            f"/api/mapsets/{mapset_id}/members",
+            json={"username": "not-in-db"},
+            headers=CSRF_HEADERS,
+        )
+    assert resp.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_invite_member_returns_404_when_osu_api_banned(
+    client: AsyncClient, owner_client
+):
+    """Banned users see 404 for unknown usernames — silent degradation to DB-only mode."""
+    from app.services.rate_limit import OsuApiBannedError
+
+    _, _, mapset_id = owner_client
+    with patch(
+        "app.routers.members.check_and_record_osu_api_call",
+        side_effect=OsuApiBannedError(),
+    ):
+        resp = await client.post(
+            f"/api/mapsets/{mapset_id}/members",
+            json={"username": "not-in-db"},
+            headers=CSRF_HEADERS,
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_invite_member_returns_502_when_osu_api_raises(
+    client: AsyncClient, owner_client
+):
+    """If the osu! API itself fails, the endpoint propagates a 502."""
+    from app.services.auth_service import AuthServiceError
+
+    _, _, mapset_id = owner_client
+    with patch(
+        "app.routers.members.lookup_osu_user_by_username", new_callable=AsyncMock
+    ) as mock_lookup:
+        mock_lookup.side_effect = AuthServiceError("osu! API unreachable")
+        resp = await client.post(
+            f"/api/mapsets/{mapset_id}/members",
+            json={"username": "anyone"},
+            headers=CSRF_HEADERS,
+        )
+    assert resp.status_code == 502
+    assert "unreachable" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_invite_member_returns_502_when_upsert_fails(
+    client: AsyncClient, owner_client
+):
+    """If upsert_user_by_osu_id raises after a successful osu! API lookup, the endpoint returns 502."""
+    from app.services.auth_service import AuthServiceError
+
+    _, _, mapset_id = owner_client
+    osu_payload = {"id": 90151, "username": "FoundOnOsu", "avatar_url": "https://a.ppy.sh/90151"}
+    with (
+        patch(
+            "app.routers.members.lookup_osu_user_by_username", new_callable=AsyncMock
+        ) as mock_lookup,
+        patch(
+            "app.routers.members.upsert_user_by_osu_id", new_callable=AsyncMock
+        ) as mock_upsert,
+    ):
+        mock_lookup.return_value = osu_payload
+        mock_upsert.side_effect = AuthServiceError("db write failed")
+        resp = await client.post(
+            f"/api/mapsets/{mapset_id}/members",
+            json={"username": "FoundOnOsu"},
+            headers=CSRF_HEADERS,
+        )
+    assert resp.status_code == 502
+    assert "db write failed" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
