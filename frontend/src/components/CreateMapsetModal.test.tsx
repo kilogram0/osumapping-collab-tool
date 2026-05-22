@@ -172,6 +172,45 @@ async function uploadOsz(result: import('../utils/oszParser').ParsedOsz) {
   });
 }
 
+describe('CreateMapsetModal — OSZ import query invalidation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('re-invalidates mapsets and quota after OSZ difficulties are imported', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <CreateMapsetModal onSuccess={vi.fn()} onCancel={vi.fn()} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    await uploadOsz(makeOsz());
+    await waitFor(() => {
+      expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe('Artist - Song');
+    });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /saved this passphrase/i }));
+    await userEvent.click(screen.getByRole('button', { name: /create mapset/i }));
+
+    await waitFor(() => {
+      type InvalidateArg = { queryKey?: unknown[] };
+      const keyAt0 = (call: unknown[]) => (call[0] as InvalidateArg)?.queryKey?.[0];
+      const mapsetsCalls = invalidateSpy.mock.calls.filter((c) => keyAt0(c) === 'mapsets');
+      const quotaCalls = invalidateSpy.mock.calls.filter((c) => keyAt0(c) === 'quota');
+      // Once from useCreateMapset onSuccess, once again after OSZ import finishes
+      expect(mapsetsCalls.length).toBe(2);
+      expect(quotaCalls.length).toBe(2);
+    });
+  });
+});
+
 describe('CreateMapsetModal — OSZ dirty-field behaviour', () => {
   beforeEach(() => {
     vi.clearAllMocks();

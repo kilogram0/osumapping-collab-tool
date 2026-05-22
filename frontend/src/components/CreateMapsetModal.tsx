@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useToast } from '../contexts/ToastContext';
 import {
@@ -48,6 +49,7 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
   const { t } = useTranslation();
   const { unlockWithKey } = useEncryption();
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const createMapset = useCreateMapset();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -228,6 +230,13 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
           const msg = err instanceof Error ? err.message : t('createMapsetModal.importFailureGeneric');
           showToast(t('createMapsetModal.importFailure', { message: msg }), 'warning');
         }
+        // Invalidate after all difficulties are created so the dashboard shows
+        // the correct difficulty_count and quota immediately. Runs outside the
+        // catch above so stale counts never persist even on a partial import.
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['mapsets'] }),
+          queryClient.invalidateQueries({ queryKey: ['quota'] }),
+        ]);
       }
 
       onSuccess();
