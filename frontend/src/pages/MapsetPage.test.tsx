@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -255,6 +255,7 @@ function renderPage() {
 describe('MapsetPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('ResizeObserver', vi.fn(() => ({ observe: vi.fn(), disconnect: vi.fn() })));
     mockIsUnlocked.mockReturnValue(true);
     mockGetKey.mockResolvedValue({ key: 'mock-key' } as unknown as CryptoKey);
     mockCreatePost.mockClear();
@@ -530,6 +531,79 @@ describe('MapsetPage', () => {
     const replyPost = postCards.find((card) => within(card).queryByText(/Thanks for the feedback/i));
     expect(replyPost).toBeDefined();
     expect(within(replyPost!).queryByRole('button', { name: /Reply/i })).not.toBeInTheDocument();
+  });
+
+  describe('view toggle button group wrap layout', () => {
+    // measureNaturalRowWidth clones children into a probe and reads probe.offsetWidth.
+    // In jsdom all layout values are 0, so probe.offsetWidth=0 and outerEl.clientWidth=0
+    // → 0+0+16 > 0 is true → both groups start in column mode by default.
+    // Entry threshold (from row): leftNatural+rightNatural+16 > clientWidth → 116 > cw
+    // Exit threshold (from col):  leftNatural+rightNatural+48 > clientWidth → 148 > cw
+    // Hysteresis dead-zone: 116 ≤ clientWidth < 148
+
+    let resizeCallback: (() => void) | null = null;
+
+    beforeEach(() => {
+      resizeCallback = null;
+      // Override the outer beforeEach's no-op with a callback-capturing version
+      // so tests can manually trigger resize events. Top-level beforeEach resets
+      // back to the no-op before every test outside this block.
+      vi.stubGlobal('ResizeObserver', vi.fn((cb: ResizeObserverCallback) => ({
+        observe: vi.fn(() => {
+          resizeCallback = () => cb([], {} as ResizeObserver);
+        }),
+        disconnect: vi.fn(),
+      })));
+    });
+
+    it('stacks both groups in column when container is too narrow (jsdom default)', async () => {
+      // offsetWidth=0, clientWidth=0 → 0+0+16 > 0 → wrapped
+      renderPage();
+      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).toBeInTheDocument());
+      expect(screen.getByTestId('view-toggle-left')).toHaveClass('flex-col');
+      expect(screen.getByTestId('view-toggle-right')).toHaveClass('flex-col');
+    });
+
+    it('keeps both groups in a row when the container is wide enough', async () => {
+      // probe.offsetWidth=50 per group → combined=100; clientWidth=1000 → 100+16=116 < 1000
+      const offsetSpy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(50);
+      const clientSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+
+      renderPage();
+      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).toBeInTheDocument());
+      expect(screen.getByTestId('view-toggle-left')).not.toHaveClass('flex-col');
+      expect(screen.getByTestId('view-toggle-right')).not.toHaveClass('flex-col');
+
+      offsetSpy.mockRestore();
+      clientSpy.mockRestore();
+    });
+
+    it('switches to column on resize and honours hysteresis dead-zone before snapping back', async () => {
+      let cw = 1000;
+      const offsetSpy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(50);
+      const clientSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => cw);
+
+      renderPage();
+      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).not.toHaveClass('flex-col'));
+
+      // Narrow below entry threshold (116 > 100 → col)
+      cw = 100;
+      act(() => { resizeCallback?.(); });
+      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).toHaveClass('flex-col'));
+
+      // Widen into dead-zone (148 > 130 → stays col)
+      cw = 130;
+      act(() => { resizeCallback?.(); });
+      expect(screen.getByTestId('view-toggle-left')).toHaveClass('flex-col');
+
+      // Widen above exit threshold (148 > 200 is false → row)
+      cw = 200;
+      act(() => { resizeCallback?.(); });
+      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).not.toHaveClass('flex-col'));
+
+      offsetSpy.mockRestore();
+      clientSpy.mockRestore();
+    });
   });
 
   describe('Delete Difficulty', () => {

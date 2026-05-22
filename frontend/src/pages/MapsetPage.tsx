@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import BaseVersionHistory from '../components/BaseVersionHistory';
@@ -44,7 +44,7 @@ import type { DecryptedPost } from '../types';
 const EMPTY_SECTIONS: Section[] = [];
 
 export default function MapsetPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const mapsetId = id ?? '';
   const { data: mapset, isLoading: mapsetLoading, isError: mapsetError } = useMapset(mapsetId);
@@ -95,6 +95,13 @@ export default function MapsetPage() {
   // the page. Only the owner's UI is affected; nothing is sent to the server.
   const [emulatedRole, setEmulatedRole] = useState<MapsetRole | null>(null);
   const [emulateGhost, setEmulateGhost] = useState(false);
+  const viewToggleRowRef = useRef<HTMLDivElement>(null);
+  const leftGroupRef = useRef<HTMLDivElement>(null);
+  const rightGroupRef = useRef<HTMLDivElement>(null);
+  // Tracks the stable wrap state for hysteresis — updated inside checkAll, not in render.
+  const isWrappedRef = useRef(false);
+  const [leftGroupWrapped, setLeftGroupWrapped] = useState(false);
+  const [rightGroupWrapped, setRightGroupWrapped] = useState(false);
 
   const realIsGhost = !!(myMembership?.kicked_at);
   const isGhost = realIsGhost || emulateGhost;
@@ -295,6 +302,51 @@ export default function MapsetPage() {
     decryptPosts();
     return () => { cancelled = true; };
   }, [unlocked, difficultyDetail, mapsetId, getKey]);
+
+  // Detect when the two button groups together no longer fit side-by-side.
+  // Clone each group's children into an off-screen probe (position:fixed, width:max-content)
+  // to read unconstrained natural widths — no mutations to the real layout, no feedback loop.
+  // useLayoutEffect avoids the first-paint flash: the correct layout is applied before the
+  // browser paints. Gap is hardcoded to the row-mode value per group (left: gap-3=12px,
+  // right: gap-2=8px) because getComputedStyle(el).gap would return the column-mode gap
+  // when already wrapped, underestimating the natural row width.
+  const selectedDifficultyName = selectedDifficultyId ? (difficultyNames[selectedDifficultyId] ?? null) : null;
+  useLayoutEffect(() => {
+    function measureNaturalRowWidth(el: HTMLDivElement, rowGapPx: number): number {
+      if (!el.children.length) return 0;
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;display:flex;flex-direction:row;flex-wrap:nowrap;width:max-content;';
+      probe.style.gap = `${rowGapPx}px`;
+      Array.from(el.children).forEach(child => {
+        const clone = child.cloneNode(true) as HTMLElement;
+        clone.style.flexShrink = '0';
+        probe.appendChild(clone);
+      });
+      document.body.appendChild(probe);
+      const width = probe.offsetWidth;
+      document.body.removeChild(probe);
+      return width;
+    }
+    const checkAll = () => {
+      const outerEl = viewToggleRowRef.current;
+      const leftEl = leftGroupRef.current;
+      const rightEl = rightGroupRef.current;
+      if (!outerEl || !leftEl || !rightEl) return;
+      const leftNatural = measureNaturalRowWidth(leftEl, 12);  // gap-3 in row mode
+      const rightNatural = measureNaturalRowWidth(rightEl, 8); // gap-2 in row mode
+      // Hysteresis: wider dead-zone to exit column mode than to enter it,
+      // preventing oscillation right at the threshold during resize.
+      const buffer = isWrappedRef.current ? 48 : 16;
+      const needsWrap = leftNatural + rightNatural + buffer > outerEl.clientWidth;
+      isWrappedRef.current = needsWrap;
+      setLeftGroupWrapped(needsWrap);
+      setRightGroupWrapped(needsWrap);
+    };
+    checkAll();
+    const ro = new ResizeObserver(checkAll);
+    if (viewToggleRowRef.current) ro.observe(viewToggleRowRef.current);
+    return () => ro.disconnect();
+  }, [canEditStructure, isOwner, selectedDifficultyId, selectedDifficultyName, i18n.language]);
 
   // Build reply trees for global posts view
   const globalPostTree = useMemo(() => {
@@ -664,8 +716,8 @@ export default function MapsetPage() {
             )}
 
             {/* View toggle */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+            <div ref={viewToggleRowRef} className="flex items-start justify-between">
+              <div ref={leftGroupRef} data-testid="view-toggle-left" className={leftGroupWrapped ? 'flex flex-col items-start gap-2' : 'flex items-center gap-3'}>
                 {canEditStructure && (
                   <button
                     type="button"
@@ -711,7 +763,7 @@ export default function MapsetPage() {
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div ref={rightGroupRef} data-testid="view-toggle-right" className={rightGroupWrapped ? 'flex flex-col items-end gap-2' : 'flex items-center gap-2'}>
                 <button
                   type="button"
                   onClick={() => {
