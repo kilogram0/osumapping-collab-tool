@@ -26,6 +26,7 @@ from app.queries import MembershipKind, classify_membership, get_mapset_membersh
 from app.schemas import (
     BaseOsuRead,
     BaseOsuVersionListItem,
+    SectionAssign,
     SectionCreate,
     SectionOsuRead,
     SectionOsuUpload,
@@ -239,6 +240,81 @@ async def delete_section(
     await db.execute(sa_delete(Section).where(Section.id == section_id))
     await db.commit()
     return None
+
+
+# ---------------------------------------------------------------------------
+# Section assignment
+# ---------------------------------------------------------------------------
+
+
+@router.patch(
+    "/difficulties/{difficulty_id}/sections/{section_id}/assign",
+    response_model=SectionRead,
+    dependencies=[Depends(require_csrf_protection)],
+)
+async def assign_section(
+    difficulty_id: UUID,
+    section_id: UUID,
+    payload: SectionAssign,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Section:
+    """Assign or unassign a section to a mapset member.
+
+    **Owner** can assign to any active member, or clear the assignment
+    (``user_id: null``).
+
+    **Mapper** can only claim an unassigned section for themselves
+    (``user_id`` must equal their own user id; section must have no current
+    assignee).  Mappers cannot reassign or clear any assignment — including
+    one they set themselves.  Only the owner can release a claim.
+
+    **Modder** and ghost members are forbidden.
+    """
+    section, mapset_id = await _get_section(db, difficulty_id, section_id)
+
+    membership = await get_mapset_membership(db, mapset_id, current_user.id)
+    if classify_membership(membership) != MembershipKind.ACTIVE:
+        raise _forbidden()
+
+    role = membership.role  # type: ignore[union-attr]
+
+    if role == MapsetRole.owner:
+        # Owner can assign to any active member or clear.
+        if payload.user_id is not None:
+            target_membership = await get_mapset_membership(db, mapset_id, payload.user_id)
+            if classify_membership(target_membership) != MembershipKind.ACTIVE:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Target user is not an active member of this mapset",
+                )
+        section.assigned_to = payload.user_id
+    elif role == MapsetRole.mapper:
+        # Mapper can only claim an unassigned section for themselves.
+        if payload.user_id != current_user.id:
+            raise _forbidden()
+        # Atomic claim: eliminates the read-check-write race between concurrent
+        # mappers who both read assigned_to=None before either commits.
+        result = await db.execute(
+            sa_update(Section)
+            .where(Section.id == section_id, Section.assigned_to.is_(None))
+            .values(assigned_to=current_user.id)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Section is already assigned to another member",
+            )
+        await db.commit()
+        await db.refresh(section)
+        return section
+    else:
+        raise _forbidden()
+
+    await db.commit()
+    await db.refresh(section)
+    return section
 
 
 # ---------------------------------------------------------------------------

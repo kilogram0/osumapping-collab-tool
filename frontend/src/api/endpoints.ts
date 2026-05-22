@@ -288,6 +288,7 @@ export interface Section {
   encrypted_start_time_ms: string;
   encrypted_end_time_ms: string;
   encrypted_sort_order: string;
+  assigned_to: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -331,6 +332,18 @@ export async function updateSection(
 
 export async function deleteSection(difficultyId: string, sectionId: string): Promise<void> {
   await client.delete(`/difficulties/${difficultyId}/sections/${sectionId}`);
+}
+
+export async function assignSection(
+  difficultyId: string,
+  sectionId: string,
+  userId: string | null,
+): Promise<Section> {
+  const { data } = await client.patch<Section>(
+    `/difficulties/${difficultyId}/sections/${sectionId}/assign`,
+    { user_id: userId },
+  );
+  return data;
 }
 
 export interface SectionOsuVersion {

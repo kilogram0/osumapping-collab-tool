@@ -26,6 +26,7 @@ export interface DecryptedSection {
   startTimeMs: number;
   endTimeMs: number;
   sortOrder: number;
+  assignedTo: string | null;
 }
 
 export default function SectionList({ sections, mapsetId, mapsetTitle, difficultyId, onEdit, onDecrypted, role }: SectionListProps) {

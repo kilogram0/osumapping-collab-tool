@@ -105,6 +105,7 @@ const MOCK_SECTIONS = [
     encrypted_start_time_ms: 'enc:{"v":0,"ms":0}',
     encrypted_end_time_ms: 'enc:{"v":0,"ms":30000}',
     encrypted_sort_order: 'enc:{"v":0,"ms":0}',
+    assignedTo: null,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
@@ -115,6 +116,7 @@ const MOCK_SECTIONS = [
     encrypted_start_time_ms: 'enc:{"v":0,"ms":30000}',
     encrypted_end_time_ms: 'enc:{"v":0,"ms":60000}',
     encrypted_sort_order: 'enc:{"v":0,"ms":1}',
+    assignedTo: null,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
@@ -227,6 +229,9 @@ vi.mock('../hooks/useDifficulty', () => ({
     mutateAsync: mockDeletePost,
   }),
   useDeleteSection: () => ({
+    mutateAsync: vi.fn(),
+  }),
+  useAssignSection: () => ({
     mutateAsync: vi.fn(),
   }),
   useDeleteDifficulty: () => ({

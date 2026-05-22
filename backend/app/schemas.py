@@ -187,8 +187,15 @@ class SectionRead(BaseModel):
     encrypted_start_time_ms: str
     encrypted_end_time_ms: str
     encrypted_sort_order: str
+    assigned_to: UUID | None
     created_at: datetime
     updated_at: datetime
+
+
+class SectionAssign(BaseModel):
+    """Request body for ``PATCH /difficulties/{did}/sections/{sid}/assign``."""
+
+    user_id: UUID | None
 
 
 # .osu file size cap (frontend validates ≤ 1 MB raw; base64 adds ~33%).

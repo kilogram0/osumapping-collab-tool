@@ -10,13 +10,13 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
-from app.models import Mapset, MapsetMember, MapsetRole, User
+from app.models import Difficulty, Mapset, MapsetMember, MapsetRole, Section, User
 from app.queries import MembershipKind, classify_membership, get_mapset_membership
 from app.schemas import (
     MemberInviteRequest,
@@ -316,5 +316,17 @@ async def remove_member(
         )
 
     target_membership.kicked_at = datetime.utcnow()
+    # Clear any section assignments the kicked member held within this mapset.
+    await db.execute(
+        sa_update(Section)
+        .where(
+            Section.assigned_to == user_id,
+            Section.difficulty_id.in_(
+                select(Difficulty.id).where(Difficulty.mapset_id == mapset_id)
+            ),
+        )
+        .values(assigned_to=None)
+        .execution_options(synchronize_session=False)
+    )
     await db.commit()
     return None

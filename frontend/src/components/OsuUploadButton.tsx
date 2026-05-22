@@ -30,6 +30,10 @@ interface OsuUploadButtonProps {
    *  together — typing them as one object makes that all-or-nothing
    *  contract visible. */
   sectionRange?: { start: number; end: number };
+  /** If set and differs from currentUserId, shows a "are you sure?" before uploading. */
+  assignedToUserId?: string | null;
+  currentUserId?: string;
+  assignedToUsername?: string | null;
 }
 
 interface UploadState {
@@ -47,6 +51,9 @@ export default function OsuUploadButton({
   mapsetId,
   role,
   sectionRange,
+  assignedToUserId,
+  currentUserId,
+  assignedToUsername,
 }: OsuUploadButtonProps) {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -249,6 +256,16 @@ export default function OsuUploadButton({
 
       if (!unlocked) {
         setUploadState({ loading: false, error: t('osuUpload.errorLocked'), success: false, warning: null });
+        return;
+      }
+
+      if (
+        assignedToUserId &&
+        currentUserId &&
+        assignedToUserId !== currentUserId &&
+        !window.confirm(t('osuUpload.assignmentWarning', { username: assignedToUsername ?? t('osuUpload.assignmentWarningSomeone') }))
+      ) {
+        event.target.value = '';
         return;
       }
 

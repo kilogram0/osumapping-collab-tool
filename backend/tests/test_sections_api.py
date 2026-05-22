@@ -2096,3 +2096,336 @@ async def test_activate_base_osu_version_rejects_missing_csrf(
         headers={"Origin": settings.FRONTEND_URL},
     )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# PATCH /difficulties/{did}/sections/{sid}/assign
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_assign_section_default_is_null(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections", json=section, headers=CSRF_HEADERS
+    )
+    resp = await client.get(f"/api/difficulties/{difficulty_id}/sections/{section['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["assigned_to"] is None
+
+
+@pytest.mark.asyncio
+async def test_assign_section_owner_can_assign_to_member(client: AsyncClient):
+    owner = await _seed_user(80020)
+    mapper_user = await _seed_user(80021)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=mapper_user.id, role=MapsetRole.mapper))
+        await db.commit()
+
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(mapper_user.id)},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assigned_to"] == str(mapper_user.id)
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_owner_can_clear_assignment(client: AsyncClient):
+    owner = await _seed_user(80022)
+    mapper_user = await _seed_user(80023)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=mapper_user.id, role=MapsetRole.mapper))
+        await db.commit()
+
+    await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(mapper_user.id)},
+        headers=CSRF_HEADERS,
+    )
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": None},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assigned_to"] is None
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_mapper_can_claim_unassigned(client: AsyncClient):
+    owner = await _seed_user(80024)
+    mapper_user = await _seed_user(80025)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=mapper_user.id, role=MapsetRole.mapper))
+        await db.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(mapper_user.id)},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assigned_to"] == str(mapper_user.id)
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_mapper_cannot_override_others_assignment(client: AsyncClient):
+    owner = await _seed_user(80026)
+    mapper1 = await _seed_user(80027)
+    mapper2 = await _seed_user(80028)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=mapper1.id, role=MapsetRole.mapper))
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=mapper2.id, role=MapsetRole.mapper))
+        await db.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper1.id))
+    await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(mapper1.id)},
+        headers=CSRF_HEADERS,
+    )
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper2.id))
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(mapper2.id)},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 409
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper1.id)
+    await _delete_user_and_mapsets(mapper2.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_modder_cannot_assign(client: AsyncClient):
+    owner = await _seed_user(80029)
+    modder = await _seed_user(80030)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=modder.id, role=MapsetRole.modder))
+        await db.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(modder.id))
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(modder.id)},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(modder.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_mapper_cannot_unassign(client: AsyncClient):
+    """Mapper cannot clear an assignment (user_id: null) — only owners can."""
+    owner = await _seed_user(80031)
+    mapper_user = await _seed_user(80032)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=mapper_user.id, role=MapsetRole.mapper))
+        await db.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(mapper_user.id)},
+        headers=CSRF_HEADERS,
+    )
+
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": None},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_owner_can_reassign_from_one_mapper_to_another(client: AsyncClient):
+    owner = await _seed_user(80033)
+    mapper1 = await _seed_user(80034)
+    mapper2 = await _seed_user(80035)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=mapper1.id, role=MapsetRole.mapper))
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=mapper2.id, role=MapsetRole.mapper))
+        await db.commit()
+
+    await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(mapper1.id)},
+        headers=CSRF_HEADERS,
+    )
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(mapper2.id)},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assigned_to"] == str(mapper2.id)
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper1.id)
+    await _delete_user_and_mapsets(mapper2.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_non_member_cannot_assign(client: AsyncClient):
+    owner = await _seed_user(80036)
+    outsider = await _seed_user(80037)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    client.cookies.set(settings.cookie_name, create_access_token(outsider.id))
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(outsider.id)},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(outsider.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_owner_can_assign_to_modder(client: AsyncClient):
+    """Owner can assign a section to a modder (e.g. newly invited member who hasn't changed role)."""
+    owner = await _seed_user(80038)
+    modder = await _seed_user(80039)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS)
+    section = _section_payload()
+    await client.post(f"/api/difficulties/{diff['id']}/sections", json=section, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        db.add(MapsetMember(id=uuid4(), mapset_id=UUID(ms["id"]), user_id=modder.id, role=MapsetRole.modder))
+        await db.commit()
+
+    resp = await client.patch(
+        f"/api/difficulties/{diff['id']}/sections/{section['id']}/assign",
+        json={"user_id": str(modder.id)},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assigned_to"] == str(modder.id)
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(modder.id)
+
+
+@pytest.mark.asyncio
+async def test_assign_section_rejects_missing_csrf(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections", json=section, headers=CSRF_HEADERS
+    )
+    resp = await client.patch(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/assign",
+        json={"user_id": None},
+        headers={"Origin": settings.FRONTEND_URL},
+    )
+    assert resp.status_code == 403

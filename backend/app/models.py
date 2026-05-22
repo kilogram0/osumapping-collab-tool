@@ -9,6 +9,7 @@ to silently drop tables or miss new ones.
 
 from datetime import datetime
 from enum import Enum as PyEnum
+from typing import Optional
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -75,6 +76,10 @@ class User(SQLModel, table=True):
     )
     section_uploads: list["SectionOsuVersion"] = Relationship(
         back_populates="uploader"
+    )
+    assigned_sections: list["Section"] = Relationship(
+        back_populates="assignee",
+        sa_relationship_kwargs={"foreign_keys": "Section.assigned_to"},
     )
     posts: list["Post"] = Relationship(
         back_populates="author",
@@ -247,6 +252,7 @@ class Section(SQLModel, table=True):
 
     __table_args__ = (
         sa.Index("ix_section_difficulty_id", "difficulty_id"),
+        sa.Index("ix_section_assigned_to", "assigned_to"),
     )
 
     id: UUID = Field(primary_key=True)
@@ -268,6 +274,12 @@ class Section(SQLModel, table=True):
     encrypted_sort_order: str = Field(
         sa_column=sa.Column(sa.Text, nullable=False)
     )
+    assigned_to: UUID | None = Field(
+        default=None,
+        sa_column=sa.Column(
+            sa.ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+        ),
+    )
     created_at: datetime | None = Field(
         default=None,
         sa_column_kwargs={
@@ -286,6 +298,10 @@ class Section(SQLModel, table=True):
 
     # Relationships
     difficulty: Difficulty = Relationship(back_populates="sections")
+    assignee: Optional["User"] = Relationship(
+        back_populates="assigned_sections",
+        sa_relationship_kwargs={"foreign_keys": "Section.assigned_to"},
+    )
     osu_versions: list["SectionOsuVersion"] = Relationship(
         back_populates="section"
     )

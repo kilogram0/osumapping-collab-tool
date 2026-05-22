@@ -10,6 +10,8 @@ interface PendingDifficultyListProps {
   mapsetId: string;
   onRestore: (difficultyId: string) => void;
   restoringId: string | null;
+  onDownload: (difficultyId: string, difficultyName: string) => void;
+  downloadingId: string | null;
 }
 
 /**
@@ -24,6 +26,8 @@ export default function PendingDifficultyList({
   mapsetId,
   onRestore,
   restoringId,
+  onDownload,
+  downloadingId,
 }: PendingDifficultyListProps) {
   const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
@@ -89,6 +93,7 @@ export default function PendingDifficultyList({
           ? names[difficulty.id] ?? t('difficultyTabs.encrypted')
           : t('difficultyTabs.encrypted');
         const isRestoring = restoringId === difficulty.id;
+        const isDownloading = downloadingId === difficulty.id;
         return (
           <li
             key={difficulty.id}
@@ -106,14 +111,24 @@ export default function PendingDifficultyList({
                   : t('mapsetPage.pendingExpiresInDays', { count: daysLeft })}
               </p>
             </div>
-            <button
-              type="button"
-              disabled={isRestoring}
-              onClick={() => onRestore(difficulty.id)}
-              className="shrink-0 px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
-            >
-              {isRestoring ? t('mapsetPage.restoring') : t('mapsetPage.restore')}
-            </button>
+            <div className="shrink-0 flex gap-2">
+              <button
+                type="button"
+                disabled={isDownloading || !unlocked}
+                onClick={() => onDownload(difficulty.id, name)}
+                className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
+              >
+                {isDownloading ? t('mapsetPage.downloadingOsu') : t('mapsetPage.downloadOsu')}
+              </button>
+              <button
+                type="button"
+                disabled={isRestoring}
+                onClick={() => onRestore(difficulty.id)}
+                className="px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
+              >
+                {isRestoring ? t('mapsetPage.restoring') : t('mapsetPage.restore')}
+              </button>
+            </div>
           </li>
         );
       })}

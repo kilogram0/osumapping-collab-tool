@@ -1,14 +1,16 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSectionOsuVersions, useActivateSectionOsuVersion, useBaseOsuVersions } from '../hooks/useDifficulty';
+import type { MemberWithUser } from '../api/endpoints';
 
 interface OsuVersionHistoryProps {
   difficultyId: string;
   sectionId: string;
+  membersById?: Map<string, MemberWithUser>;
   onClose: () => void;
 }
 
-export default function OsuVersionHistory({ difficultyId, sectionId, onClose }: OsuVersionHistoryProps) {
+export default function OsuVersionHistory({ difficultyId, sectionId, membersById, onClose }: OsuVersionHistoryProps) {
   const { t } = useTranslation();
   const { data: versions, isLoading, error } = useSectionOsuVersions(difficultyId, sectionId);
   const { data: baseVersions } = useBaseOsuVersions(difficultyId);
@@ -88,6 +90,8 @@ export default function OsuVersionHistory({ difficultyId, sectionId, onClose }: 
                 </p>
                 <p className="text-xs text-gray-500">
                   {new Date(v.created_at).toLocaleString()}
+                  {' · '}
+                  {membersById?.get(v.uploaded_by)?.username ?? t('sectionHistory.unknownUploader')}
                 </p>
               </div>
               {!v.is_active && (

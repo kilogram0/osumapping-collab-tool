@@ -42,6 +42,7 @@ interface SectionDetailPanelProps {
     parent_id?: string | null;
   }) => void | Promise<void>;
   onDeletePost: (postId: string) => void | Promise<void>;
+  onAssignSection?: (sectionId: string, userId: string | null) => void | Promise<void>;
   onEditSection?: (section: DecryptedSection) => void;
   onDeleteSection?: (section: DecryptedSection) => void | Promise<void>;
 }
@@ -76,6 +77,7 @@ export default function SectionDetailPanel({
   onCreatePost,
   onUpdatePost,
   onDeletePost,
+  onAssignSection,
   onEditSection,
   onDeleteSection,
 }: SectionDetailPanelProps) {
@@ -83,6 +85,7 @@ export default function SectionDetailPanel({
   const { isUnlocked, getKey } = useEncryption();
   const unlocked = isUnlocked(mapsetId);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAssignSelect, setShowAssignSelect] = useState(false);
   const [replyingTo, setReplyingTo] = useState<DecryptedPost | null>(null);
   const [editingPost, setEditingPost] = useState<DecryptedPost | null>(null);
   const [editingPostBody, setEditingPostBody] = useState('');
@@ -254,6 +257,61 @@ export default function SectionDetailPanel({
           <p className="text-sm text-gray-400">
             {formatTime(section.startTimeMs)} – {formatTime(section.endTimeMs)}
           </p>
+          {/* Assignment row */}
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            {section.assignedTo ? (
+              <span className="text-xs text-blue-400 font-medium">
+                {t('sectionDetail.assignedTo', {
+                  username: membersById?.get(section.assignedTo)?.username ?? t('sectionDetail.unknownMember'),
+                })}
+              </span>
+            ) : (
+              <span className="text-xs text-gray-500 italic">{t('sectionDetail.unassigned')}</span>
+            )}
+            {isOwner && onAssignSection && (
+              showAssignSelect ? (
+                <select
+                  autoFocus
+                  className="text-xs bg-gray-700 text-white border border-gray-600 rounded px-1 py-0.5"
+                  defaultValue={section.assignedTo ?? ''}
+                  onBlur={() => setShowAssignSelect(false)}
+                  onChange={(e) => {
+                    setShowAssignSelect(false);
+                    void onAssignSection(section.id, e.target.value || null);
+                  }}
+                >
+                  {section.assignedTo && !membersById?.has(section.assignedTo) && (
+                    <option value={section.assignedTo} disabled>
+                      {t('sectionDetail.assigneeNotMember')}
+                    </option>
+                  )}
+                  <option value="">{t('sectionDetail.assignUnassigned')}</option>
+                  {Array.from(membersById?.values() ?? [])
+                    .filter((m) => m.role !== 'modder')
+                    .map((m) => (
+                      <option key={m.user_id} value={m.user_id}>{m.username}</option>
+                    ))}
+                </select>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowAssignSelect(true)}
+                  className="text-xs text-gray-400 hover:text-white underline"
+                >
+                  {t('sectionDetail.assignChange')}
+                </button>
+              )
+            )}
+            {!isOwner && role === 'mapper' && !section.assignedTo && onAssignSection && (
+              <button
+                type="button"
+                onClick={() => void onAssignSection(section.id, currentUserId)}
+                className="text-xs text-green-400 hover:text-green-300 underline"
+              >
+                {t('sectionDetail.claim')}
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {canEditStructure && (
@@ -264,6 +322,13 @@ export default function SectionDetailPanel({
                 mapsetId={mapsetId}
                 role={role}
                 sectionRange={{ start: section.startTimeMs, end: section.endTimeMs }}
+                assignedToUserId={section.assignedTo}
+                currentUserId={currentUserId}
+                assignedToUsername={
+                  section.assignedTo
+                    ? (membersById?.get(section.assignedTo)?.username ?? null)
+                    : null
+                }
               />
               {onEditSection && (
                 <button
@@ -350,6 +415,7 @@ export default function SectionDetailPanel({
         <OsuVersionHistory
           difficultyId={difficultyId}
           sectionId={section.id}
+          membersById={membersById}
           onClose={() => setShowHistory(false)}
         />
       )}

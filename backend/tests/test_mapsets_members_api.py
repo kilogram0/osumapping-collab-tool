@@ -797,3 +797,69 @@ async def test_remove_member_rejects_missing_csrf(client: AsyncClient, owner_cli
         assert resp.status_code == 403
     finally:
         await _delete_user_and_mapsets(modder.id)
+
+
+@pytest.mark.asyncio
+async def test_remove_member_clears_section_assignments(client: AsyncClient, owner_client):
+    """Kicking a member automatically clears their section assignments."""
+    _, owner, mapset_id = owner_client
+    mapper = await _seed_user(90120, "kick-assign-mapper")
+    try:
+        # Create a difficulty and section.
+        diff_id = str(uuid4())
+        await client.post(
+            f"/api/mapsets/{mapset_id}/difficulties",
+            json={"id": diff_id, "encrypted_name": "encrypted:hard"},
+            headers=CSRF_HEADERS,
+        )
+        sec_id = str(uuid4())
+        await client.post(
+            f"/api/difficulties/{diff_id}/sections",
+            json={
+                "id": sec_id,
+                "encrypted_name": "encrypted:intro",
+                "encrypted_start_time_ms": "encrypted:0",
+                "encrypted_end_time_ms": "encrypted:30000",
+                "encrypted_sort_order": "encrypted:1",
+            },
+            headers=CSRF_HEADERS,
+        )
+
+        # Add mapper member.
+        factory = async_sessionmaker(
+            test_engine, class_=AsyncSession, expire_on_commit=False
+        )
+        async with factory() as session:
+            session.add(
+                MapsetMember(
+                    id=uuid4(),
+                    mapset_id=UUID(mapset_id),
+                    user_id=mapper.id,
+                    role=MapsetRole.mapper,
+                )
+            )
+            await session.commit()
+
+        # Owner assigns the section to the mapper.
+        client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+        assign_resp = await client.patch(
+            f"/api/difficulties/{diff_id}/sections/{sec_id}/assign",
+            json={"user_id": str(mapper.id)},
+            headers=CSRF_HEADERS,
+        )
+        assert assign_resp.status_code == 200
+        assert assign_resp.json()["assigned_to"] == str(mapper.id)
+
+        # Kick the mapper.
+        kick_resp = await client.delete(
+            f"/api/mapsets/{mapset_id}/members/{mapper.id}",
+            headers=CSRF_HEADERS,
+        )
+        assert kick_resp.status_code == 204
+
+        # Section assignment must now be null.
+        get_resp = await client.get(f"/api/difficulties/{diff_id}/sections/{sec_id}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["assigned_to"] is None
+    finally:
+        await _delete_user_and_mapsets(mapper.id)

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   activateBaseOsuVersion,
   activateSectionOsuVersion,
+  assignSection,
   createDifficulty,
   createPost,
   createSection,
@@ -117,6 +118,17 @@ export function useDeleteSection(difficultyId: string) {
     mutationFn: (sectionId: string) => deleteSection(difficultyId, sectionId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+    },
+  });
+}
+
+export function useAssignSection(difficultyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sectionId, userId }: { sectionId: string; userId: string | null }) =>
+      assignSection(difficultyId, sectionId, userId),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
     },
   });

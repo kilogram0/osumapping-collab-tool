@@ -21,6 +21,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useToast } from '../contexts/ToastContext';
 import {
+  useAssignSection,
   useCreatePost,
   useDeleteDifficulty,
   useDeletePost,
@@ -31,14 +32,14 @@ import {
   useUpdatePost,
 } from '../hooks/useDifficulty';
 import { useMapset, useMembers, useMyMembership } from '../hooks/useMapset';
-import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad } from '../utils/crypto';
+import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad, sectionOsuVersionAad, difficultyBaseOsuVersionAad } from '../utils/crypto';
 import { extractApiErrorMessage } from '../utils/errors';
 import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
-import { downloadBaseOsu } from '../api/endpoints';
-import { difficultyBaseOsuVersionAad } from '../utils/crypto';
+import { downloadBaseOsu, downloadSectionOsu, fetchDifficultyDetail } from '../api/endpoints';
 import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { composeOsuFilename } from '../utils/osuFilename';
+import { mergeOsu } from '../utils/osuMerge';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
@@ -74,9 +75,11 @@ export default function MapsetPage() {
   const updatePostMutation = useUpdatePost(selectedDifficultyId ?? '');
   const deletePostMutation = useDeletePost(selectedDifficultyId ?? '');
   const deleteSectionMutation = useDeleteSection(selectedDifficultyId ?? '');
+  const assignSectionMutation = useAssignSection(selectedDifficultyId ?? '');
   const deleteDifficultyMutation = useDeleteDifficulty(mapsetId);
   const restoreDifficultyMutation = useRestoreDifficulty(mapsetId);
 
+  const [downloadingPendingId, setDownloadingPendingId] = useState<string | null>(null);
   const [showCreateDifficulty, setShowCreateDifficulty] = useState(false);
   const [showRenameDifficulty, setShowRenameDifficulty] = useState(false);
   const [showDeleteDifficultyConfirm, setShowDeleteDifficultyConfirm] = useState(false);
@@ -235,6 +238,7 @@ export default function MapsetPage() {
                 startTimeMs: 0,
                 endTimeMs: decodeJsonEnvelope(endRaw),
                 sortOrder: decodeJsonEnvelope(sortRaw),
+                assignedTo: s.assigned_to,
               });
             } catch (_err) {
               logger.warn(`Failed to decrypt section ${s.id}:`, _err);
@@ -515,6 +519,14 @@ export default function MapsetPage() {
     }
   }
 
+  async function handleAssignSection(sectionId: string, userId: string | null) {
+    try {
+      await assignSectionMutation.mutateAsync({ sectionId, userId });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedAssignSection'), 'error');
+    }
+  }
+
   async function handleDeleteDifficulty() {
     if (!selectedDifficultyId) return;
     try {
@@ -542,6 +554,80 @@ export default function MapsetPage() {
     }
   }
 
+  async function handleDownloadPendingDifficulty(difficultyId: string, difficultyName: string) {
+    if (!unlocked) return;
+    setDownloadingPendingId(difficultyId);
+    try {
+      const key = await getKey(mapsetId);
+      if (!key) return;
+
+      const detail = await fetchDifficultyDetail(difficultyId);
+      const baseResp = await downloadBaseOsu(difficultyId);
+      const basePlaintext = await decrypt(
+        key,
+        baseResp.encrypted_content,
+        difficultyBaseOsuVersionAad(baseResp.id, mapsetId),
+      );
+
+      const sectionInputs: { content: string; sortOrder: number; sectionId: string }[] = [];
+      let skippedSections = 0;
+      const sectionTasks = detail.sections.map((section) => async () => {
+        try {
+          const resp = await downloadSectionOsu(difficultyId, section.id);
+          const plaintext = await decrypt(
+            key,
+            resp.encrypted_content,
+            sectionOsuVersionAad(resp.id, mapsetId),
+          );
+          const sortOrderRaw = await decrypt(
+            key,
+            section.encrypted_sort_order,
+            sectionFieldAad(section.id, mapsetId),
+          );
+          sectionInputs.push({ content: plaintext, sortOrder: decodeJsonEnvelope(sortOrderRaw), sectionId: section.id });
+        } catch (err) {
+          logger.warn(`Failed to fetch section ${section.id} for pending download:`, err);
+          skippedSections++;
+        }
+      });
+      const concurrencyQueue = [...sectionTasks];
+      const worker = async () => { while (concurrencyQueue.length > 0) await concurrencyQueue.shift()!(); };
+      await Promise.all(Array.from({ length: Math.min(5, sectionTasks.length) }, worker));
+
+      const merged = mergeOsu(basePlaintext, sectionInputs);
+      const diffLabel = `${difficultyName}_version_${baseResp.version ?? 0}`;
+      const { content: finalContent, metadata } = withMetadataVersion(parseOsuFile(merged), diffLabel);
+      const filename = composeOsuFilename({
+        artist: metadata.artist,
+        title: metadata.title,
+        mapsetTitle: mapset?.title ?? '',
+        diffName: diffLabel,
+      });
+
+      const blob = new Blob([finalContent], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      if (skippedSections > 0) {
+        showToast(
+          t('mapsetPage.pendingDownloadSkippedSections', { count: skippedSections }),
+          'warning',
+        );
+      }
+    } catch (err) {
+      logger.warn('Failed to download pending difficulty:', err);
+      showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedDownloadPending'), 'error');
+    } finally {
+      setDownloadingPendingId(null);
+    }
+  }
+
   async function handleDownloadBase() {
     if (!unlocked || !selectedDifficultyId) return;
     try {
@@ -559,7 +645,7 @@ export default function MapsetPage() {
       const filename = composeOsuFilename({
         artist: metadata.artist,
         title: metadata.title,
-        mapsetTitle: mapset!.title,
+        mapsetTitle: mapset?.title ?? '',
         diffName,
       });
       const blob = new Blob([finalContent], { type: 'text/plain' });
@@ -760,6 +846,8 @@ export default function MapsetPage() {
                   ? (restoreDifficultyMutation.variables ?? null)
                   : null
               }
+              onDownload={handleDownloadPendingDifficulty}
+              downloadingId={downloadingPendingId}
             />
           </div>
         )}
@@ -892,6 +980,7 @@ export default function MapsetPage() {
                 onCreatePost={handleCreatePost}
                 onUpdatePost={handleUpdatePost}
                 onDeletePost={handleDeletePost}
+                onAssignSection={handleAssignSection}
                 onEditSection={(s) => {
                   setEditingSection(s);
                   setShowEditSection(true);

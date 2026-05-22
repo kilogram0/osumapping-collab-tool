@@ -60,6 +60,7 @@ const SECTION: DecryptedSection = {
   startTimeMs: 0,
   endTimeMs: 30000,
   sortOrder: 0,
+  assignedTo: null,
 };
 
 const POSTS: DecryptedPost[] = [

@@ -87,6 +87,19 @@ describe('OsuVersionHistory', () => {
     });
   });
 
+  it('shows uploader username when membersById is provided', () => {
+    const membersById = new Map([
+      ['user-1', { id: 'mem-1', user_id: 'user-1', username: 'peppy', role: 'mapper' as const, mapset_id: 'm1', kicked_at: null, created_at: '', updated_at: '', avatar_url: '', osu_id: 1 }],
+    ]);
+    renderComponent({ membersById });
+    expect(screen.getAllByText(/peppy/).length).toBeGreaterThan(0);
+  });
+
+  it('falls back to Unknown when uploader is not in membersById', () => {
+    renderComponent({ membersById: new Map() });
+    expect(screen.getAllByText(/Unknown/).length).toBeGreaterThan(0);
+  });
+
   it('shows base-created badge when version created a base', () => {
     mockBaseFetch.mockReturnValue({
       data: [{ id: 'b1', version: 1, is_active: false, source_section_version_id: 'v2', created_at: '' }],
