@@ -80,7 +80,7 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
       tabIndex={0}
       onClick={handleClick}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleClick()}
-      className={`bg-gray-800 hover:bg-gray-750 border rounded-lg p-4 cursor-pointer transition-colors flex items-center justify-between gap-4 ${
+      className={`bg-gray-800 hover:bg-gray-750 border rounded-lg p-4 cursor-pointer transition-colors flex items-center justify-between gap-4 h-24 ${
         isPendingDeletion ? 'border-red-500/60' : 'border-gray-700'
       }`}
       data-testid="mapset-card"

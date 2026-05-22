@@ -8,7 +8,7 @@ import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyTabs from '../components/DifficultyTabs';
 import EditSectionModal from '../components/EditSectionModal';
 import ImportBookmarksButton from '../components/ImportBookmarksButton';
-import LanguageSwitcher from '../components/LanguageSwitcher';
+import TopBar from '../components/TopBar';
 import ManageMembersModal from '../components/ManageMembersModal';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
@@ -560,9 +560,9 @@ export default function MapsetPage() {
   const selectedSection = decryptedSections.find((s) => s.id === selectedSectionId) ?? null;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-4 flex items-center justify-between gap-3">
+    <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20">
+      <TopBar
+        left={
           <button
             type="button"
             onClick={() => navigate('/dashboard')}
@@ -570,8 +570,9 @@ export default function MapsetPage() {
           >
             <span aria-hidden="true">←</span> {t('mapsetPage.back')}
           </button>
-          <LanguageSwitcher />
-        </div>
+        }
+      />
+      <div className="max-w-6xl mx-auto">
         {actualIsOwner && (emulatedRole || emulateGhost) && (
           <div
             role="status"

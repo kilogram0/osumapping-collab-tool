@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { Mapset } from '../api/endpoints';
 import CreateMapsetModal from '../components/CreateMapsetModal';
-import LanguageSwitcher from '../components/LanguageSwitcher';
 import MapsetCard from '../components/MapsetCard';
+import TopBar from '../components/TopBar';
 import PassphraseModal from '../components/PassphraseModal';
 import { useKickedMapsets, useMapsets, useQuota } from '../hooks/useMapset';
 
@@ -22,19 +22,17 @@ export default function DashboardPage() {
     quotaPct >= 90 ? 'bg-red-500' : quotaPct >= 70 ? 'bg-yellow-400' : 'bg-green-500';
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20">
+      <TopBar />
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold text-blue-400">{t('dashboard.title')}</h1>
-          <div className="flex items-center gap-3">
-            <LanguageSwitcher />
-            <button
-              onClick={() => setShowCreate(true)}
-              className="px-4 py-2 bg-pink-500 hover:bg-pink-600 rounded-lg font-semibold transition-colors"
-            >
-              {t('dashboard.createMapset')}
-            </button>
-          </div>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="px-4 py-2 bg-pink-500 hover:bg-pink-600 rounded-lg font-semibold transition-colors"
+          >
+            {t('dashboard.createMapset')}
+          </button>
         </div>
 
         {quota && (
