@@ -8,6 +8,7 @@ import CreatePostForm from '../components/CreatePostForm';
 import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyTabs from '../components/DifficultyTabs';
 import EditSectionModal from '../components/EditSectionModal';
+import SplitSectionModal from '../components/SplitSectionModal';
 import ImportBookmarksButton from '../components/ImportBookmarksButton';
 import TopBar from '../components/TopBar';
 import ManageMembersModal from '../components/ManageMembersModal';
@@ -24,6 +25,7 @@ import { useToast } from '../contexts/ToastContext';
 import {
   useAssignSection,
   useCreatePost,
+  useCreateSection,
   useDeleteDifficulty,
   useDeletePost,
   useDeleteSection,
@@ -31,9 +33,11 @@ import {
   useDifficulties,
   useRestoreDifficulty,
   useUpdatePost,
+  useUpdateSection,
 } from '../hooks/useDifficulty';
 import { useMapset, useMembers, useMyMembership } from '../hooks/useMapset';
-import { decrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad, sectionOsuVersionAad, difficultyBaseOsuVersionAad } from '../utils/crypto';
+import { decrypt, encrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad, sectionOsuVersionAad, difficultyBaseOsuVersionAad } from '../utils/crypto';
+import { isAxiosError } from 'axios';
 import { extractApiErrorMessage } from '../utils/errors';
 import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
@@ -41,8 +45,8 @@ import { downloadBaseOsu, downloadSectionOsu, fetchDifficultyDetail } from '../a
 import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { composeOsuFilename } from '../utils/osuFilename';
 import { mergeOsu } from '../utils/osuMerge';
-import { redistributeForDelete, hasSectionOsu } from '../utils/sectionRedistribute';
-import { findNextSection } from '../utils/sectionOrder';
+import { redistributeForDelete, redistributeForMerge, redistributeForShorten, hasSectionOsu } from '../utils/sectionRedistribute';
+import { findNextSection, sortSections } from '../utils/sectionOrder';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
@@ -79,6 +83,8 @@ export default function MapsetPage() {
   const updatePostMutation = useUpdatePost(selectedDifficultyId ?? '');
   const deletePostMutation = useDeletePost(selectedDifficultyId ?? '');
   const deleteSectionMutation = useDeleteSection(selectedDifficultyId ?? '');
+  const createSectionMutation = useCreateSection(selectedDifficultyId ?? '');
+  const updateSectionMutation = useUpdateSection(selectedDifficultyId ?? '');
   const assignSectionMutation = useAssignSection(selectedDifficultyId ?? '');
   const deleteDifficultyMutation = useDeleteDifficulty(mapsetId);
   const restoreDifficultyMutation = useRestoreDifficulty(mapsetId);
@@ -89,6 +95,10 @@ export default function MapsetPage() {
   const [showDeleteDifficultyConfirm, setShowDeleteDifficultyConfirm] = useState(false);
   const [showCreateSection, setShowCreateSection] = useState(false);
   const [showEditSection, setShowEditSection] = useState(false);
+  const [showSplitSection, setShowSplitSection] = useState(false);
+  const [splittingSection, setSplittingSection] = useState<DecryptedSection | null>(null);
+  const [splitSubmitting, setSplitSubmitting] = useState(false);
+  const [splitError, setSplitError] = useState<string | null>(null);
   const [showBaseHistory, setShowBaseHistory] = useState(false);
   const [showManageMembers, setShowManageMembers] = useState(false);
   const [ghostBannerDismissed, setGhostBannerDismissed] = useState(false);
@@ -553,6 +563,195 @@ export default function MapsetPage() {
     }
   }
 
+  async function handleMergeSection(section: DecryptedSection) {
+    if (!selectedDifficultyId) return;
+    const next = findNextSection(decryptedSections, section.id);
+    if (!next) return;
+
+    const key = await getKey(mapsetId);
+    if (!key) {
+      showToast(t('mapsetPage.toastMergeNeedsUnlock'), 'error');
+      return;
+    }
+
+    // Any assignment on `next` is silently lost when its row is deleted.
+    // The confirm dialog already names both sections so the owner is aware.
+    //
+    // Step order: redistribute → update end_time → delete.
+    // Alternative order (redistribute → delete → update) avoids the
+    // "overlapping sections" failure mode but risks a coverage gap: if update
+    // fails after delete, target's endTimeMs still points to the old boundary
+    // so the time range [oldEnd, next.endTime] becomes uncovered and target's
+    // moved hit objects in that range get clipped. The chosen order instead
+    // risks a surviving orphaned `next` row when delete fails — recoverable
+    // by a manual delete — while keeping the data intact in target.
+
+    // Capture non-null values now so the inner function can reference them
+    // safely — TypeScript control-flow narrowing doesn't carry into closures.
+    const diffId = selectedDifficultyId;
+    const nextId = next.id;
+
+    function finishMergeSuccess() {
+      queryClient.invalidateQueries({ queryKey: ['difficulty-detail', diffId] });
+      queryClient.invalidateQueries({ queryKey: ['section-osu-versions', diffId, section.id] });
+      setSelectedSectionId((current) => (current === nextId ? section.id : current));
+      showToast(t('mapsetPage.toastSectionMerged'), 'success');
+    }
+
+    let mergeStep: 'redistribute' | 'update' | 'delete' = 'redistribute';
+    try {
+      await redistributeForMerge({
+        difficultyId: diffId,
+        mapsetId,
+        targetSectionId: section.id,
+        sourceSectionId: nextId,
+        key,
+      });
+
+      mergeStep = 'update';
+      const encryptedEnd = await encrypt(
+        key,
+        JSON.stringify({ v: 0, ms: next.endTimeMs }),
+        sectionFieldAad(section.id, mapsetId),
+      );
+      await updateSectionMutation.mutateAsync({
+        sectionId: section.id,
+        payload: { encrypted_end_time_ms: encryptedEnd },
+      });
+
+      mergeStep = 'delete';
+      await deleteSectionMutation.mutateAsync(nextId);
+
+      finishMergeSuccess();
+    } catch (err) {
+      if (mergeStep !== 'redistribute') {
+        // If the only failure was deleting `next` and it returned 404, the
+        // section was already gone (concurrent delete). The redistribute and
+        // end-time update both succeeded, so the state is consistent — treat
+        // it as success rather than firing the misleading partial-failure toast.
+        if (mergeStep === 'delete' && isAxiosError(err) && err.response?.status === 404) {
+          finishMergeSuccess();
+        } else {
+          queryClient.invalidateQueries({ queryKey: ['difficulty-detail', diffId] });
+          showToast(t('mapsetPage.toastMergePartialFailure'), 'error');
+        }
+      } else {
+        showToast(extractApiErrorMessage(err, t('mapsetPage.toastFailedMergeSection')), 'error');
+      }
+    }
+  }
+
+  function handleOpenSplitSection(s: DecryptedSection) {
+    setSplittingSection(s);
+    setSplitError(null);
+    setShowSplitSection(true);
+  }
+
+  async function handleSplitSection(
+    section: DecryptedSection,
+    { newSectionName, splitTimeMs }: { newSectionName: string; splitTimeMs: number },
+  ) {
+    if (!selectedDifficultyId) return;
+    setSplitSubmitting(true);
+    setSplitError(null);
+
+    // Step order: create → redistribute → update.
+    //
+    // EditSectionModal uses the reverse (update first, then redistribute)
+    // because for a pure shorten, "redistribute first then update fails"
+    // would leave moved HOs in next's blob below next's eventual startTimeMs
+    // — the clipper drops them with no retry signal (see EditSectionModal's
+    // long comment). That logic does NOT apply to split: there's a `create`
+    // step in between, and the new section already covers the moved range
+    // by construction. The current order's worst failure is a visible
+    // overlap with intact data; the reversed order's worst failure is
+    // silent data loss from the merge clipper. Don't flip without an
+    // atomic backend "create row + first .osu version" endpoint — see
+    // memory: project_split_atomic_create_followup.
+    let splitStep: 'create' | 'redistribute' | 'update' = 'create';
+    try {
+      const key = await getKey(mapsetId);
+      if (!key) {
+        setSplitError(t('splitSectionModal.errorKeyMissing'));
+        setSplitSubmitting(false);
+        return;
+      }
+
+      const newId = crypto.randomUUID();
+      const next = findNextSection(decryptedSections, section.id);
+      // JS doubles give ~53 bits of mantissa; repeated splits between the
+      // same two sections halve the gap each time. After ~50 splits
+      // (section.sortOrder + next.sortOrder) / 2 === section.sortOrder and
+      // the id lexicographic tiebreaker silently takes over. Acceptable in
+      // practice; a sort-order renumber would be the principled fix if it
+      // ever becomes an issue.
+      const newSortOrder = next
+        ? (section.sortOrder + next.sortOrder) / 2
+        : section.sortOrder + 1;
+
+      const [encName, encStart, encEnd, encSort] = await Promise.all([
+        encrypt(key, newSectionName, sectionFieldAad(newId, mapsetId)),
+        encrypt(key, JSON.stringify({ v: 0, ms: splitTimeMs }), sectionFieldAad(newId, mapsetId)),
+        encrypt(key, JSON.stringify({ v: 0, ms: section.endTimeMs }), sectionFieldAad(newId, mapsetId)),
+        encrypt(key, JSON.stringify({ v: 0, ms: newSortOrder }), sectionFieldAad(newId, mapsetId)),
+      ]);
+
+      await createSectionMutation.mutateAsync({
+        id: newId,
+        encrypted_name: encName,
+        encrypted_start_time_ms: encStart,
+        encrypted_end_time_ms: encEnd,
+        encrypted_sort_order: encSort,
+      });
+
+      splitStep = 'redistribute';
+      await redistributeForShorten({
+        difficultyId: selectedDifficultyId,
+        mapsetId,
+        sourceSectionId: section.id,
+        nextSectionId: newId,
+        newEndMs: splitTimeMs,
+        key,
+      });
+
+      splitStep = 'update';
+      const encryptedEnd = await encrypt(
+        key,
+        JSON.stringify({ v: 0, ms: splitTimeMs }),
+        sectionFieldAad(section.id, mapsetId),
+      );
+      await updateSectionMutation.mutateAsync({
+        sectionId: section.id,
+        payload: { encrypted_end_time_ms: encryptedEnd },
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['section-osu-versions', selectedDifficultyId, section.id] });
+      queryClient.invalidateQueries({ queryKey: ['section-osu-versions', selectedDifficultyId, newId] });
+
+      setShowSplitSection(false);
+      setSplittingSection(null);
+      showToast(t('mapsetPage.toastSectionSplit'), 'success');
+    } catch (err) {
+      if (splitStep !== 'create') {
+        // The new section row was already created server-side (step 1 succeeded).
+        // Keeping the modal open risks a second submit creating another orphaned
+        // row. Close it, invalidate the section list so the orphan is visible
+        // after the prompted refresh, and surface the inconsistency via toast.
+        // What the user will see: an extra empty section (redistribute failure)
+        // or two sections with overlapping ranges (update failure) — both are
+        // recoverable by deleting the stray section or re-editing end times.
+        queryClient.invalidateQueries({ queryKey: ['difficulty-detail', selectedDifficultyId!] });
+        setShowSplitSection(false);
+        setSplittingSection(null);
+        showToast(t('mapsetPage.toastSplitPartialFailure'), 'error');
+      } else {
+        setSplitError(extractApiErrorMessage(err, t('mapsetPage.toastFailedSplitSection')));
+      }
+    } finally {
+      setSplitSubmitting(false);
+    }
+  }
+
   async function handleAssignSection(sectionId: string, userId: string | null) {
     try {
       await assignSectionMutation.mutateAsync({ sectionId, userId });
@@ -997,11 +1196,10 @@ export default function MapsetPage() {
               <SectionDetailPanel
                 section={selectedSection}
                 isLastSection={(() => {
-                  const sorted = [...decryptedSections].sort(
-                    (a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id),
-                  );
+                  const sorted = sortSections(decryptedSections);
                   return sorted[sorted.length - 1]?.id === selectedSection.id;
                 })()}
+                nextSection={findNextSection(decryptedSections, selectedSection.id)}
                 posts={decryptedPosts}
                 mapsetId={mapsetId}
                 mapsetTitle={mapset.title}
@@ -1020,6 +1218,8 @@ export default function MapsetPage() {
                   setShowEditSection(true);
                 }}
                 onDeleteSection={handleDeleteSection}
+                onMergeSection={isOwner ? handleMergeSection : undefined}
+                onSplitSection={isOwner ? handleOpenSplitSection : undefined}
               />
             )}
 
@@ -1123,6 +1323,20 @@ export default function MapsetPage() {
         />
         );
       })()}
+
+      {showSplitSection && splittingSection && (
+        <SplitSectionModal
+          section={splittingSection}
+          onSubmit={(params) => handleSplitSection(splittingSection, params)}
+          onCancel={() => {
+            setShowSplitSection(false);
+            setSplittingSection(null);
+            setSplitError(null);
+          }}
+          submitting={splitSubmitting}
+          externalError={splitError}
+        />
+      )}
 
       {showBaseHistory && selectedDifficultyId && (
         <BaseVersionHistory

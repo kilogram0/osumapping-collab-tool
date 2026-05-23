@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import MapsetPage from './MapsetPage';
 import { ToastProvider } from '../contexts/ToastContext';
 import ToastContainer from '../components/ToastContainer';
@@ -182,7 +182,20 @@ const mockUpdatePost = vi.fn().mockResolvedValue({});
 const mockDeletePost = vi.fn().mockResolvedValue({});
 const mockDeleteDifficulty = vi.fn().mockResolvedValue({});
 const mockRestoreDifficulty = vi.fn().mockResolvedValue({});
+const mockDeleteSection = vi.fn().mockResolvedValue({});
+const mockUpdateSection = vi.fn().mockResolvedValue({});
+const mockCreateSection = vi.fn().mockResolvedValue({});
 const mockUseDifficulties = vi.fn(() => ({ data: MOCK_DIFFICULTIES, isLoading: false }));
+
+const mockRedistributeForMerge = vi.fn().mockResolvedValue({ movedCount: 0 });
+const mockRedistributeForShorten = vi.fn().mockResolvedValue({ movedCount: 0 });
+
+vi.mock('../utils/sectionRedistribute', () => ({
+  redistributeForMerge: (...args: unknown[]) => mockRedistributeForMerge(...args),
+  redistributeForShorten: (...args: unknown[]) => mockRedistributeForShorten(...args),
+  redistributeForDelete: vi.fn().mockResolvedValue({ movedCount: 0 }),
+  hasSectionOsu: vi.fn().mockResolvedValue(false),
+}));
 
 vi.mock('../hooks/useMapset', () => ({
   useMapset: () => ({
@@ -214,10 +227,10 @@ vi.mock('../hooks/useDifficulty', () => ({
     mutateAsync: vi.fn(),
   }),
   useCreateSection: () => ({
-    mutateAsync: vi.fn(),
+    mutateAsync: mockCreateSection,
   }),
   useUpdateSection: () => ({
-    mutateAsync: vi.fn(),
+    mutateAsync: mockUpdateSection,
   }),
   useCreatePost: () => ({
     mutateAsync: mockCreatePost,
@@ -229,7 +242,7 @@ vi.mock('../hooks/useDifficulty', () => ({
     mutateAsync: mockDeletePost,
   }),
   useDeleteSection: () => ({
-    mutateAsync: vi.fn(),
+    mutateAsync: mockDeleteSection,
   }),
   useAssignSection: () => ({
     mutateAsync: vi.fn(),
@@ -273,6 +286,16 @@ describe('MapsetPage', () => {
     mockDeletePost.mockClear();
     mockDeleteDifficulty.mockClear();
     mockRestoreDifficulty.mockClear();
+    mockDeleteSection.mockReset();
+    mockDeleteSection.mockResolvedValue({});
+    mockUpdateSection.mockReset();
+    mockUpdateSection.mockResolvedValue({});
+    mockCreateSection.mockReset();
+    mockCreateSection.mockResolvedValue({});
+    mockRedistributeForMerge.mockReset();
+    mockRedistributeForMerge.mockResolvedValue({ movedCount: 0 });
+    mockRedistributeForShorten.mockReset();
+    mockRedistributeForShorten.mockResolvedValue({ movedCount: 0 });
     mockUseDifficulties.mockReturnValue({ data: MOCK_DIFFICULTIES, isLoading: false });
     mockUseMyMembership.mockReturnValue({
       data: {
@@ -285,6 +308,10 @@ describe('MapsetPage', () => {
       },
       isLoading: false,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('navigates back to dashboard when back button is clicked', async () => {
@@ -870,6 +897,118 @@ describe('MapsetPage', () => {
           screen.getByText(/Pending-deletion limit reached/i),
         ).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Merge section', () => {
+    async function openSectionPanel() {
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument());
+      await user.click(screen.getByTestId('timeline-section-s1'));
+      await waitFor(() => expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument());
+      return user;
+    }
+
+    it('shows success toast when delete 404s (next already gone concurrently)', async () => {
+      mockDeleteSection.mockRejectedValueOnce(
+        Object.assign(new Error('Not found'), {
+          isAxiosError: true,
+          response: { status: 404 },
+        }),
+      );
+      vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
+
+      renderPage();
+      const user = await openSectionPanel();
+
+      await user.click(screen.getByRole('button', { name: /Merge with next/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Sections merged/i)).toBeInTheDocument();
+      });
+    });
+
+    it('shows partial-failure toast (not success) when update step fails', async () => {
+      mockUpdateSection.mockRejectedValueOnce(new Error('Server error'));
+      vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
+
+      renderPage();
+      const user = await openSectionPanel();
+
+      await user.click(screen.getByRole('button', { name: /Merge with next/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/may be inconsistent/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/Sections merged/i)).not.toBeInTheDocument();
+      // delete must not run when update fails — step-order contract
+      expect(mockDeleteSection).not.toHaveBeenCalled();
+    });
+
+    it('shows err.message toast (not partial-failure) when redistribute step fails', async () => {
+      mockRedistributeForMerge.mockRejectedValueOnce(new Error('Redistribute failed'));
+      vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
+
+      renderPage();
+      const user = await openSectionPanel();
+
+      await user.click(screen.getByRole('button', { name: /Merge with next/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Redistribute failed/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/may be inconsistent/i)).not.toBeInTheDocument();
+      // no server writes landed, so update and delete must not have been called
+      expect(mockUpdateSection).not.toHaveBeenCalled();
+      expect(mockDeleteSection).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Split section', () => {
+    async function openSplitModal() {
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument());
+      await user.click(screen.getByTestId('timeline-section-s1'));
+      await waitFor(() => expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: /^Split$/i }));
+      await waitFor(() => expect(screen.getByRole('dialog', { name: /Split Section/i })).toBeInTheDocument());
+      return user;
+    }
+
+    it('closes modal and shows partial-failure toast when redistribute step fails', async () => {
+      mockRedistributeForShorten.mockRejectedValueOnce(new Error('Network error'));
+
+      renderPage();
+      const user = await openSplitModal();
+      const dialog = screen.getByRole('dialog', { name: /Split Section/i });
+
+      await user.type(within(dialog).getByLabelText(/Split Time/i), '00:15:000');
+      await user.type(within(dialog).getByLabelText(/Name for the Second Section/i), 'Kiai');
+      await user.click(within(dialog).getByRole('button', { name: /^Split$/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /Split Section/i })).not.toBeInTheDocument();
+      });
+      expect(screen.getByText(/may be inconsistent/i)).toBeInTheDocument();
+    });
+
+    it('keeps modal open with inline error when section create step fails', async () => {
+      mockCreateSection.mockRejectedValueOnce(new Error('Create failed'));
+
+      renderPage();
+      const user = await openSplitModal();
+      const dialog = screen.getByRole('dialog', { name: /Split Section/i });
+
+      await user.type(within(dialog).getByLabelText(/Split Time/i), '00:15:000');
+      await user.type(within(dialog).getByLabelText(/Name for the Second Section/i), 'Kiai');
+      await user.click(within(dialog).getByRole('button', { name: /^Split$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Split Section/i })).toBeInTheDocument();
+      });
+      expect(screen.getByText(/Create failed/i)).toBeInTheDocument();
+      // redistribute must not run when create fails — step-order contract
+      expect(mockRedistributeForShorten).not.toHaveBeenCalled();
     });
   });
 });

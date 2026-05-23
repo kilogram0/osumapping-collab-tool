@@ -25,6 +25,8 @@ import {
 import {
   parseSections,
   parseHitObjects,
+  parseTimingPoints,
+  isNegativeTimingPoint,
   stringifySections,
 } from './osuParser';
 
@@ -32,7 +34,8 @@ import {
  * Partition a section's hit objects at `cutoffMs`: objects strictly before
  * the cutoff are kept (returned in `remainingContent`), objects at or after
  * the cutoff are returned as raw lines in `movedRaws`. Headers and timing
- * points are untouched.
+ * points are untouched — partitioning of negative (inherited / SV) timing
+ * points is done separately by `splitNegativeTimingPointsAtTime`.
  */
 export function splitSectionAtTime(
   content: string,
@@ -50,6 +53,39 @@ export function splitSectionAtTime(
   }
   ho.lines = kept.map((o) => o.raw);
   return { remainingContent: stringifySections(sections), movedRaws: moved };
+}
+
+/**
+ * Partition a section's negative (inherited / SV-change) timing points at
+ * `cutoffMs`: negatives strictly before the cutoff are kept (in
+ * `remainingContent`), negatives at or after the cutoff are returned as raw
+ * lines in `movedRaws`. Positive (uninherited / BPM) timing points are
+ * always kept — those belong to the base, not the section.
+ *
+ * Why this exists: like hit objects, negative timing points are scoped to a
+ * section's [startTimeMs, endTimeMs) range by the merge engine. Shortening
+ * or deleting a section without migrating them is silent data loss (see
+ * osuMerge.ts §2: "Section timing points (all, positive and negative)").
+ */
+export function splitNegativeTimingPointsAtTime(
+  content: string,
+  cutoffMs: number,
+): { remainingContent: string; movedRaws: string[] } {
+  const sections = parseSections(content);
+  const tp = sections.find((s) => s.name === 'TimingPoints');
+  if (!tp) return { remainingContent: content, movedRaws: [] };
+  const parsed = parseTimingPoints(tp.lines);
+  const keptRaws: string[] = [];
+  const movedRaws: string[] = [];
+  for (const point of parsed) {
+    if (isNegativeTimingPoint(point) && point.time >= cutoffMs) {
+      movedRaws.push(point.raw);
+    } else {
+      keptRaws.push(point.raw);
+    }
+  }
+  tp.lines = keptRaws;
+  return { remainingContent: stringifySections(sections), movedRaws };
 }
 
 /**
@@ -81,6 +117,40 @@ export function mergeHitObjectsInto(content: string, addedRaws: string[]): strin
   }
   deduped.sort((a, b) => a.time - b.time);
   ho.lines = deduped.map((o) => o.raw);
+  return stringifySections(sections);
+}
+
+/**
+ * Insert the supplied raw timing-point lines into the [TimingPoints] block
+ * of `content` and re-sort by time. Existing timing points are preserved
+ * verbatim. A missing [TimingPoints] block is created. Any non-negative
+ * (uninherited / BPM) lines in `addedRaws` are silently dropped — positives
+ * belong to the base, not the section (see osuMerge.ts §2).
+ *
+ * Dedupes by (time, trimmed-raw) for the same idempotency reason as
+ * `mergeHitObjectsInto`: a partially-succeeded redistribute retry must not
+ * duplicate negatives in the destination.
+ */
+export function mergeNegativeTimingPointsInto(content: string, addedRaws: string[]): string {
+  const addedNegatives = parseTimingPoints(addedRaws).filter(isNegativeTimingPoint);
+  if (addedNegatives.length === 0) return content;
+  const sections = parseSections(content);
+  let tp = sections.find((s) => s.name === 'TimingPoints');
+  if (!tp) {
+    tp = { name: 'TimingPoints', lines: [] };
+    sections.push(tp);
+  }
+  const combined = [...parseTimingPoints(tp.lines), ...addedNegatives];
+  const seen = new Set<string>();
+  const deduped: typeof combined = [];
+  for (const point of combined) {
+    const key = `${point.time}|${point.raw.trim()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(point);
+  }
+  deduped.sort((a, b) => a.time - b.time);
+  tp.lines = deduped.map((p) => p.raw);
   return stringifySections(sections);
 }
 
@@ -142,9 +212,11 @@ async function uploadNewSectionVersion(
 }
 
 /**
- * Move hit objects past `newEndMs` from the shortened section into the next
- * section's content. No-op when neither section has an active .osu, when
- * there are no objects past the cutoff, or when the source has no .osu yet.
+ * Move hit objects and negative timing points past `newEndMs` from the
+ * shortened section into the next section's content. No-op when the source
+ * has no active .osu, or when nothing (HOs or negative TPs) sits past the
+ * cutoff. The next section may have no .osu yet — treated as an empty
+ * container built from the source's headers.
  */
 export async function redistributeForShorten(params: {
   difficultyId: string;
@@ -159,30 +231,32 @@ export async function redistributeForShorten(params: {
   const sourceContent = await fetchActiveSectionContent(difficultyId, sourceSectionId, mapsetId, key);
   if (sourceContent === null) return { movedCount: 0 };
 
-  const { remainingContent, movedRaws } = splitSectionAtTime(sourceContent, newEndMs);
-  if (movedRaws.length === 0) return { movedCount: 0 };
+  const { remainingContent: afterHo, movedRaws: hoMoved } = splitSectionAtTime(sourceContent, newEndMs);
+  const { remainingContent: sourceRemaining, movedRaws: tpMoved } = splitNegativeTimingPointsAtTime(afterHo, newEndMs);
+  if (hoMoved.length === 0 && tpMoved.length === 0) return { movedCount: 0 };
 
   // The next section may have no .osu yet; treat that as an empty container.
   const nextContent = await fetchActiveSectionContent(difficultyId, nextSectionId, mapsetId, key);
-  const nextUpdated = mergeHitObjectsInto(
-    nextContent ?? buildEmptySectionShell(sourceContent),
-    movedRaws,
-  );
+  let nextUpdated = nextContent ?? buildEmptySectionShell(sourceContent);
+  nextUpdated = mergeHitObjectsInto(nextUpdated, hoMoved);
+  nextUpdated = mergeNegativeTimingPointsInto(nextUpdated, tpMoved);
 
   // Parallel uploads: the two writes are independent. If one fails the
-  // other may still land, but mergeHitObjectsInto is dedupe-idempotent and
-  // splitSectionAtTime is naturally idempotent (objects past the cutoff
-  // either are or aren't there), so a retry recovers without double-moving.
+  // other may still land, but mergeHitObjectsInto / mergeNegativeTimingPointsInto
+  // are dedupe-idempotent and splitSectionAtTime / splitNegativeTimingPointsAtTime
+  // are naturally idempotent (items past the cutoff either are or aren't there),
+  // so a retry recovers without double-moving.
   await Promise.all([
-    uploadNewSectionVersion(difficultyId, sourceSectionId, mapsetId, key, remainingContent),
+    uploadNewSectionVersion(difficultyId, sourceSectionId, mapsetId, key, sourceRemaining),
     uploadNewSectionVersion(difficultyId, nextSectionId, mapsetId, key, nextUpdated),
   ]);
-  return { movedCount: movedRaws.length };
+  return { movedCount: hoMoved.length };
 }
 
 /**
- * Move all hit objects from the deleted section into the next section's
- * content. No-op when neither section has an active .osu.
+ * Move all hit objects and negative timing points from the deleted section
+ * into the next section's content. No-op when the source has no active
+ * .osu, or has neither hit objects nor negative timing points to migrate.
  */
 export async function redistributeForDelete(params: {
   difficultyId: string;
@@ -198,16 +272,55 @@ export async function redistributeForDelete(params: {
 
   const sourceSections = parseSections(sourceContent);
   const sourceHo = sourceSections.find((s) => s.name === 'HitObjects');
-  const movedRaws = sourceHo ? parseHitObjects(sourceHo.lines).map((o) => o.raw) : [];
-  if (movedRaws.length === 0) return { movedCount: 0 };
+  const hoMoved = sourceHo ? parseHitObjects(sourceHo.lines).map((o) => o.raw) : [];
+  const sourceTp = sourceSections.find((s) => s.name === 'TimingPoints');
+  const tpMoved = sourceTp
+    ? parseTimingPoints(sourceTp.lines).filter(isNegativeTimingPoint).map((p) => p.raw)
+    : [];
+  if (hoMoved.length === 0 && tpMoved.length === 0) return { movedCount: 0 };
 
   const nextContent = await fetchActiveSectionContent(difficultyId, nextSectionId, mapsetId, key);
-  const nextUpdated = mergeHitObjectsInto(
-    nextContent ?? buildEmptySectionShell(sourceContent),
-    movedRaws,
-  );
+  let nextUpdated = nextContent ?? buildEmptySectionShell(sourceContent);
+  nextUpdated = mergeHitObjectsInto(nextUpdated, hoMoved);
+  nextUpdated = mergeNegativeTimingPointsInto(nextUpdated, tpMoved);
   await uploadNewSectionVersion(difficultyId, nextSectionId, mapsetId, key, nextUpdated);
-  return { movedCount: movedRaws.length };
+  return { movedCount: hoMoved.length };
+}
+
+/**
+ * Merge all hit objects and negative timing points from `sourceSectionId`
+ * (the section being absorbed) into `targetSectionId` (the section being
+ * kept). No-op when the source has no active .osu, or has neither hit
+ * objects nor negative timing points to migrate. If the target has no .osu
+ * yet, an empty shell is created from the source's headers before merging.
+ */
+export async function redistributeForMerge(params: {
+  difficultyId: string;
+  mapsetId: string;
+  targetSectionId: string;
+  sourceSectionId: string;
+  key: CryptoKey;
+}): Promise<{ movedCount: number }> {
+  const { difficultyId, mapsetId, targetSectionId, sourceSectionId, key } = params;
+
+  const sourceContent = await fetchActiveSectionContent(difficultyId, sourceSectionId, mapsetId, key);
+  if (sourceContent === null) return { movedCount: 0 };
+
+  const sourceSections = parseSections(sourceContent);
+  const sourceHo = sourceSections.find((s) => s.name === 'HitObjects');
+  const hoMoved = sourceHo ? parseHitObjects(sourceHo.lines).map((o) => o.raw) : [];
+  const sourceTp = sourceSections.find((s) => s.name === 'TimingPoints');
+  const tpMoved = sourceTp
+    ? parseTimingPoints(sourceTp.lines).filter(isNegativeTimingPoint).map((p) => p.raw)
+    : [];
+  if (hoMoved.length === 0 && tpMoved.length === 0) return { movedCount: 0 };
+
+  const targetContent = await fetchActiveSectionContent(difficultyId, targetSectionId, mapsetId, key);
+  let targetUpdated = targetContent ?? buildEmptySectionShell(sourceContent);
+  targetUpdated = mergeHitObjectsInto(targetUpdated, hoMoved);
+  targetUpdated = mergeNegativeTimingPointsInto(targetUpdated, tpMoved);
+  await uploadNewSectionVersion(difficultyId, targetSectionId, mapsetId, key, targetUpdated);
+  return { movedCount: hoMoved.length };
 }
 
 /**

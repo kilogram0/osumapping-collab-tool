@@ -45,6 +45,10 @@ interface SectionDetailPanelProps {
   onAssignSection?: (sectionId: string, userId: string | null) => void | Promise<void>;
   onEditSection?: (section: DecryptedSection) => void;
   onDeleteSection?: (section: DecryptedSection) => void | Promise<void>;
+  /** The section that immediately follows this one in sort order, if any. */
+  nextSection?: DecryptedSection | null;
+  onMergeSection?: (section: DecryptedSection) => void | Promise<void>;
+  onSplitSection?: (section: DecryptedSection) => void;
 }
 
 function formatTime(ms: number): string {
@@ -80,6 +84,9 @@ export default function SectionDetailPanel({
   onAssignSection,
   onEditSection,
   onDeleteSection,
+  nextSection,
+  onMergeSection,
+  onSplitSection,
 }: SectionDetailPanelProps) {
   const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
@@ -340,6 +347,29 @@ export default function SectionDetailPanel({
                 </button>
               )}
             </>
+          )}
+          {isOwner && onSplitSection && (
+            <button
+              type="button"
+              onClick={() => onSplitSection(section)}
+              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+            >
+              {t('sectionDetail.split')}
+            </button>
+          )}
+          {isOwner && nextSection && onMergeSection && (
+            <button
+              type="button"
+              onClick={() => {
+                const ok = window.confirm(
+                  t('sectionDetail.mergeConfirm', { name: section.name, nextName: nextSection.name }),
+                );
+                if (ok) void onMergeSection(section);
+              }}
+              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+            >
+              {t('sectionDetail.merge')}
+            </button>
           )}
           {isOwner && onDeleteSection && (
             <button
