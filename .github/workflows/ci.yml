@@ -31,7 +31,7 @@ jobs:
           done
 
       - name: Create test database
-        run: docker compose exec db psql -U testuser -c "CREATE DATABASE modding_test;"
+        run: docker compose exec db psql -U testuser -d postgres -c "CREATE DATABASE modding_test;"
 
       - name: Run backend migrations against test database
         run: |
