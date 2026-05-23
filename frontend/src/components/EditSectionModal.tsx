@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, sectionFieldAad } from '../utils/crypto';
 import { useUpdateSection } from '../hooks/useDifficulty';
 import { formatTimestamp, parseTimestampString } from '../utils/extractTimestamp';
+import { redistributeForShorten } from '../utils/sectionRedistribute';
 
 interface EditSectionModalProps {
   difficultyId: string;
@@ -12,6 +14,11 @@ interface EditSectionModalProps {
   initialName: string;
   initialStartTimeMs: number;
   initialEndTimeMs: number;
+  /** ID of the section that follows this one in sortOrder, if any. When the
+   *  edit shortens this section, any hit objects past the new end time are
+   *  migrated into the next section so they aren't silently dropped by the
+   *  merge clipper (see osuMerge §3). */
+  nextSectionId?: string | null;
   /** End time of the section that follows this one, if any. Used to keep the
    *  next section at least MIN_SECTION_MS long. */
   nextSectionEndTimeMs?: number | null;
@@ -30,6 +37,7 @@ export default function EditSectionModal({
   initialName,
   initialStartTimeMs,
   initialEndTimeMs,
+  nextSectionId,
   nextSectionEndTimeMs,
   songLengthMs,
   onSuccess,
@@ -38,6 +46,7 @@ export default function EditSectionModal({
   const { t } = useTranslation();
   const { getKey } = useEncryption();
   const updateSection = useUpdateSection(difficultyId);
+  const queryClient = useQueryClient();
 
   const [name, setName] = useState(initialName);
   const [endTimeInput, setEndTimeInput] = useState(formatTimestamp(initialEndTimeMs));
@@ -103,7 +112,39 @@ export default function EditSectionModal({
         sectionFieldAad(sectionId, mapsetId),
       );
 
+      // updateSection.mutateAsync calls PATCH /sections/:id, which is a
+      // plain mutable-row update — no version rows are created. Retrying
+      // with the same payload is safe and does not inflate history.
+      //
+      // Order: persist the new end time first, redistribute second. We have
+      // no server-side transaction across both, so something has to give:
+      //   - update first, then redistribute: if redistribute fails on retry,
+      //     splitSectionAtTime still sees objects past newEndMs in the
+      //     source blob and re-uploads idempotently (mergeHitObjectsInto
+      //     dedupes). The merge clipper preserves the appearance of the
+      //     stray objects being in the next section's range until the retry
+      //     lands, but no data is lost in storage.
+      //   - redistribute first, then update: if update fails, the source's
+      //     trailing objects have already moved into next's blob below
+      //     next's eventual startTimeMs. The clipper will drop them and the
+      //     user has no signal to retry, since splitSectionAtTime now finds
+      //     nothing to move. That's silent data loss after a transient
+      //     failure — worse than the above.
       await updateSection.mutateAsync({ sectionId, payload });
+
+      if (nextSectionId && endMs < initialEndTimeMs) {
+        await redistributeForShorten({
+          difficultyId,
+          mapsetId,
+          sourceSectionId: sectionId,
+          nextSectionId,
+          newEndMs: endMs,
+          key,
+        });
+        queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+        queryClient.invalidateQueries({ queryKey: ['section-osu-versions', difficultyId, sectionId] });
+        queryClient.invalidateQueries({ queryKey: ['section-osu-versions', difficultyId, nextSectionId] });
+      }
 
       onSuccess();
     } catch (err) {

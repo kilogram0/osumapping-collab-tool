@@ -17,6 +17,16 @@ export interface SectionInput {
   content: string;
   sortOrder: number;
   sectionId: string;
+  /** Inclusive lower bound (ms) for this section's hit objects. When omitted,
+   *  hit objects are not filtered by time — the section's full hit-object list
+   *  is included. */
+  startTimeMs?: number;
+  /** Upper bound (ms) for this section's hit objects. By default the bound is
+   *  exclusive so adjacent sections don't double-count a boundary object; set
+   *  `endInclusive: true` on the final section so an object exactly at the
+   *  song end is preserved. */
+  endTimeMs?: number;
+  endInclusive?: boolean;
 }
 
 interface TimingEntry {
@@ -106,14 +116,24 @@ export function mergeOsu(baseContent: string, sections: SectionInput[]): string 
   });
 
   // --- 3. Collect hit objects from every section ---
+  // Clip each section's hit objects to its declared [startTimeMs, endTimeMs)
+  // range when those bounds are provided. Sections can carry stray objects
+  // outside their range — e.g. when a previously-longer section was shortened
+  // — and we must not emit those a second time from the adjacent section that
+  // now owns that time range.
   const allHitObjects: { time: number; raw: string }[] = [];
   for (const section of sections) {
     const parsed = parseSections(section.content);
     const hoSection = parsed.find((s) => s.name === 'HitObjects');
-    if (hoSection) {
-      for (const obj of parseHitObjects(hoSection.lines)) {
-        allHitObjects.push({ time: obj.time, raw: obj.raw });
+    if (!hoSection) continue;
+    const lo = section.startTimeMs;
+    const hi = section.endTimeMs;
+    for (const obj of parseHitObjects(hoSection.lines)) {
+      if (lo !== undefined && obj.time < lo) continue;
+      if (hi !== undefined) {
+        if (section.endInclusive ? obj.time > hi : obj.time >= hi) continue;
       }
+      allHitObjects.push({ time: obj.time, raw: obj.raw });
     }
   }
 

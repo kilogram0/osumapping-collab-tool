@@ -345,6 +345,68 @@ Combo1 : 255,0,0
     expect(lines).toHaveLength(2);
   });
 
+  it('clips a section to [startTimeMs, endTimeMs) when bounds are provided', () => {
+    // Models the user's bug: section originally covered the song; was
+    // shortened to end at 1000ms so a new section could be added past that.
+    // The blob still has its original full hit-object list, but only objects
+    // before 1000ms should now be emitted from this section.
+    const section = makeSection({
+      hitObjects: [
+        '100,100,500,1,0',
+        '100,100,1000,1,0',
+        '100,100,1500,1,0',
+        '100,100,2000,1,0',
+      ],
+    });
+    const merged = mergeOsu(makeBase(), [
+      {
+        content: section,
+        sortOrder: 0,
+        sectionId: 's1',
+        startTimeMs: 0,
+        endTimeMs: 1000,
+      },
+    ]);
+    const hoIdx = merged.indexOf('[HitObjects]');
+    const lines = merged.slice(hoIdx).split('\n').slice(1).filter((l) => l.trim() !== '');
+    expect(lines).toEqual(['100,100,500,1,0']);
+  });
+
+  it('does not double-count boundary objects across adjacent clipped sections', () => {
+    // s1 spans [0, 1000), s2 spans [1000, 2000]. The object at exactly 1000
+    // belongs to s2 only — s1 has it as a stray remnant from a pre-shorten
+    // version. Without clipping it would appear twice in the merged output.
+    const s1 = makeSection({
+      hitObjects: ['100,100,500,1,0', '100,100,1000,1,0'],
+    });
+    const s2 = makeSection({
+      hitObjects: ['100,100,1000,1,0', '100,100,1500,1,0'],
+    });
+    const merged = mergeOsu(makeBase(), [
+      { content: s1, sortOrder: 0, sectionId: 's1', startTimeMs: 0, endTimeMs: 1000 },
+      { content: s2, sortOrder: 1, sectionId: 's2', startTimeMs: 1000, endTimeMs: 2000, endInclusive: true },
+    ]);
+    const hoIdx = merged.indexOf('[HitObjects]');
+    const lines = merged.slice(hoIdx).split('\n').slice(1).filter((l) => l.trim() !== '');
+    expect(lines).toEqual([
+      '100,100,500,1,0',
+      '100,100,1000,1,0',
+      '100,100,1500,1,0',
+    ]);
+  });
+
+  it('keeps the final boundary object when endInclusive is set', () => {
+    const s = makeSection({
+      hitObjects: ['100,100,1000,1,0', '100,100,2000,1,0'],
+    });
+    const merged = mergeOsu(makeBase(), [
+      { content: s, sortOrder: 0, sectionId: 's', startTimeMs: 0, endTimeMs: 2000, endInclusive: true },
+    ]);
+    const hoIdx = merged.indexOf('[HitObjects]');
+    const lines = merged.slice(hoIdx).split('\n').slice(1).filter((l) => l.trim() !== '');
+    expect(lines).toEqual(['100,100,1000,1,0', '100,100,2000,1,0']);
+  });
+
   it('handles real-world .osu with simultaneous positive+negative timing points', () => {
     // This mirrors the user's provided file where 83371 has both:
     // 83371,506.7749,4,1,2,66,1,8  (positive)

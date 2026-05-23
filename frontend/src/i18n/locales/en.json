@@ -420,6 +420,8 @@
     "toastFailedUpdatePost": "Failed to update post.",
     "toastFailedDeletePost": "Failed to delete post.",
     "toastFailedDeleteSection": "Failed to delete section.",
+    "toastCannotDeleteLastSection": "Cannot delete the final section — shorten it instead so its hit objects aren't lost.",
+    "toastDeleteNeedsUnlock": "Unlock the mapset first — the encryption key is required to safely migrate hit objects before deleting.",
     "toastFailedAssignSection": "Failed to update section assignment.",
     "toastFailedDownloadPending": "Failed to download difficulty.",
     "toastFailedDeleteDifficulty": "Failed to delete difficulty.",

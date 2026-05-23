@@ -420,6 +420,8 @@
     "toastFailedUpdatePost": "No s'ha pogut actualitzar la publicació.",
     "toastFailedDeletePost": "No s'ha pogut suprimir la publicació.",
     "toastFailedDeleteSection": "No s'ha pogut suprimir la secció.",
+    "toastCannotDeleteLastSection": "No es pot suprimir l'última secció — escurça-la per no perdre'n els hit objects.",
+    "toastDeleteNeedsUnlock": "Desbloqueja el mapset primer — cal la clau de xifrat per migrar els hit objects de forma segura.",
     "toastFailedAssignSection": "No s'ha pogut actualitzar l'assignació de la secció.",
     "toastFailedDownloadPending": "No s'ha pogut descarregar la dificultat.",
     "toastFailedDeleteDifficulty": "No s'ha pogut suprimir la dificultat.",

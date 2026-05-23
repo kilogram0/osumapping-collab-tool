@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import BaseVersionHistory from '../components/BaseVersionHistory';
 import CreateDifficultyModal from '../components/CreateDifficultyModal';
 import CreatePostForm from '../components/CreatePostForm';
@@ -40,6 +41,8 @@ import { downloadBaseOsu, downloadSectionOsu, fetchDifficultyDetail } from '../a
 import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { composeOsuFilename } from '../utils/osuFilename';
 import { mergeOsu } from '../utils/osuMerge';
+import { redistributeForDelete, hasSectionOsu } from '../utils/sectionRedistribute';
+import { findNextSection } from '../utils/sectionOrder';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
@@ -69,6 +72,7 @@ export default function MapsetPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const unlocked = isUnlocked(mapsetId);
 
   const createPostMutation = useCreatePost(selectedDifficultyId ?? '');
@@ -510,7 +514,37 @@ export default function MapsetPage() {
   }
 
   async function handleDeleteSection(section: DecryptedSection) {
+    if (!selectedDifficultyId) return;
+    const next = findNextSection(decryptedSections, section.id);
     try {
+      if (!next) {
+        // Final section: only allow deletion when there is no .osu blob to
+        // lose. If a blob exists we have nowhere to move its hit objects, so
+        // we block and suggest shortening instead.
+        const hasBlob = await hasSectionOsu(selectedDifficultyId, section.id);
+        if (hasBlob) {
+          showToast(t('mapsetPage.toastCannotDeleteLastSection'), 'error');
+          return;
+        }
+        // No blob → nothing to lose, proceed straight to delete.
+      } else {
+        // Require the encryption key. Without it redistributeForDelete cannot
+        // run and we'd silently drop the deleted section's hit objects — the
+        // exact data loss this flow exists to prevent. Surface "unlock first".
+        const key = await getKey(mapsetId);
+        if (!key) {
+          showToast(t('mapsetPage.toastDeleteNeedsUnlock'), 'error');
+          return;
+        }
+        await redistributeForDelete({
+          difficultyId: selectedDifficultyId,
+          mapsetId,
+          deletedSectionId: section.id,
+          nextSectionId: next.id,
+          key,
+        });
+        queryClient.invalidateQueries({ queryKey: ['section-osu-versions', selectedDifficultyId, next.id] });
+      }
       await deleteSectionMutation.mutateAsync(section.id);
       setSelectedSectionId((current) => (current === section.id ? null : current));
       showToast(t('mapsetPage.toastSectionDeleted'), 'success');
@@ -1066,11 +1100,7 @@ export default function MapsetPage() {
       )}
 
       {showEditSection && editingSection && selectedDifficultyId && (() => {
-        const sortedForEdit = [...decryptedSections].sort(
-          (a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id),
-        );
-        const idx = sortedForEdit.findIndex((s) => s.id === editingSection.id);
-        const next = idx >= 0 ? sortedForEdit[idx + 1] : undefined;
+        const next = findNextSection(decryptedSections, editingSection.id);
         return (
         <EditSectionModal
           difficultyId={selectedDifficultyId}
@@ -1079,6 +1109,7 @@ export default function MapsetPage() {
           initialName={editingSection.name}
           initialStartTimeMs={editingSection.startTimeMs}
           initialEndTimeMs={editingSection.endTimeMs}
+          nextSectionId={next?.id ?? null}
           nextSectionEndTimeMs={next?.endTimeMs ?? null}
           songLengthMs={songLengthMs}
           onSuccess={() => {
