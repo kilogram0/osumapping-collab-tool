@@ -1,0 +1,105 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ${{ github.repository }}/backend
+  FRONTEND_IMAGE: ${{ github.repository }}/frontend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: modding
+      DATABASE_URL: postgresql+asyncpg://testuser:testpassword@db:5432/modding
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Start database
+        run: docker compose up -d db
+
+      - name: Wait for database to be healthy
+        run: |
+          until docker compose exec db pg_isready -U testuser -d modding; do
+            sleep 1
+          done
+
+      - name: Create test database
+        run: docker compose exec db psql -U testuser -c "CREATE DATABASE modding_test;"
+
+      - name: Run backend migrations against test database
+        run: |
+          docker compose run --rm \
+            -e DATABASE_URL=postgresql+asyncpg://testuser:testpassword@db:5432/modding_test \
+            backend alembic upgrade head
+
+      - name: Run backend tests
+        run: |
+          docker compose run --rm \
+            -e DATABASE_URL=postgresql+asyncpg://testuser:testpassword@db:5432/modding_test \
+            backend pytest
+
+      - name: Run frontend tests
+        run: docker compose run --rm -e CI=true frontend npx vitest run
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          dockerfile: ./backend/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          dockerfile: ./frontend/Dockerfile
+          target: prod
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ~/app/circlemerge
+
+            # Pull the newly built images
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+
+            # Run database migrations before restarting
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm backend alembic upgrade head
+
+            # Restart services with new images
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+            # Remove old unused images
+            docker image prune -f
