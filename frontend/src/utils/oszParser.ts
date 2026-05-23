@@ -127,7 +127,7 @@ export async function getAudioDurationMs(bytes: Uint8Array): Promise<number | nu
   try {
     // Blob.arrayBuffer() yields a plain ArrayBuffer regardless of the Uint8Array's
     // byteOffset or the underlying buffer type — no cast needed.
-    const arrayBuffer = await new Blob([bytes]).arrayBuffer();
+    const arrayBuffer = await new Blob([bytes as Uint8Array<ArrayBuffer>]).arrayBuffer();
     const audioContext = new AudioContext();
     try {
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);

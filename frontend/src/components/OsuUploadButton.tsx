@@ -108,10 +108,6 @@ export default function OsuUploadButton({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [modalOpen]);
 
-  const resetUploadState = useCallback(() => {
-    setUploadState({ loading: false, error: null, success: false, warning: null });
-  }, []);
-
   const performUpload = useCallback(
     async (key: CryptoKey, sectionContent: string, candidateBase: string | null): Promise<boolean> => {
       setUploadState({ loading: true, error: null, success: false, warning: null });
@@ -356,7 +352,7 @@ export default function OsuUploadButton({
     } else {
       // Legacy fallback: respect checkbox.
       let finalSection = pendingUpload.sectionContent;
-      let finalBase = pendingUpload.candidateBase;
+      let finalBase: string | null = pendingUpload.candidateBase;
       if (normalizeCritical && pendingUpload.activeBase) {
         finalSection = normalizeCriticalLines(pendingUpload.sectionContent, pendingUpload.activeBase);
         finalBase = null;

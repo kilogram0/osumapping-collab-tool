@@ -62,6 +62,7 @@ export default function SectionList({ sections, mapsetId, mapsetTitle, difficult
               startTimeMs: decodeJsonEnvelope(startRaw),
               endTimeMs: decodeJsonEnvelope(endRaw),
               sortOrder: decodeJsonEnvelope(sortRaw),
+              assignedTo: s.assigned_to,
             });
           } catch (_err) {
             logger.warn(`Failed to decrypt section ${s.id}:`, _err);

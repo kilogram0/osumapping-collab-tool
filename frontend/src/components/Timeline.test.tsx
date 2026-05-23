@@ -6,9 +6,9 @@ import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
 
 const SECTIONS: DecryptedSection[] = [
-  { id: 's1', name: 'Intro', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0 },
-  { id: 's2', name: 'Kiai 1', startTimeMs: 30000, endTimeMs: 60000, sortOrder: 1 },
-  { id: 's3', name: 'Outro', startTimeMs: 60000, endTimeMs: 90000, sortOrder: 2 },
+  { id: 's1', name: 'Intro', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: null },
+  { id: 's2', name: 'Kiai 1', startTimeMs: 30000, endTimeMs: 60000, sortOrder: 1, assignedTo: null },
+  { id: 's3', name: 'Outro', startTimeMs: 60000, endTimeMs: 90000, sortOrder: 2, assignedTo: null },
 ];
 
 const POSTS: DecryptedPost[] = [
@@ -130,8 +130,8 @@ describe('Timeline', () => {
 
   it('sorts sections by startTimeMs regardless of input order', () => {
     const shuffled = [
-      { id: 's2', name: 'Kiai', startTimeMs: 30000, endTimeMs: 60000, sortOrder: 1 },
-      { id: 's1', name: 'Intro', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0 },
+      { id: 's2', name: 'Kiai', startTimeMs: 30000, endTimeMs: 60000, sortOrder: 1, assignedTo: null },
+      { id: 's1', name: 'Intro', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: null },
     ];
     renderTimeline({ sections: shuffled });
     const blocks = screen.getAllByRole('button').filter((el) =>

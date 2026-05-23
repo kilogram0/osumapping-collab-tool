@@ -1,4 +1,4 @@
-import { makeClampedOnChange, type TimeParts } from '../utils/timeInput';
+import { makeClampedOnChange } from '../utils/timeInput';
 
 interface TimeInputProps {
   label: string;

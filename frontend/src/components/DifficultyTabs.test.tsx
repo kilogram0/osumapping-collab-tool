@@ -33,8 +33,8 @@ vi.mock('../utils/logger', () => ({
 }));
 
 const DIFFICULTIES = [
-  { id: 'd1', mapset_id: 'ms1', encrypted_name: 'enc:Easy', created_at: '', updated_at: '' },
-  { id: 'd2', mapset_id: 'ms1', encrypted_name: 'enc:Hard', created_at: '', updated_at: '' },
+  { id: 'd1', mapset_id: 'ms1', encrypted_name: 'enc:Easy', created_at: '', updated_at: '', delete_at: null },
+  { id: 'd2', mapset_id: 'ms1', encrypted_name: 'enc:Hard', created_at: '', updated_at: '', delete_at: null },
 ];
 
 describe('DifficultyTabs', () => {

@@ -154,7 +154,13 @@ describe('CreateMapsetModal', () => {
 
 function makeOsz(overrides?: Partial<import('../utils/oszParser').ParsedOsz>) {
   return {
-    difficulties: [{ filename: 'Hard.osu', content: '', parsed: { sections: [] }, name: 'Hard', bookmarks: [] }],
+    difficulties: [{
+      filename: 'Hard.osu',
+      content: '',
+      parsed: { sections: [], timingPointsSection: null, hitObjectsSection: null, timingPoints: [], hitObjects: [] },
+      name: 'Hard',
+      bookmarks: [],
+    }],
     title: 'Song',
     artist: 'Artist',
     audioFilename: null,
