@@ -17,6 +17,11 @@ jobs:
       POSTGRES_PASSWORD: testpassword
       POSTGRES_DB: modding
       DATABASE_URL: postgresql+asyncpg://testuser:testpassword@db:5432/modding
+      OSU_CLIENT_ID: placeholder
+      OSU_CLIENT_SECRET: placeholder
+      SECRET_KEY: placeholder-secret-key-for-ci-only
+      FRONTEND_URL: http://localhost:5173
+      BACKEND_URL: http://localhost:8000
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
