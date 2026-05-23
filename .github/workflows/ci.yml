@@ -52,7 +52,7 @@ jobs:
             backend pytest
 
       - name: Run frontend tests
-        run: docker compose run --rm -e CI=true frontend npx vitest run
+        run: docker compose run --rm -u root -e CI=true frontend npx vitest run
 
   build-and-deploy:
     runs-on: ubuntu-latest
