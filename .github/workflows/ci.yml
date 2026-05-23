@@ -48,6 +48,7 @@ jobs:
         run: |
           docker compose run --rm \
             -e DATABASE_URL=postgresql+asyncpg://testuser:testpassword@db:5432/modding \
+            -e TEST_DATABASE_URL=postgresql+asyncpg://testuser:testpassword@db:5432/modding_test \
             backend pytest
 
       - name: Run frontend tests
