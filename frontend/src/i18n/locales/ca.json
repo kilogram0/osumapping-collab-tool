@@ -237,6 +237,8 @@
     "bodyPlaceholder": "Escriu la teva publicació aquí... p. ex. 00:46:140 (2,3,4) - són massa propers",
     "submitNew": "Publica",
     "submitReply": "Respon",
+    "submitReplyResolve": "Respon i resol",
+    "submitReplyReopen": "Respon i reobre",
     "submitEdit": "Desa els canvis",
     "submitting": "S'està enviant...",
     "errorEmpty": "El cos de la publicació no pot estar buit.",
@@ -249,6 +251,8 @@
     "tagSuggestion": "Suggeriment",
     "tagProblem": "Problema",
     "tagPraise": "Elogi",
+    "tagResolve": "Resolt",
+    "tagReopen": "Reoberta",
     "userPrefix": "Usuari {{id}}",
     "youSuffix": "(tu)",
     "edited": "(editat)",
@@ -259,6 +263,10 @@
     "encrypted": "🔒 Publicació xifrada",
     "expand": "Desplega la publicació",
     "collapse": "Plega la publicació"
+  },
+  "resolveEvent": {
+    "resolved": "ha marcat això com a resolt.",
+    "reopened": "ha reoberta aquesta discussió."
   },
   "timeline": {
     "unavailable": "No hi ha cap línia de temps disponible",

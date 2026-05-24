@@ -18,6 +18,8 @@ interface PostCardProps {
   author?: { username: string; avatar_url: string } | null;
   /** If false, the Reply button is hidden even when onReply is provided. */
   showReplyButton?: boolean;
+  /** True when this root post has been resolved (last status reply has tag 'resolve'). */
+  isResolved?: boolean;
   onReply?: (post: Post) => void;
   onEdit?: (post: Post) => void;
   onDelete?: (postId: string) => void;
@@ -28,14 +30,18 @@ const TAG_COLORS: Record<PostTag, string> = {
   suggestion: 'bg-yellow-500',
   praise: 'bg-blue-500',
   general: 'bg-gray-500',
+  resolve: 'bg-green-500',
+  reopen: 'bg-orange-500',
 };
 
-const TAG_LABEL_KEYS = {
+const TAG_LABEL_KEYS: Record<PostTag, string> = {
   general: 'postCard.tagGeneral',
   suggestion: 'postCard.tagSuggestion',
   problem: 'postCard.tagProblem',
   praise: 'postCard.tagPraise',
-} as const satisfies Record<PostTag, string>;
+  resolve: 'postCard.tagResolve',
+  reopen: 'postCard.tagReopen',
+};
 
 function storageKey(userId: string, postId: string): string {
   return `post-collapsed:${userId}:${postId}`;
@@ -49,6 +55,7 @@ export default function PostCard({
   decryptedBody: propDecryptedBody,
   author,
   showReplyButton = true,
+  isResolved = false,
   onReply,
   onEdit,
   onDelete,
@@ -153,8 +160,13 @@ export default function PostCard({
 
   const isEdited = post.created_at !== post.updated_at;
 
+  const isRootPost = post.parent_id === null;
+
   return (
-    <div data-testid="post-card" className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+    <div
+      data-testid="post-card"
+      className={`bg-gray-800 border rounded-lg p-4 ${isRootPost && isResolved ? 'border-green-600' : 'border-gray-700'}`}
+    >
       <div className="flex items-start gap-3">
         <div className="shrink-0">
           {author?.avatar_url ? (

@@ -6,12 +6,15 @@ import type { PostTag } from '../api/endpoints';
 import { formatTimestamp } from '../utils/extractTimestamp';
 
 // Higher-priority tags get higher z-index so they dominate visually when markers overlap.
-const TAG_MARKER: Record<PostTag, { color: string; z: number }> = {
+// resolve/reopen are excluded: replies never appear in the timeline.
+const TAG_MARKER: Partial<Record<PostTag, { color: string; z: number }>> = {
   problem:    { color: '#ef4444', z: 40 },
   suggestion: { color: '#eab308', z: 30 },
   praise:     { color: '#3b82f6', z: 20 },
   general:    { color: '#6b7280', z: 10 },
 };
+
+const RESOLVED_MARKER = { color: '#22c55e', z: 5 };
 
 interface TimelineProps {
   sections: DecryptedSection[];
@@ -22,6 +25,8 @@ interface TimelineProps {
   onJumpToPost?: (postId: string) => void;
   membersById?: Map<string, { username: string }>;
   sectionHitObjectMap?: Map<string, boolean>;
+  /** IDs of root posts whose last status reply has tag 'resolve'. */
+  resolvedPostIds?: Set<string>;
 }
 
 // OKLCH hue sweep: 20° (orange-red) → 310° (violet), 290° total range.
@@ -46,6 +51,7 @@ export default function Timeline({
   onJumpToPost,
   membersById,
   sectionHitObjectMap,
+  resolvedPostIds,
 }: TimelineProps) {
   const { t } = useTranslation();
   const [tooltip, setTooltip] = useState<{
@@ -74,8 +80,13 @@ export default function Timeline({
   }, [sections, membersById]);
 
   const markerPosts = useMemo(() => {
+    // Only root posts get a marker — one dot per discussion thread, not per reply.
     return posts.filter(
-      (p) => p.extractedMs !== null && p.extractedMs >= 0 && p.extractedMs <= songLengthMs,
+      (p) =>
+        p.parent_id === null &&
+        p.extractedMs !== null &&
+        p.extractedMs >= 0 &&
+        p.extractedMs <= songLengthMs,
     );
   }, [posts, songLengthMs]);
 
@@ -155,9 +166,11 @@ export default function Timeline({
           );
         })}
 
-        {/* Post markers */}
+        {/* Post markers — root posts only; resolved posts shown in green at lowest z */}
         {markerPosts.map((post) => {
           const leftPercent = ((post.extractedMs ?? 0) / songLengthMs) * 100;
+          const resolved = resolvedPostIds?.has(post.id) ?? false;
+          const marker = resolved ? RESOLVED_MARKER : (TAG_MARKER[post.tag] ?? { color: '#6b7280', z: 10 });
           return (
             <button
               key={post.id}
@@ -166,8 +179,8 @@ export default function Timeline({
               className="absolute top-1 w-4 h-4 rounded-full border-2 border-gray-900 shadow hover:scale-125 transition-transform"
               style={{
                 left: `calc(${leftPercent}% - 8px)`,
-                backgroundColor: TAG_MARKER[post.tag].color,
-                zIndex: TAG_MARKER[post.tag].z,
+                backgroundColor: marker.color,
+                zIndex: marker.z,
               }}
               title={t('timeline.postAt', { time: formatTimestamp(post.extractedMs ?? 0) })}
               onClick={(e) => {

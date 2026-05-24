@@ -38,6 +38,8 @@ class PostTag(str, PyEnum):
     suggestion = "suggestion"
     problem = "problem"
     praise = "praise"
+    resolve = "resolve"
+    reopen = "reopen"
 
 
 class User(SQLModel, table=True):

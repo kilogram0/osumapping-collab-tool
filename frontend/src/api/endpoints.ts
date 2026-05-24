@@ -102,7 +102,7 @@ export async function cancelMapsetDeletion(id: string): Promise<void> {
 // Posts
 // ---------------------------------------------------------------------------
 
-export type PostTag = 'general' | 'suggestion' | 'problem' | 'praise';
+export type PostTag = 'general' | 'suggestion' | 'problem' | 'praise' | 'resolve' | 'reopen';
 
 export interface Post {
   id: string;

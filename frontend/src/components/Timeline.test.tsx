@@ -225,4 +225,34 @@ describe('Timeline', () => {
     const block = screen.getByTestId('timeline-section-s1');
     expect(block.style.backgroundColor).not.toContain('/ 0.4');
   });
+
+  it('does not render markers for reply posts even when they have timestamps', () => {
+    const posts: DecryptedPost[] = [
+      { id: 'root', difficulty_id: 'd1', author_id: 'u1', parent_id: null,     tag: 'suggestion', encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 15000 },
+      { id: 'repl', difficulty_id: 'd1', author_id: 'u1', parent_id: 'root-id', tag: 'general',    encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 20000 },
+    ];
+    renderTimeline({ posts });
+    expect(screen.getByTestId('timeline-marker-root')).toBeInTheDocument();
+    expect(screen.queryByTestId('timeline-marker-repl')).not.toBeInTheDocument();
+  });
+
+  it('shows resolved posts in green with lowest z-index', () => {
+    const posts: DecryptedPost[] = [
+      { id: 'root', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'problem', encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 15000 },
+    ];
+    const resolvedPostIds = new Set(['root']);
+    renderTimeline({ posts, resolvedPostIds });
+    const marker = screen.getByTestId('timeline-marker-root');
+    expect(marker.style.backgroundColor).toBe('rgb(34, 197, 94)');
+    expect(marker.style.zIndex).toBe('5');
+  });
+
+  it('shows unresolved posts in their tag color', () => {
+    const posts: DecryptedPost[] = [
+      { id: 'root', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'problem', encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 15000 },
+    ];
+    renderTimeline({ posts });
+    const marker = screen.getByTestId('timeline-marker-root');
+    expect(marker.style.backgroundColor).toBe('rgb(239, 68, 68)');
+  });
 });

@@ -222,4 +222,19 @@ describe('PostCard', () => {
     expect(screen.getByText(/plaintext body without timestamps/i)).toBeInTheDocument();
     expect(decrypt).not.toHaveBeenCalled();
   });
+
+  it('shows green border when isResolved is true on a root post', async () => {
+    renderCard({ isResolved: true });
+    await act(async () => {});
+    const card = screen.getByTestId('post-card');
+    expect(card.className).toContain('border-green-600');
+  });
+
+  it('does not show green border when isResolved is false', async () => {
+    renderCard({ isResolved: false });
+    await act(async () => {});
+    const card = screen.getByTestId('post-card');
+    expect(card.className).not.toContain('border-green-600');
+  });
+
 });

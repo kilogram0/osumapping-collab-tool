@@ -237,6 +237,8 @@
     "bodyPlaceholder": "Write your post here... e.g. 00:46:140 (2,3,4) - these are too close",
     "submitNew": "Post",
     "submitReply": "Reply",
+    "submitReplyResolve": "Reply & Resolve",
+    "submitReplyReopen": "Reply & Reopen",
     "submitEdit": "Save Changes",
     "submitting": "Submitting...",
     "errorEmpty": "Post body cannot be empty.",
@@ -249,6 +251,8 @@
     "tagSuggestion": "Suggestion",
     "tagProblem": "Problem",
     "tagPraise": "Praise",
+    "tagResolve": "Resolved",
+    "tagReopen": "Reopened",
     "userPrefix": "User {{id}}",
     "youSuffix": "(you)",
     "edited": "(edited)",
@@ -259,6 +263,10 @@
     "encrypted": "🔒 Encrypted post",
     "expand": "Expand post",
     "collapse": "Collapse post"
+  },
+  "resolveEvent": {
+    "resolved": "marked this as resolved.",
+    "reopened": "reopened this."
   },
   "timeline": {
     "unavailable": "No timeline available",

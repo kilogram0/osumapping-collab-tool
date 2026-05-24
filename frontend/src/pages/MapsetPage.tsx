@@ -16,6 +16,7 @@ import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
 import PendingDifficultyList from '../components/PendingDifficultyList';
 import PostCard from '../components/PostCard';
+import ResolveEvent from '../components/ResolveEvent';
 import RenameDifficultyModal from '../components/RenameDifficultyModal';
 import SectionDetailPanel from '../components/SectionDetailPanel';
 import Timeline from '../components/Timeline';
@@ -47,6 +48,7 @@ import { composeOsuFilename } from '../utils/osuFilename';
 import { mergeOsu } from '../utils/osuMerge';
 import { redistributeForDelete, redistributeForMerge, redistributeForShorten, hasSectionOsu } from '../utils/sectionRedistribute';
 import { findNextSection, sortSections } from '../utils/sectionOrder';
+import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
@@ -471,7 +473,7 @@ export default function MapsetPage() {
 
     for (const post of decryptedPosts) {
       if (post.parent_id === null) {
-        topLevel.push(post);
+        if (!isStatusReply(post.tag)) topLevel.push(post);
       } else {
         const siblings = replyMap.get(post.parent_id) ?? [];
         siblings.push(post);
@@ -482,12 +484,15 @@ export default function MapsetPage() {
     return { topLevel, replyMap };
   }, [decryptedPosts]);
 
+  const resolvedPostIds = useMemo(() => deriveResolvedRootIds(globalPostTree), [globalPostTree]);
+
   function renderGlobalPostNode(post: DecryptedPost, depth: number): JSX.Element | null {
     const MAX_REPLY_DEPTH = 10;
     if (depth > MAX_REPLY_DEPTH) return null;
     const replies = globalPostTree.replyMap.get(post.id) ?? [];
     const isReplyingToThis = replyingTo?.id === post.id;
     const isEditingThis = editingPost?.id === post.id;
+    const isResolved = depth === 0 && resolvedPostIds.has(post.id);
     return (
       <div key={post.id} id={`post-${post.id}`} className={depth > 0 ? 'mt-2 ml-8 border-l-2 border-gray-700 pl-4' : ''}>
         <PostCard
@@ -498,6 +503,7 @@ export default function MapsetPage() {
           decryptedBody={post.decryptedBody}
           author={membersById.get(post.author_id) ?? null}
           showReplyButton={depth === 0}
+          isResolved={isResolved}
           onReply={(p) => {
             setEditingPost(null);
             setShowCreateForm(false);
@@ -521,6 +527,7 @@ export default function MapsetPage() {
               onSubmit={handleCreatePost}
               onCancel={() => setReplyingTo(null)}
               parentPost={post}
+              resolveAction={depth === 0 && canBeResolved(post.tag) ? (resolvedPostIds.has(post.id) ? 'reopen' : 'resolve') : undefined}
             />
           </div>
         )}
@@ -541,7 +548,23 @@ export default function MapsetPage() {
           </div>
         )}
 
-        {replies.map((reply) => renderGlobalPostNode(reply, depth + 1))}
+        {replies.map((reply) => {
+          if (depth === 0 && isStatusReply(reply.tag)) {
+            return (
+              <div key={reply.id} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
+                <ResolveEvent
+                  post={reply}
+                  author={membersById.get(reply.author_id) ?? null}
+                  currentUserId={user?.id ?? ''}
+                  isOwner={isOwner}
+                  onDelete={handleDeletePost}
+                />
+              </div>
+            );
+          }
+          if (isStatusReply(reply.tag)) return null;
+          return renderGlobalPostNode(reply, depth + 1);
+        })}
       </div>
     );
   }
@@ -1172,6 +1195,7 @@ export default function MapsetPage() {
                 selectedSectionId={selectedSectionId}
                 membersById={membersById}
                 sectionHitObjectMap={sectionHitObjectMap}
+                resolvedPostIds={resolvedPostIds}
                 onJumpToPost={(postId) => {
                   setShowAllPosts(true);
                   setSelectedSectionId(null);

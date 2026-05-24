@@ -267,4 +267,106 @@ describe('CreatePostForm', () => {
 
     expect(textarea).toHaveValue('');
   });
+
+  it('shows Reply & Resolve button when resolveAction is resolve', () => {
+    render(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={vi.fn()}
+        parentPost={PARENT_POST}
+        resolveAction="resolve"
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Reply & Resolve/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reopen/i })).not.toBeInTheDocument();
+  });
+
+  it('shows Reopen button when resolveAction is reopen', () => {
+    render(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={vi.fn()}
+        parentPost={PARENT_POST}
+        resolveAction="reopen"
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Reopen/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reply & Resolve/i })).not.toBeInTheDocument();
+  });
+
+  it('does not show resolve action button when resolveAction is not set', () => {
+    render(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={vi.fn()}
+        parentPost={PARENT_POST}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Reply & Resolve/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reopen/i })).not.toBeInTheDocument();
+  });
+
+  it('clicking Reply & Resolve submits with tag resolve', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={onSubmit}
+        parentPost={PARENT_POST}
+        resolveAction="resolve"
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/Reply/i), 'looks good');
+    await user.click(screen.getByRole('button', { name: /Reply & Resolve/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].tag).toBe('resolve');
+    expect(onSubmit.mock.calls[0][0].parent_id).toBe('parent-1');
+  });
+
+  it('clicking Reopen submits with tag reopen', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={onSubmit}
+        parentPost={PARENT_POST}
+        resolveAction="reopen"
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/Reply/i), 'still broken');
+    await user.click(screen.getByRole('button', { name: /Reopen/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].tag).toBe('reopen');
+  });
+
+  it('Reply button always submits with the regular tag in reply mode', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={onSubmit}
+        parentPost={PARENT_POST}
+        resolveAction="resolve"
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/Reply/i), 'just a comment');
+    await user.click(screen.getByRole('button', { name: /^Reply$/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].tag).toBe('general');
+  });
 });

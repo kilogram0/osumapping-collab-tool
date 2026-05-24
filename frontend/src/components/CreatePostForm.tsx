@@ -32,6 +32,9 @@ interface CreatePostFormProps {
   /** When set and the submitted body has no timestamp, this ms value is prepended as a timestamp.
    *  Only applies to new posts (not replies or edits). */
   defaultTimestampMs?: number | null;
+  /** When set in reply mode, a second submit button appears alongside the regular Reply button.
+   *  'resolve' → "Reply & Resolve"; 'reopen' → "Reopen". */
+  resolveAction?: 'resolve' | 'reopen';
 }
 
 export default function CreatePostForm({
@@ -43,6 +46,7 @@ export default function CreatePostForm({
   editingPost,
   initialBody = '',
   defaultTimestampMs = null,
+  resolveAction,
 }: CreatePostFormProps) {
   const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
@@ -55,8 +59,7 @@ export default function CreatePostForm({
   const isReply = !!parentPost && !editingPost;
   const isEdit = !!editingPost;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function doSubmit(submittedTag: PostTag) {
     setError(null);
 
     if (!body.trim()) {
@@ -87,7 +90,7 @@ export default function CreatePostForm({
 
       await onSubmit({
         id: postId,
-        tag,
+        tag: submittedTag,
         encrypted_body: encryptedBody,
         parent_id: isReply ? parentPost.id : editingPost?.parent_id ?? null,
       });
@@ -102,6 +105,11 @@ export default function CreatePostForm({
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    doSubmit(tag);
   }
 
   return (
@@ -170,6 +178,22 @@ export default function CreatePostForm({
                 ? t('createPostForm.submitReply')
                 : t('createPostForm.submitNew')}
         </button>
+        {isReply && resolveAction && (
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={() => doSubmit(resolveAction)}
+            className={`px-4 py-2 disabled:bg-gray-600 text-white text-sm font-medium rounded transition-colors ${
+              resolveAction === 'resolve'
+                ? 'bg-green-600 hover:bg-green-500'
+                : 'bg-orange-600 hover:bg-orange-500'
+            }`}
+          >
+            {resolveAction === 'resolve'
+              ? t('createPostForm.submitReplyResolve')
+              : t('createPostForm.submitReplyReopen')}
+          </button>
+        )}
         {onCancel && (
           <button
             type="button"
@@ -184,4 +208,3 @@ export default function CreatePostForm({
     </form>
   );
 }
-

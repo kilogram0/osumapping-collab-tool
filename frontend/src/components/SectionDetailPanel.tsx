@@ -4,6 +4,7 @@ import type { Post, MemberWithUser } from '../api/endpoints';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
 import PostCard from './PostCard';
+import ResolveEvent from './ResolveEvent';
 import CreatePostForm from './CreatePostForm';
 import OsuUploadButton from './OsuUploadButton';
 import OsuVersionHistory from './OsuVersionHistory';
@@ -12,6 +13,7 @@ import { assembleSectionOsu } from '../utils/sectionDownload';
 import { composeOsuFilename } from '../utils/osuFilename';
 import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { logger } from '../utils/logger';
+import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
 
 interface SectionDetailPanelProps {
   section: DecryptedSection;
@@ -143,7 +145,7 @@ export default function SectionDetailPanel({
 
     for (const post of sectionPosts) {
       if (post.parent_id === null) {
-        topLevel.push(post);
+        if (!isStatusReply(post.tag)) topLevel.push(post);
       } else {
         const siblings = replyMap.get(post.parent_id) ?? [];
         siblings.push(post);
@@ -153,6 +155,8 @@ export default function SectionDetailPanel({
 
     return { topLevel, replyMap };
   }, [sectionPosts]);
+
+  const resolvedPostIds = useMemo(() => deriveResolvedRootIds(postTree), [postTree]);
 
   async function handleDownload() {
     if (!unlocked) return;
@@ -225,6 +229,7 @@ export default function SectionDetailPanel({
     const replies = postTree.replyMap.get(post.id) ?? [];
     const isReplyingToThis = replyingTo?.id === post.id;
     const isEditingThis = editingPost?.id === post.id;
+    const isResolved = depth === 0 && resolvedPostIds.has(post.id);
     return (
       <div key={post.id} className={depth > 0 ? 'mt-2 ml-8 border-l-2 border-gray-700 pl-4' : ''}>
         <PostCard
@@ -235,6 +240,7 @@ export default function SectionDetailPanel({
           decryptedBody={post.decryptedBody}
           author={membersById?.get(post.author_id) ?? null}
           showReplyButton={depth === 0}
+          isResolved={isResolved}
           onReply={(p) => {
             setEditingPost(null);
             setShowCreateForm(false);
@@ -257,6 +263,7 @@ export default function SectionDetailPanel({
               onSubmit={handleCreatePost}
               onCancel={() => setReplyingTo(null)}
               parentPost={post}
+              resolveAction={depth === 0 && canBeResolved(post.tag) ? (resolvedPostIds.has(post.id) ? 'reopen' : 'resolve') : undefined}
             />
           </div>
         )}
@@ -277,7 +284,23 @@ export default function SectionDetailPanel({
           </div>
         )}
 
-        {replies.map((reply) => renderPostNode(reply, depth + 1))}
+        {replies.map((reply) => {
+          if (depth === 0 && isStatusReply(reply.tag)) {
+            return (
+              <div key={reply.id} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
+                <ResolveEvent
+                  post={reply}
+                  author={membersById?.get(reply.author_id) ?? null}
+                  currentUserId={currentUserId}
+                  isOwner={isOwner}
+                  onDelete={onDeletePost}
+                />
+              </div>
+            );
+          }
+          if (isStatusReply(reply.tag)) return null;
+          return renderPostNode(reply, depth + 1);
+        })}
       </div>
     );
   }
