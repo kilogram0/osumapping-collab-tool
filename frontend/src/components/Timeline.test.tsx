@@ -119,7 +119,7 @@ describe('Timeline', () => {
     expect(screen.getByTestId('timeline-marker-prob').style.backgroundColor).toBe('rgb(239, 68, 68)');
     expect(screen.getByTestId('timeline-marker-sugg').style.backgroundColor).toBe('rgb(234, 179, 8)');
     expect(screen.getByTestId('timeline-marker-prse').style.backgroundColor).toBe('rgb(59, 130, 246)');
-    expect(screen.getByTestId('timeline-marker-genl').style.backgroundColor).toBe('rgb(107, 114, 128)');
+    expect(screen.getByTestId('timeline-marker-genl').style.backgroundColor).toBe('rgb(168, 85, 247)');
   });
 
   it('calls onJumpToPost when a marker is clicked', async () => {
