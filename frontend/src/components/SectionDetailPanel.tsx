@@ -14,6 +14,7 @@ import { composeOsuFilename } from '../utils/osuFilename';
 import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { logger } from '../utils/logger';
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
+import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
 
 interface SectionDetailPanelProps {
   section: DecryptedSection;
@@ -152,6 +153,9 @@ export default function SectionDetailPanel({
         replyMap.set(post.parent_id, siblings);
       }
     }
+
+    topLevel.sort(compareRootPostOrder);
+    for (const replies of replyMap.values()) replies.sort(compareReplyOrder);
 
     return { topLevel, replyMap };
   }, [sectionPosts]);

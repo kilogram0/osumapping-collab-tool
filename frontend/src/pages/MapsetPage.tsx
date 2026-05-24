@@ -49,6 +49,7 @@ import { mergeOsu } from '../utils/osuMerge';
 import { redistributeForDelete, redistributeForMerge, redistributeForShorten, hasSectionOsu } from '../utils/sectionRedistribute';
 import { findNextSection, sortSections } from '../utils/sectionOrder';
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
+import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
@@ -389,15 +390,6 @@ export default function MapsetPage() {
         );
 
         if (!cancelled) {
-          // Sort by extracted timestamp (if any), then by created_at
-          results.sort((a, b) => {
-            if (a.extractedMs !== null && b.extractedMs !== null) {
-              return a.extractedMs - b.extractedMs;
-            }
-            if (a.extractedMs !== null) return -1;
-            if (b.extractedMs !== null) return 1;
-            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-          });
           setDecryptedPosts(results);
         }
       } catch (err) {
@@ -480,6 +472,9 @@ export default function MapsetPage() {
         replyMap.set(post.parent_id, siblings);
       }
     }
+
+    topLevel.sort(compareRootPostOrder);
+    for (const replies of replyMap.values()) replies.sort(compareReplyOrder);
 
     return { topLevel, replyMap };
   }, [decryptedPosts]);

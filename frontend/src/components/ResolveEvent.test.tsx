@@ -97,4 +97,24 @@ describe('ResolveEvent', () => {
     const container = screen.getByTestId('resolve-event');
     expect(container.className).toContain('orange');
   });
+
+  it('linkifies a timestamp in the body', () => {
+    renderEvent({ post: { ...BASE_RESOLVE, decryptedBody: '00:46:972 - good pattern', extractedMs: 46972 } });
+    const link = screen.getByRole('link', { name: /00:46:972/i });
+    expect(link).toHaveAttribute('href', 'osu://edit/00:46:972');
+  });
+
+  it('linkifies multiple timestamps in the body', () => {
+    renderEvent({ post: { ...BASE_RESOLVE, decryptedBody: '00:46:972 and 01:14:255 (4,5) both fine', extractedMs: 46972 } });
+    const links = screen.getAllByRole('link');
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute('href', 'osu://edit/00:46:972');
+    expect(links[1]).toHaveAttribute('href', 'osu://edit/01:14:255%20(4%2C5)');
+  });
+
+  it('renders plain text body when there are no timestamps', () => {
+    renderEvent({ post: { ...BASE_RESOLVE, decryptedBody: 'No timestamps here.' } });
+    expect(screen.getByText('No timestamps here.')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
 });

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import type { DecryptedPost } from '../types';
+import { findAllTimestamps, generateOsuLink } from '../utils/extractTimestamp';
 
 interface ResolveEventProps {
   post: DecryptedPost;
@@ -7,6 +8,32 @@ interface ResolveEventProps {
   currentUserId: string;
   isOwner: boolean;
   onDelete?: (postId: string) => void;
+}
+
+function renderBody(text: string): React.ReactNode {
+  const matches = findAllTimestamps(text);
+  if (matches.length === 0) return text;
+
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of matches) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    parts.push(
+      <a
+        key={match.index}
+        href={generateOsuLink(match.ms, match.combos)}
+        className="text-blue-400 hover:text-blue-300 underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {match.raw}
+      </a>,
+    );
+    lastIndex = match.index + match.raw.length;
+  }
+
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return <>{parts}</>;
 }
 
 export default function ResolveEvent({
@@ -43,7 +70,9 @@ export default function ResolveEvent({
           {isResolve ? t('resolveEvent.resolved') : t('resolveEvent.reopened')}
         </p>
         {post.decryptedBody && (
-          <p className="text-xs text-gray-400 mt-0.5 whitespace-pre-wrap">{post.decryptedBody}</p>
+          <p className="text-xs text-gray-400 mt-0.5 whitespace-pre-wrap">
+            {renderBody(post.decryptedBody)}
+          </p>
         )}
       </div>
       <span className="text-xs text-gray-500 shrink-0 leading-5">
