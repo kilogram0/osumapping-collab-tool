@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
@@ -11,25 +11,21 @@ interface TimelineProps {
   selectedSectionId: string | null;
   onSelectSection: (sectionId: string) => void;
   onJumpToPost?: (postId: string) => void;
+  membersById?: Map<string, { username: string }>;
+  sectionHitObjectMap?: Map<string, boolean>;
 }
 
-// Static class strings so Tailwind's JIT can detect them at build time.
-// Each entry pairs the base bg with its hover: variant — never reuse the
-// lighter shade as the base, since both classes are emitted together and
-// the lighter one would win under Tailwind source ordering.
-const SECTION_COLORS: { base: string; hover: string }[] = [
-  { base: 'bg-blue-600', hover: 'hover:bg-blue-500' },
-  { base: 'bg-emerald-600', hover: 'hover:bg-emerald-500' },
-  { base: 'bg-amber-600', hover: 'hover:bg-amber-500' },
-  { base: 'bg-rose-600', hover: 'hover:bg-rose-500' },
-  { base: 'bg-violet-600', hover: 'hover:bg-violet-500' },
-  { base: 'bg-cyan-600', hover: 'hover:bg-cyan-500' },
-  { base: 'bg-orange-600', hover: 'hover:bg-orange-500' },
-  { base: 'bg-pink-600', hover: 'hover:bg-pink-500' },
-];
+// OKLCH hue sweep: 20° (orange-red) → 310° (violet), 290° total range.
+// OKLCH is perceptually uniform — equal hue steps look like equal color differences,
+// unlike HSL where the green-blue band appears compressed to the human eye.
+function memberHue(idx: number, total: number): number {
+  return total <= 1 ? 20 : 20 + (idx / (total - 1)) * 290;
+}
 
-function getSectionColors(index: number): { base: string; hover: string } {
-  return SECTION_COLORS[index % SECTION_COLORS.length];
+function sectionBg(hue: number | null, pending: boolean): string {
+  // hue === null → unassigned; chroma 0 gives neutral grey in any hue
+  const c = hue !== null ? `0.15 ${hue}` : '0 0';
+  return pending ? `oklch(42% ${c} / 0.4)` : `oklch(${hue !== null ? 62 : 42}% ${c})`;
 }
 
 export default function Timeline({
@@ -39,6 +35,8 @@ export default function Timeline({
   selectedSectionId,
   onSelectSection,
   onJumpToPost,
+  membersById,
+  sectionHitObjectMap,
 }: TimelineProps) {
   const { t } = useTranslation();
   const [tooltip, setTooltip] = useState<{
@@ -50,6 +48,21 @@ export default function Timeline({
   const sortedSections = useMemo(() => {
     return [...sections].sort((a, b) => a.startTimeMs - b.startTimeMs || a.sortOrder - b.sortOrder);
   }, [sections]);
+
+  // Map each assigned user ID to a hue (0–300°), sorted by username.
+  const memberHueMap = useMemo(() => {
+    const uniqueIds = [...new Set(sections.map((s) => s.assignedTo).filter((id): id is string => id !== null))];
+    uniqueIds.sort((a, b) => {
+      const nameA = membersById?.get(a)?.username ?? a;
+      const nameB = membersById?.get(b)?.username ?? b;
+      return nameA.localeCompare(nameB);
+    });
+    const map = new Map<string, number>();
+    uniqueIds.forEach((id, idx) => {
+      map.set(id, memberHue(idx, uniqueIds.length));
+    });
+    return map;
+  }, [sections, membersById]);
 
   const markerPosts = useMemo(() => {
     return posts.filter(
@@ -81,20 +94,26 @@ export default function Timeline({
           const widthPercent = (duration / songLengthMs) * 100;
           const leftPercent = (section.startTimeMs / songLengthMs) * 100;
           const isSelected = selectedSectionId === section.id;
-          const { base: colorClass, hover: hoverClass } = getSectionColors(index);
+          const isLast = index === sortedSections.length - 1;
+
+          // undefined = scan not yet complete; treat as "has content" to avoid flash.
+          const pending = sectionHitObjectMap?.get(section.id) === false;
+          const hue = section.assignedTo != null ? (memberHueMap.get(section.assignedTo) ?? null) : null;
 
           return (
             <button
               key={section.id}
               type="button"
               data-testid={`timeline-section-${section.id}`}
-              className={`absolute top-0 bottom-0 ${colorClass} ${hoverClass} transition-colors
-                ${isSelected ? 'ring-2 ring-white z-10' : ''}
+              className={`absolute top-0 bottom-0 transition-all hover:brightness-110
+                ${isLast ? '' : 'border-r-2 border-black/30'}
+                ${isSelected ? 'ring ring-inset ring-white z-10' : ''}
                 flex items-center justify-center text-white text-xs font-medium px-1
                 overflow-hidden whitespace-nowrap text-ellipsis`}
               style={{
                 left: `${leftPercent}%`,
                 width: `${widthPercent}%`,
+                backgroundColor: sectionBg(hue, pending),
               }}
               onClick={() => onSelectSection(section.id)}
               onMouseEnter={(e) => {

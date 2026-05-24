@@ -105,6 +105,10 @@ export default function MapsetPage() {
   const [difficultyNames, setDifficultyNames] = useState<Record<string, string>>({});
   const [editingSection, setEditingSection] = useState<DecryptedSection | null>(null);
   const [decryptedSections, setDecryptedSections] = useState<DecryptedSection[]>([]);
+  const [sectionHitObjectMap, setSectionHitObjectMap] = useState<Map<string, boolean>>(new Map());
+  // Cache keyed by "sectionId:startMs:endMs" so a range edit forces a rescan for that
+  // section while sibling sections whose range is unchanged are skipped.
+  const hitObjectCacheRef = useRef<Map<string, boolean>>(new Map());
   const [decryptedDescription, setDecryptedDescription] = useState<string | null>(null);
   const [songLengthMs, setSongLengthMs] = useState<number | null>(null);
   const [decryptedPosts, setDecryptedPosts] = useState<DecryptedPost[]>([]);
@@ -285,6 +289,65 @@ export default function MapsetPage() {
     decryptSections();
     return () => { cancelled = true; };
   }, [unlocked, difficultyDetail, mapsetId, getKey]);
+
+  // Clear the hit-object map and its cache whenever the difficulty changes so
+  // stale results from a previous difficulty never bleed through.
+  useEffect(() => {
+    hitObjectCacheRef.current = new Map();
+    setSectionHitObjectMap(new Map());
+  }, [selectedDifficultyId]);
+
+  // Background scan: download + parse each section's .osu to check whether it
+  // contains any hit objects within the section's own time range.
+  // Cache key = "sectionId:startMs:endMs" — a range edit invalidates only that
+  // section while siblings with unchanged ranges are skipped.
+  useEffect(() => {
+    if (!decryptedSections.length || !selectedDifficultyId || !unlocked) return;
+
+    const makeKey = (s: DecryptedSection) => `${s.id}:${s.startTimeMs}:${s.endTimeMs}`;
+    const sectionsToScan = decryptedSections.filter((s) => !hitObjectCacheRef.current.has(makeKey(s)));
+    if (!sectionsToScan.length) return;
+
+    let cancelled = false;
+
+    async function scanHitObjects() {
+      const key = await getKey(mapsetId);
+      if (!key || cancelled) return;
+
+      const updates = new Map<string, boolean>();
+      const tasks = sectionsToScan.map((section) => async () => {
+        try {
+          const resp = await downloadSectionOsu(selectedDifficultyId!, section.id);
+          const plaintext = await decrypt(key, resp.encrypted_content, sectionOsuVersionAad(resp.id, mapsetId));
+          const parsed = parseOsuFile(plaintext);
+          const hasInRange = parsed.hitObjects.some(
+            (ho) => ho.time >= section.startTimeMs && ho.time < section.endTimeMs,
+          );
+          updates.set(section.id, hasInRange);
+          hitObjectCacheRef.current.set(makeKey(section), hasInRange);
+        } catch (err) {
+          const is404 = isAxiosError(err) && err.response?.status === 404;
+          updates.set(section.id, false);
+          // Only cache 404 (no file uploaded). Transient failures are left
+          // uncached so the section is retried on the next sections change.
+          if (is404) hitObjectCacheRef.current.set(makeKey(section), false);
+        }
+      });
+
+      const queue = [...tasks];
+      const worker = async () => { while (queue.length > 0) await queue.shift()!(); };
+      await Promise.all(Array.from({ length: Math.min(5, tasks.length) }, worker));
+
+      if (!cancelled) setSectionHitObjectMap((prev) => {
+        const next = new Map(prev);
+        for (const [id, val] of updates) next.set(id, val);
+        return next;
+      });
+    }
+
+    scanHitObjects();
+    return () => { cancelled = true; };
+  }, [decryptedSections, selectedDifficultyId, unlocked, mapsetId, getKey]);
 
   // Decrypt posts whenever the difficulty detail changes
   useEffect(() => {
@@ -1094,6 +1157,8 @@ export default function MapsetPage() {
                 posts={decryptedPosts}
                 songLengthMs={songLengthMs}
                 selectedSectionId={selectedSectionId}
+                membersById={membersById}
+                sectionHitObjectMap={sectionHitObjectMap}
                 onSelectSection={(sectionId) => {
                   if (showAllPosts) {
                     // Switch from All Posts to Section View

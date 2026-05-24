@@ -71,6 +71,18 @@ vi.mock('../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn() },
 }));
 
+vi.mock('../api/endpoints', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/endpoints')>();
+  return {
+    ...actual,
+    // Reject so the background hitobject scan treats all sections as pending
+    // without making real network calls in tests.
+    downloadSectionOsu: vi.fn().mockRejectedValue(new Error('no osu in tests')),
+    downloadBaseOsu: vi.fn().mockRejectedValue(new Error('no base osu in tests')),
+    fetchDifficultyDetail: vi.fn().mockRejectedValue(new Error('use hook mock')),
+  };
+});
+
 vi.mock('../components/MergedDownloadButton', () => ({
   default: () => <button type="button">Download Full Difficulty (.osu)</button>,
 }));

@@ -120,7 +120,7 @@ describe('Timeline', () => {
   it('highlights the selected section', () => {
     renderTimeline({ selectedSectionId: 's2' });
     const block = screen.getByTestId('timeline-section-s2');
-    expect(block.className).toContain('ring-2');
+    expect(block.className).toContain('ring-inset');
   });
 
   it('shows fallback message when songLengthMs is zero', () => {
@@ -139,5 +139,76 @@ describe('Timeline', () => {
     );
     expect(blocks[0]).toHaveAttribute('data-testid', 'timeline-section-s1');
     expect(blocks[1]).toHaveAttribute('data-testid', 'timeline-section-s2');
+  });
+
+  it('gives unassigned sections a grey background via inline style', () => {
+    renderTimeline({ sections: [{ id: 's1', name: 'Intro', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: null }] });
+    const block = screen.getByTestId('timeline-section-s1');
+    // Unassigned uses oklch with chroma 0 (neutral grey); no alpha channel on a full section.
+    expect(block.style.backgroundColor).toContain('oklch');
+    expect(block.style.backgroundColor).not.toContain('/ 0.4');
+  });
+
+  it('gives two sections assigned to the same user the same color', () => {
+    const sections: DecryptedSection[] = [
+      { id: 's1', name: 'A', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: 'user-1' },
+      { id: 's2', name: 'B', startTimeMs: 30000, endTimeMs: 60000, sortOrder: 1, assignedTo: 'user-1' },
+    ];
+    const membersById = new Map([['user-1', { username: 'alice' }]]);
+    renderTimeline({ sections, membersById });
+    const bg1 = screen.getByTestId('timeline-section-s1').style.backgroundColor;
+    const bg2 = screen.getByTestId('timeline-section-s2').style.backgroundColor;
+    expect(bg1).toBeTruthy();
+    expect(bg1).toEqual(bg2);
+  });
+
+  it('gives sections assigned to different users different colors', () => {
+    const sections: DecryptedSection[] = [
+      { id: 's1', name: 'A', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: 'user-1' },
+      { id: 's2', name: 'B', startTimeMs: 30000, endTimeMs: 60000, sortOrder: 1, assignedTo: 'user-2' },
+    ];
+    const membersById = new Map([
+      ['user-1', { username: 'alice' }],
+      ['user-2', { username: 'bob' }],
+    ]);
+    renderTimeline({ sections, membersById });
+    const bg1 = screen.getByTestId('timeline-section-s1').style.backgroundColor;
+    const bg2 = screen.getByTestId('timeline-section-s2').style.backgroundColor;
+    expect(bg1).toBeTruthy();
+    expect(bg2).toBeTruthy();
+    expect(bg1).not.toEqual(bg2);
+  });
+
+  it('uses a muted background for sections with no hit objects in range', () => {
+    const sections: DecryptedSection[] = [
+      { id: 's1', name: 'A', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: 'user-1' },
+    ];
+    const membersById = new Map([['user-1', { username: 'alice' }]]);
+    const sectionHitObjectMap = new Map([['s1', false]]);
+    renderTimeline({ sections, membersById, sectionHitObjectMap });
+    const block = screen.getByTestId('timeline-section-s1');
+    // Muted assigned sections carry an alpha value in their oklch backgroundColor
+    expect(block.style.backgroundColor).toContain('/ 0.4');
+  });
+
+  it('uses full background for sections that have hit objects in range', () => {
+    const sections: DecryptedSection[] = [
+      { id: 's1', name: 'A', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: 'user-1' },
+    ];
+    const membersById = new Map([['user-1', { username: 'alice' }]]);
+    const sectionHitObjectMap = new Map([['s1', true]]);
+    renderTimeline({ sections, membersById, sectionHitObjectMap });
+    const block = screen.getByTestId('timeline-section-s1');
+    expect(block.style.backgroundColor).not.toContain('/ 0.4');
+  });
+
+  it('uses full background when section is not yet in the hit-object map', () => {
+    const sections: DecryptedSection[] = [
+      { id: 's1', name: 'A', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: 'user-1' },
+    ];
+    const membersById = new Map([['user-1', { username: 'alice' }]]);
+    renderTimeline({ sections, membersById, sectionHitObjectMap: new Map() });
+    const block = screen.getByTestId('timeline-section-s1');
+    expect(block.style.backgroundColor).not.toContain('/ 0.4');
   });
 });
