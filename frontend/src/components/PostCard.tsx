@@ -34,14 +34,14 @@ const TAG_COLORS: Record<PostTag, string> = {
   reopen: 'bg-orange-500',
 };
 
-const TAG_LABEL_KEYS: Record<PostTag, string> = {
+const TAG_LABEL_KEYS = {
   general: 'postCard.tagGeneral',
   suggestion: 'postCard.tagSuggestion',
   problem: 'postCard.tagProblem',
   praise: 'postCard.tagPraise',
   resolve: 'postCard.tagResolve',
   reopen: 'postCard.tagReopen',
-};
+} as const satisfies Record<PostTag, string>;
 
 function storageKey(userId: string, postId: string): string {
   return `post-collapsed:${userId}:${postId}`;
