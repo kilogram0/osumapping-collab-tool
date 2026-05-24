@@ -403,7 +403,6 @@
     "deleteDifficultyBodyPrefix": "Vols suprimir ",
     "deleteDifficultyBodySuffix": "? Això eliminarà permanentment totes les seves seccions, publicacions i versions .osu pujades. ",
     "deleteUndoneWarning": "No es pot desfer.",
-    "sectionView": "Vista per seccions",
     "showAllPosts": "Mostra totes les publicacions",
     "selectSection": "Selecciona una secció de la línia de temps de dalt per veure'n els detalls i publicacions.",
     "noSectionsYet": "Encara no hi ha cap secció.",

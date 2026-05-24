@@ -403,7 +403,6 @@
     "deleteDifficultyBodyPrefix": "Delete ",
     "deleteDifficultyBodySuffix": "? This will permanently remove all its sections, posts, and uploaded .osu versions. ",
     "deleteUndoneWarning": "This cannot be undone.",
-    "sectionView": "Section View",
     "showAllPosts": "Show All Posts",
     "selectSection": "Select a section from the timeline above to view its details and posts.",
     "noSectionsYet": "No sections yet.",

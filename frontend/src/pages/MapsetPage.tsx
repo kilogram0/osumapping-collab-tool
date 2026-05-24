@@ -116,7 +116,7 @@ export default function MapsetPage() {
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editingPostBody, setEditingPostBody] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showAllPosts, setShowAllPosts] = useState(false);
+  const [showAllPosts, setShowAllPosts] = useState(true);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   // Owner-only role emulation: lets the owner preview the page as a mapper,
   // modder, or ghost member. Stored in component state — resets when leaving
@@ -176,7 +176,7 @@ export default function MapsetPage() {
     setEditingPost(null);
     setShowCreateForm(false);
     setEditingPostBody('');
-    setShowAllPosts(false);
+    setShowAllPosts(true);
     setSelectedSectionId(null);
   }, [selectedDifficultyId]);
 
@@ -1225,20 +1225,6 @@ export default function MapsetPage() {
                 )}
               </div>
               <div ref={rightGroupRef} data-testid="view-toggle-right" className={rightGroupWrapped ? 'flex flex-col items-end gap-2' : 'flex items-center gap-2'}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAllPosts(false);
-                    setSelectedSectionId(null);
-                  }}
-                  className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-                    !showAllPosts
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  {t('mapsetPage.sectionView')}
-                </button>
                 <button
                   type="button"
                   onClick={() => {

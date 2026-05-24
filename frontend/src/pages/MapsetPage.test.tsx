@@ -429,12 +429,20 @@ describe('MapsetPage', () => {
     expect(screen.queryByRole('button', { name: /Add Section/i })).not.toBeInTheDocument();
   });
 
-  it('shows Section View and Show All Posts toggles', async () => {
+  it('shows Show All Posts toggle', async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Section View/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Section View/i })).not.toBeInTheDocument();
+  });
+
+  it('defaults to all-posts view on load without any button click', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
   });
 
   it('shows section detail panel when a timeline section is clicked', async () => {
@@ -451,16 +459,60 @@ describe('MapsetPage', () => {
     expect(within(panel).getByRole('heading', { name: 'Intro' })).toBeInTheDocument();
   });
 
-  it('shows all posts view when Show All Posts is clicked', async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
+  it('resets to all-posts view when switching difficulties', async () => {
+    mockUseDifficulties.mockReturnValue({
+      data: [
+        ...MOCK_DIFFICULTIES,
+        {
+          id: 'd2',
+          mapset_id: 'ms1',
+          encrypted_name: 'enc:Normal',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+        },
+      ],
+      isLoading: false,
     });
+
+    renderPage();
     const user = userEvent.setup();
+
+    // Click a section to enter section view
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('timeline-section-s1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument();
+    });
+
+    // Switch difficulty — should reset to all-posts view
+    await user.click(screen.getByRole('tab', { name: /Normal/i }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('section-detail-panel')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+  });
+
+  it('clicking Show All Posts from section view hides the section panel and shows posts', async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    // Enter section view
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('timeline-section-s1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument();
+    });
+
+    // Return to all-posts via the button
     await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
     await waitFor(() => {
-      expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+      expect(screen.queryByTestId('section-detail-panel')).not.toBeInTheDocument();
     });
+    expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
     expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
   });
 
@@ -740,10 +792,8 @@ describe('MapsetPage', () => {
         expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
       });
       await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
-      await waitFor(() => {
-        expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /^Delete$/i }));
+      const dialog = await screen.findByRole('dialog', { name: /Delete Difficulty/i });
+      await user.click(within(dialog).getByRole('button', { name: /^Delete$/i }));
       await waitFor(() => {
         expect(mockDeleteDifficulty).toHaveBeenCalledWith('d1');
       });
@@ -758,10 +808,8 @@ describe('MapsetPage', () => {
         expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
       });
       await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
-      await waitFor(() => {
-        expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /^Delete$/i }));
+      const dialog = await screen.findByRole('dialog', { name: /Delete Difficulty/i });
+      await user.click(within(dialog).getByRole('button', { name: /^Delete$/i }));
       await waitFor(() => {
         expect(screen.getByText('Server error')).toBeInTheDocument();
       });
