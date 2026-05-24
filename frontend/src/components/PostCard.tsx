@@ -29,7 +29,7 @@ const TAG_COLORS: Record<PostTag, string> = {
   problem: 'bg-red-500',
   suggestion: 'bg-yellow-500',
   praise: 'bg-blue-500',
-  general: 'bg-gray-500',
+  general: 'bg-purple-500',
   resolve: 'bg-green-500',
   reopen: 'bg-orange-500',
 };

@@ -11,7 +11,7 @@ const TAG_MARKER: Partial<Record<PostTag, { color: string; z: number }>> = {
   problem:    { color: '#ef4444', z: 40 },
   suggestion: { color: '#eab308', z: 30 },
   praise:     { color: '#3b82f6', z: 20 },
-  general:    { color: '#6b7280', z: 10 },
+  general:    { color: '#a855f7', z: 10 },
 };
 
 const RESOLVED_MARKER = { color: '#22c55e', z: 5 };

@@ -225,7 +225,7 @@
   },
   "createPostForm": {
     "tagLabel": "Tag",
-    "tagGeneral": "General",
+    "tagGeneral": "Note",
     "tagSuggestion": "Suggestion",
     "tagProblem": "Problem",
     "tagPraise": "Praise",
@@ -247,7 +247,7 @@
     "errorGeneric": "Failed to submit post. Please try again."
   },
   "postCard": {
-    "tagGeneral": "General",
+    "tagGeneral": "Note",
     "tagSuggestion": "Suggestion",
     "tagProblem": "Problem",
     "tagPraise": "Praise",

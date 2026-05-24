@@ -225,7 +225,7 @@
   },
   "createPostForm": {
     "tagLabel": "Etiqueta",
-    "tagGeneral": "General",
+    "tagGeneral": "Nota",
     "tagSuggestion": "Suggeriment",
     "tagProblem": "Problema",
     "tagPraise": "Elogi",
@@ -247,7 +247,7 @@
     "errorGeneric": "No s'ha pogut enviar la publicació. Torna-ho a provar."
   },
   "postCard": {
-    "tagGeneral": "General",
+    "tagGeneral": "Nota",
     "tagSuggestion": "Suggeriment",
     "tagProblem": "Problema",
     "tagPraise": "Elogi",
