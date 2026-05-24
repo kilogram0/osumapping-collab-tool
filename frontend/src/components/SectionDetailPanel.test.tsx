@@ -152,6 +152,89 @@ describe('SectionDetailPanel', () => {
     expect(screen.queryByText(/No timestamp/i)).not.toBeInTheDocument();
   });
 
+  it('shows replies to a section post even when the reply has no timestamp', () => {
+    const replyNoTimestamp: DecryptedPost = {
+      id: 'r1',
+      difficulty_id: 'd1',
+      author_id: 'other-user-uuid',
+      parent_id: 'p1',
+      tag: 'general',
+      encrypted_body: 'enc:looks fine to me',
+      created_at: '2024-01-01T15:00:00Z',
+      updated_at: '2024-01-01T15:00:00Z',
+      decryptedBody: 'looks fine to me',
+      extractedMs: null,
+    };
+    renderPanel({ posts: [...POSTS, replyNoTimestamp] });
+    expect(screen.getByText(/too close/i)).toBeInTheDocument();
+    expect(screen.getByText(/looks fine to me/i)).toBeInTheDocument();
+  });
+
+  it('shows replies to a section post even when the reply timestamp is outside the section', () => {
+    const replyOtherSection: DecryptedPost = {
+      id: 'r2',
+      difficulty_id: 'd1',
+      author_id: 'other-user-uuid',
+      parent_id: 'p1',
+      tag: 'general',
+      encrypted_body: 'enc:01:30:000 - see here for reference',
+      created_at: '2024-01-01T15:00:00Z',
+      updated_at: '2024-01-01T15:00:00Z',
+      decryptedBody: '01:30:000 - see here for reference',
+      extractedMs: 90000,
+    };
+    renderPanel({ posts: [...POSTS, replyOtherSection] });
+    expect(screen.getByText(/see here for reference/i)).toBeInTheDocument();
+  });
+
+  it('does not show replies whose root post is outside the section', () => {
+    const replyToOutside: DecryptedPost = {
+      id: 'r3',
+      difficulty_id: 'd1',
+      author_id: 'current-user-uuid',
+      parent_id: 'p2',
+      tag: 'general',
+      encrypted_body: 'enc:fair point',
+      created_at: '2024-01-01T15:00:00Z',
+      updated_at: '2024-01-01T15:00:00Z',
+      decryptedBody: 'fair point',
+      extractedMs: null,
+    };
+    renderPanel({ posts: [...POSTS, replyToOutside] });
+    // p2 is at 45000ms (outside the section), so its reply should not appear
+    expect(screen.queryByText(/fair point/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a deeply nested reply anchored to the section root', () => {
+    const reply1: DecryptedPost = {
+      id: 'r1',
+      difficulty_id: 'd1',
+      author_id: 'other-user-uuid',
+      parent_id: 'p1',
+      tag: 'general',
+      encrypted_body: 'enc:first reply',
+      created_at: '2024-01-01T15:00:00Z',
+      updated_at: '2024-01-01T15:00:00Z',
+      decryptedBody: 'first reply',
+      extractedMs: null,
+    };
+    const reply2: DecryptedPost = {
+      id: 'r2',
+      difficulty_id: 'd1',
+      author_id: 'current-user-uuid',
+      parent_id: 'r1',
+      tag: 'general',
+      encrypted_body: 'enc:nested reply',
+      created_at: '2024-01-01T15:01:00Z',
+      updated_at: '2024-01-01T15:01:00Z',
+      decryptedBody: 'nested reply',
+      extractedMs: null,
+    };
+    renderPanel({ posts: [...POSTS, reply1, reply2] });
+    expect(screen.getByText(/first reply/i)).toBeInTheDocument();
+    expect(screen.getByText(/nested reply/i)).toBeInTheDocument();
+  });
+
   it('shows no-posts message when section has no posts', () => {
     renderPanel({ posts: [] });
     expect(screen.getByText(/No posts for this section yet/i)).toBeInTheDocument();

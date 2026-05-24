@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { Post, PostTag } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, postFieldAad } from '../utils/crypto';
+import { extractFirstTimestamp, formatTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
 
 const TAG_OPTIONS = [
@@ -28,6 +29,9 @@ interface CreatePostFormProps {
   editingPost?: Post | null;
   /** Existing decrypted body when in edit mode. */
   initialBody?: string;
+  /** When set and the submitted body has no timestamp, this ms value is prepended as a timestamp.
+   *  Only applies to new posts (not replies or edits). */
+  defaultTimestampMs?: number | null;
 }
 
 export default function CreatePostForm({
@@ -38,6 +42,7 @@ export default function CreatePostForm({
   parentPost,
   editingPost,
   initialBody = '',
+  defaultTimestampMs = null,
 }: CreatePostFormProps) {
   const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
@@ -74,7 +79,11 @@ export default function CreatePostForm({
       }
 
       const postId = editingPost?.id ?? crypto.randomUUID();
-      const encryptedBody = await encrypt(key, body, postFieldAad(postId, mapsetId));
+      const finalBody =
+        !isEdit && !isReply && defaultTimestampMs !== null && !extractFirstTimestamp(body)
+          ? `${formatTimestamp(defaultTimestampMs)} - ${body}`
+          : body;
+      const encryptedBody = await encrypt(key, finalBody, postFieldAad(postId, mapsetId));
 
       await onSubmit({
         id: postId,

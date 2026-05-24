@@ -201,6 +201,56 @@ describe('CreatePostForm', () => {
     expect(payload.encrypted_body).toBe('enc:updated body');
   });
 
+  it('prepends section start timestamp when body has no timestamp and defaultTimestampMs is set', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={onSubmit}
+        defaultTimestampMs={46140}
+      />,
+    );
+
+    const user = userEvent.setup();
+    const textarea = screen.getByLabelText(/New post/i);
+    await user.type(textarea, 'Great Part!');
+
+    await user.click(screen.getByRole('button', { name: /Post/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.encrypted_body).toBe('enc:00:46:140 - Great Part!');
+  });
+
+  it('does not prepend timestamp when body already contains one', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={onSubmit}
+        defaultTimestampMs={46140}
+      />,
+    );
+
+    const user = userEvent.setup();
+    const textarea = screen.getByLabelText(/New post/i);
+    await user.type(textarea, '01:23:456 - different spot');
+
+    await user.click(screen.getByRole('button', { name: /Post/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.encrypted_body).toBe('enc:01:23:456 - different spot');
+  });
+
   it('clears body after successful new post submission', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={onSubmit} />);

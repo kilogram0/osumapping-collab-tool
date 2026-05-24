@@ -99,14 +99,41 @@ export default function SectionDetailPanel({
   const [showCreateForm, setShowCreateForm] = useState(false);
 
   const sectionPosts = useMemo(() => {
-    return posts.filter((p) => {
+    const postById = new Map(posts.map((p) => [p.id, p]));
+
+    // Walk the parent chain to find the root (top-level) post id.
+    // Visited set guards against cycles in malformed data.
+    function findRootId(postId: string): string {
+      let current = postId;
+      const visited = new Set<string>();
+      while (true) {
+        if (visited.has(current)) return current;
+        visited.add(current);
+        const post = postById.get(current);
+        if (!post || post.parent_id === null) return current;
+        current = post.parent_id;
+      }
+    }
+
+    const inSectionByTimestamp = (p: DecryptedPost) => {
       if (p.extractedMs === null) return false;
       if (p.extractedMs < section.startTimeMs) return false;
-      // Half-open [start, end) so a post on a section boundary belongs only
-      // to the later section. The final section keeps an inclusive upper
-      // bound so posts at the song's last ms still appear somewhere.
+      // Half-open [start, end) — final section uses inclusive upper bound.
       return isLastSection ? p.extractedMs <= section.endTimeMs : p.extractedMs < section.endTimeMs;
-    });
+    };
+
+    // Top-level posts whose timestamp falls in this section anchor the threads.
+    const sectionRootIds = new Set(
+      posts.filter((p) => p.parent_id === null && inSectionByTimestamp(p)).map((p) => p.id),
+    );
+
+    // A top-level post belongs if its timestamp is in range.
+    // A reply belongs if its root ancestor is a post in this section,
+    // regardless of the reply's own timestamp (replies reference context,
+    // not necessarily the same position in the map).
+    return posts.filter((p) =>
+      p.parent_id === null ? sectionRootIds.has(p.id) : sectionRootIds.has(findRootId(p.id)),
+    );
   }, [posts, section, isLastSection]);
 
   // Build reply trees for section posts
@@ -426,6 +453,7 @@ export default function SectionDetailPanel({
               difficultyId={difficultyId}
               onSubmit={handleCreatePost}
               onCancel={() => setShowCreateForm(false)}
+              defaultTimestampMs={section.startTimeMs}
             />
           </div>
         )}
