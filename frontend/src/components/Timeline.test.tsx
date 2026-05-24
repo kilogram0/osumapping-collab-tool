@@ -108,6 +108,20 @@ describe('Timeline', () => {
     expect(onSelectSection).toHaveBeenCalledWith('s2');
   });
 
+  it('gives markers the correct background color for each tag', () => {
+    const posts: DecryptedPost[] = [
+      { id: 'prob', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'problem',    encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 10000 },
+      { id: 'sugg', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'suggestion', encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 20000 },
+      { id: 'prse', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'praise',     encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 30000 },
+      { id: 'genl', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'general',    encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 40000 },
+    ];
+    renderTimeline({ posts });
+    expect(screen.getByTestId('timeline-marker-prob').style.backgroundColor).toBe('rgb(239, 68, 68)');
+    expect(screen.getByTestId('timeline-marker-sugg').style.backgroundColor).toBe('rgb(234, 179, 8)');
+    expect(screen.getByTestId('timeline-marker-prse').style.backgroundColor).toBe('rgb(59, 130, 246)');
+    expect(screen.getByTestId('timeline-marker-genl').style.backgroundColor).toBe('rgb(107, 114, 128)');
+  });
+
   it('calls onJumpToPost when a marker is clicked', async () => {
     const onJumpToPost = vi.fn();
     renderTimeline({ onJumpToPost });

@@ -2,7 +2,16 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
+import type { PostTag } from '../api/endpoints';
 import { formatTimestamp } from '../utils/extractTimestamp';
+
+// Higher-priority tags get higher z-index so they dominate visually when markers overlap.
+const TAG_MARKER: Record<PostTag, { color: string; z: number }> = {
+  problem:    { color: '#ef4444', z: 40 },
+  suggestion: { color: '#eab308', z: 30 },
+  praise:     { color: '#3b82f6', z: 20 },
+  general:    { color: '#6b7280', z: 10 },
+};
 
 interface TimelineProps {
   sections: DecryptedSection[];
@@ -154,8 +163,12 @@ export default function Timeline({
               key={post.id}
               type="button"
               data-testid={`timeline-marker-${post.id}`}
-              className="absolute top-1 w-3 h-3 bg-white rounded-full border-2 border-gray-900 shadow hover:scale-125 transition-transform z-20"
-              style={{ left: `calc(${leftPercent}% - 6px)` }}
+              className="absolute top-1 w-4 h-4 rounded-full border-2 border-gray-900 shadow hover:scale-125 transition-transform"
+              style={{
+                left: `calc(${leftPercent}% - 8px)`,
+                backgroundColor: TAG_MARKER[post.tag].color,
+                zIndex: TAG_MARKER[post.tag].z,
+              }}
               title={t('timeline.postAt', { time: formatTimestamp(post.extractedMs ?? 0) })}
               onClick={(e) => {
                 e.stopPropagation();

@@ -24,10 +24,10 @@ interface PostCardProps {
 }
 
 const TAG_COLORS: Record<PostTag, string> = {
-  general: 'bg-gray-500',
-  suggestion: 'bg-blue-500',
   problem: 'bg-red-500',
-  praise: 'bg-green-500',
+  suggestion: 'bg-yellow-500',
+  praise: 'bg-blue-500',
+  general: 'bg-gray-500',
 };
 
 const TAG_LABEL_KEYS = {

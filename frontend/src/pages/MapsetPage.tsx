@@ -118,6 +118,7 @@ export default function MapsetPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showAllPosts, setShowAllPosts] = useState(true);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
+  const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   // Owner-only role emulation: lets the owner preview the page as a mapper,
   // modder, or ghost member. Stored in component state — resets when leaving
   // the page. Only the owner's UI is affected; nothing is sent to the server.
@@ -406,6 +407,18 @@ export default function MapsetPage() {
     return () => { cancelled = true; };
   }, [unlocked, difficultyDetail, mapsetId, getKey]);
 
+  useEffect(() => {
+    if (!jumpTarget || !showAllPosts) return;
+    const el = document.getElementById(`post-${jumpTarget}`);
+    setJumpTarget(null);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('post-flash');
+    void el.offsetWidth; // force reflow to restart animation
+    el.classList.add('post-flash');
+    setTimeout(() => el.classList.remove('post-flash'), 3000);
+  }, [jumpTarget, showAllPosts]);
+
   // Detect when the two button groups together no longer fit side-by-side.
   // Clone each group's children into an off-screen probe (position:fixed, width:max-content)
   // to read unconstrained natural widths — no mutations to the real layout, no feedback loop.
@@ -476,7 +489,7 @@ export default function MapsetPage() {
     const isReplyingToThis = replyingTo?.id === post.id;
     const isEditingThis = editingPost?.id === post.id;
     return (
-      <div key={post.id} className={depth > 0 ? 'mt-2 ml-8 border-l-2 border-gray-700 pl-4' : ''}>
+      <div key={post.id} id={`post-${post.id}`} className={depth > 0 ? 'mt-2 ml-8 border-l-2 border-gray-700 pl-4' : ''}>
         <PostCard
           post={post}
           mapsetId={mapsetId}
@@ -1159,6 +1172,11 @@ export default function MapsetPage() {
                 selectedSectionId={selectedSectionId}
                 membersById={membersById}
                 sectionHitObjectMap={sectionHitObjectMap}
+                onJumpToPost={(postId) => {
+                  setShowAllPosts(true);
+                  setSelectedSectionId(null);
+                  setJumpTarget(postId);
+                }}
                 onSelectSection={(sectionId) => {
                   if (showAllPosts) {
                     // Switch from All Posts to Section View

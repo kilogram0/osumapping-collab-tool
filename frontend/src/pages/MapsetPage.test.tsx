@@ -445,6 +445,32 @@ describe('MapsetPage', () => {
     expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
   });
 
+  it('clicking a timeline marker switches to all-posts view and flashes the target post', async () => {
+    vi.stubGlobal('scrollIntoView', vi.fn());
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    renderPage();
+    const user = userEvent.setup();
+
+    // Enter section view first so we can confirm the switch
+    await waitFor(() => expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument());
+    await user.click(screen.getByTestId('timeline-section-s1'));
+    await waitFor(() => expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument());
+
+    // p1 has timestamp 00:46:140 → 46140ms, within song length 245000ms
+    const marker = await screen.findByTestId('timeline-marker-p1');
+    await user.click(marker);
+
+    // Must switch back to all-posts view
+    await waitFor(() => expect(screen.queryByTestId('section-detail-panel')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/these are too close/i)).toBeInTheDocument());
+
+    // Target post wrapper must carry the flash class
+    const postWrapper = document.getElementById('post-p1');
+    expect(postWrapper).not.toBeNull();
+    expect(postWrapper!.classList.contains('post-flash')).toBe(true);
+  });
+
   it('shows section detail panel when a timeline section is clicked', async () => {
     renderPage();
     await waitFor(() => {
