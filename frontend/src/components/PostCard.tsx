@@ -6,6 +6,8 @@ import { decrypt, postFieldAad } from '../utils/crypto';
 import { extractFirstTimestamp, findAllTimestamps, generateOsuLink, formatTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
 
+const IMAGE_RE = /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g;
+
 interface PostCardProps {
   post: Post;
   mapsetId: string;
@@ -112,44 +114,87 @@ export default function PostCard({
     }
   };
 
-  const primaryTimestamp = decryptedBody ? extractFirstTimestamp(decryptedBody) : null;
+  // Alt text is excluded so timestamp-shaped alts don't become header chips.
+  function stripImageAltText(text: string): string {
+    return text.replace(IMAGE_RE, (_match, _alt, url) => `![](${url})`);
+  }
+
+  const primaryTimestamp = decryptedBody ? extractFirstTimestamp(stripImageAltText(decryptedBody)) : null;
 
   function renderBody(text: string): React.ReactNode {
-    const matches = findAllTimestamps(text);
-    if (matches.length === 0) {
+    type Token =
+      | { kind: 'timestamp'; ms: number; combos?: string; raw: string; index: number }
+      | { kind: 'image'; alt: string; url: string; raw: string; index: number };
+
+    // Collect image tokens and record their alt text spans so timestamps inside alt text are excluded.
+    const imageTokens: (Token & { kind: 'image' })[] = [];
+    IMAGE_RE.lastIndex = 0;
+    let im: RegExpExecArray | null;
+    while ((im = IMAGE_RE.exec(text)) !== null) {
+      imageTokens.push({ kind: 'image', alt: im[1], url: im[2], raw: im[0], index: im.index });
+    }
+
+    const altSpans = imageTokens.map(t => ({ start: t.index + 2, end: t.index + 2 + t.alt.length }));
+
+    const tokens: Token[] = [...imageTokens];
+    for (const m of findAllTimestamps(text)) {
+      const inAlt = altSpans.some(s => m.index >= s.start && m.index + m.raw.length <= s.end);
+      if (!inAlt) {
+        tokens.push({ kind: 'timestamp', ms: m.ms, combos: m.combos, raw: m.raw, index: m.index });
+      }
+    }
+
+    tokens.sort((a, b) => a.index - b.index);
+
+    if (tokens.length === 0) {
       return <p className="text-gray-200 whitespace-pre-wrap">{text}</p>;
     }
 
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
 
-    for (const match of matches) {
-      if (match.index > lastIndex) {
+    for (const token of tokens) {
+      if (token.index < lastIndex) continue;
+
+      if (token.index > lastIndex) {
         parts.push(
-          <span key={`text-${lastIndex}`}>
-            {text.slice(lastIndex, match.index)}
-          </span>,
+          <span key={`text-${lastIndex}`}>{text.slice(lastIndex, token.index)}</span>,
         );
       }
-      const link = generateOsuLink(match.ms, match.combos);
-      parts.push(
-        <a
-          key={`link-${match.index}`}
-          href={link}
-          className="text-blue-400 hover:text-blue-300 underline"
-          onClick={(e) => {
-            // Prevent the click from being intercepted by collapse handler
-            e.stopPropagation();
-          }}
-        >
-          {match.raw}
-        </a>,
-      );
-      lastIndex = match.index + match.raw.length;
+
+      if (token.kind === 'timestamp') {
+        const link = generateOsuLink(token.ms, token.combos);
+        parts.push(
+          <a
+            key={`link-${token.index}`}
+            href={link}
+            className="text-blue-400 hover:text-blue-300 underline"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            {token.raw}
+          </a>,
+        );
+      } else {
+        parts.push(
+          <img
+            key={`img-${token.index}`}
+            src={token.url}
+            alt={token.alt}
+            className="max-w-full max-h-96 object-contain rounded my-1"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onClick={(e) => e.stopPropagation()}
+          />,
+        );
+      }
+
+      lastIndex = token.index + token.raw.length;
     }
 
     if (lastIndex < text.length) {
-      parts.push(<span key={`text-end`}>{text.slice(lastIndex)}</span>);
+      parts.push(<span key="text-end">{text.slice(lastIndex)}</span>);
     }
 
     return <p className="text-gray-200 whitespace-pre-wrap">{parts}</p>;

@@ -215,6 +215,72 @@ describe('PostCard', () => {
     });
   });
 
+  it('renders image from ![alt](url) syntax', async () => {
+    renderCard({ decryptedBody: 'look at this ![screenshot](https://example.com/img.png) here' });
+    await act(async () => {});
+    await waitFor(() => {
+      const img = screen.getByAltText('screenshot');
+      expect(img).toHaveAttribute('src', 'https://example.com/img.png');
+    });
+  });
+
+  it('ignores non-http image URLs', async () => {
+    renderCard({ decryptedBody: '![bad](javascript:alert(1))' });
+    await act(async () => {});
+    expect(screen.queryByAltText('bad')).not.toBeInTheDocument();
+  });
+
+  it('renders image and timestamp in the same post', async () => {
+    renderCard({ decryptedBody: '00:10:000 - see ![ref](https://example.com/x.png)' });
+    await act(async () => {});
+    await waitFor(() => {
+      expect(screen.getAllByRole('link', { name: /00:10:000/i }).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByAltText('ref')).toBeInTheDocument();
+    });
+  });
+
+  it('does not treat timestamp in image alt text as a timestamp link', async () => {
+    // Alt text is not content — the timestamp inside it must not produce a link or a header chip
+    renderCard({ decryptedBody: '![00:10:000](https://example.com/x.png)' });
+    await act(async () => {});
+    await waitFor(() => {
+      expect(screen.getByAltText('00:10:000')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('link', { name: /00:10:000/i })).not.toBeInTheDocument();
+  });
+
+  it('does not double-render timestamp that appears inside image URL', async () => {
+    renderCard({ decryptedBody: '![img](https://example.com/00:10:000/x.png)' });
+    await act(async () => {});
+    await waitFor(() => {
+      expect(screen.getByAltText('img')).toBeInTheDocument();
+    });
+    // Only the header primaryTimestamp link appears — the body must NOT add a second one
+    expect(screen.getAllByRole('link', { name: /00:10:000/i })).toHaveLength(1);
+  });
+
+  it('clicking an image does not collapse the post', async () => {
+    renderCard({ decryptedBody: '![pic](https://example.com/img.png)' });
+    await act(async () => {});
+    const img = await screen.findByAltText('pic');
+    const user = userEvent.setup();
+    await user.click(img);
+    // post body should still be visible (not collapsed)
+    expect(screen.getByAltText('pic')).toBeInTheDocument();
+  });
+
+  it('does not render image for URL with spaces (malformed)', async () => {
+    renderCard({ decryptedBody: '![x](https://a.com/b c)' });
+    await act(async () => {});
+    expect(screen.queryByAltText('x')).not.toBeInTheDocument();
+  });
+
+  it('does not render image for unclosed bracket syntax', async () => {
+    renderCard({ decryptedBody: '![noclose](https://x.com/a.png' });
+    await act(async () => {});
+    expect(screen.queryByAltText('noclose')).not.toBeInTheDocument();
+  });
+
   it('uses provided decryptedBody without calling decrypt', async () => {
     const { decrypt } = await import('../utils/crypto');
     renderCard({ decryptedBody: 'plaintext body without timestamps' });
