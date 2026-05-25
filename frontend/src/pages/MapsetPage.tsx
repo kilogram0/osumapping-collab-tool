@@ -120,6 +120,7 @@ export default function MapsetPage() {
   const [editingPostBody, setEditingPostBody] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showAllPosts, setShowAllPosts] = useState(true);
+  const [showOnlyUnresolved, setShowOnlyUnresolved] = useState(false);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   // Owner-only role emulation: lets the owner preview the page as a mapper,
@@ -181,6 +182,7 @@ export default function MapsetPage() {
     setShowCreateForm(false);
     setEditingPostBody('');
     setShowAllPosts(true);
+    setShowOnlyUnresolved(false);
     setSelectedSectionId(null);
   }, [selectedDifficultyId]);
 
@@ -480,6 +482,20 @@ export default function MapsetPage() {
   }, [decryptedPosts]);
 
   const resolvedPostIds = useMemo(() => deriveResolvedRootIds(globalPostTree), [globalPostTree]);
+
+  const postsForTimeline = useMemo(() => {
+    if (!showOnlyUnresolved) return decryptedPosts;
+    return decryptedPosts.filter(
+      (p) => p.parent_id === null && canBeResolved(p.tag) && !resolvedPostIds.has(p.id),
+    );
+  }, [showOnlyUnresolved, decryptedPosts, resolvedPostIds]);
+
+  const visibleTopLevel = useMemo(() => {
+    if (!showOnlyUnresolved) return globalPostTree.topLevel;
+    return globalPostTree.topLevel.filter(
+      (p) => canBeResolved(p.tag) && !resolvedPostIds.has(p.id),
+    );
+  }, [showOnlyUnresolved, globalPostTree.topLevel, resolvedPostIds]);
 
   function renderGlobalPostNode(post: DecryptedPost, depth: number): JSX.Element | null {
     const MAX_REPLY_DEPTH = 10;
@@ -1185,7 +1201,7 @@ export default function MapsetPage() {
             {songLengthMs !== null && decryptedSections.length > 0 && (
               <Timeline
                 sections={decryptedSections}
-                posts={decryptedPosts}
+                posts={postsForTimeline}
                 songLengthMs={songLengthMs}
                 selectedSectionId={selectedSectionId}
                 membersById={membersById}
@@ -1276,6 +1292,18 @@ export default function MapsetPage() {
                 >
                   {t('mapsetPage.showAllPosts')}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setShowOnlyUnresolved((v) => !v)}
+                  aria-pressed={showOnlyUnresolved}
+                  className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                    showOnlyUnresolved
+                      ? 'bg-orange-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  {t('mapsetPage.showOnlyUnresolved')}
+                </button>
               </div>
             </div>
 
@@ -1308,6 +1336,7 @@ export default function MapsetPage() {
                 onDeleteSection={handleDeleteSection}
                 onMergeSection={isOwner ? handleMergeSection : undefined}
                 onSplitSection={isOwner ? handleOpenSplitSection : undefined}
+                showOnlyUnresolved={showOnlyUnresolved}
               />
             )}
 
@@ -1352,11 +1381,13 @@ export default function MapsetPage() {
                 {detailLoading && <p className="text-gray-400">{t('mapsetPage.loadingPosts')}</p>}
 
                 <div className="space-y-4">
-                  {globalPostTree.topLevel.map((post) => renderGlobalPostNode(post, 0))}
+                  {visibleTopLevel.map((post) => renderGlobalPostNode(post, 0))}
                 </div>
 
-                {decryptedPosts.length === 0 && !detailLoading && (
-                  <p className="text-gray-400 italic">{t('mapsetPage.noPostsYet')}</p>
+                {visibleTopLevel.length === 0 && !detailLoading && (
+                  <p className="text-gray-400 italic">
+                    {decryptedPosts.length === 0 ? t('mapsetPage.noPostsYet') : t('mapsetPage.noUnresolvedPosts')}
+                  </p>
                 )}
               </div>
             )}

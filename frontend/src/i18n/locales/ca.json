@@ -412,6 +412,8 @@
     "deleteDifficultyBodySuffix": "? Això eliminarà permanentment totes les seves seccions, publicacions i versions .osu pujades. ",
     "deleteUndoneWarning": "No es pot desfer.",
     "showAllPosts": "Mostra totes les publicacions",
+    "showOnlyUnresolved": "Mostra només les no resoltes",
+    "noUnresolvedPosts": "No hi ha cap problema o suggeriment sense resoldre.",
     "selectSection": "Selecciona una secció de la línia de temps de dalt per veure'n els detalls i publicacions.",
     "noSectionsYet": "Encara no hi ha cap secció.",
     "allPostsHeading": "Totes les publicacions",

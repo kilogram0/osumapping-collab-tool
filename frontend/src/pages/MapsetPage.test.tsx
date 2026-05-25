@@ -1050,6 +1050,48 @@ describe('MapsetPage', () => {
     });
   });
 
+  describe('Show only unresolved filter', () => {
+    it('hides non-problem/suggestion posts when filter is toggled on', async () => {
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument();
+        expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+      });
+
+      const user = userEvent.setup();
+      const filterBtn = screen.getByRole('button', { name: /Show Only Unresolved/i });
+      expect(filterBtn).toHaveAttribute('aria-pressed', 'false');
+      await user.click(filterBtn);
+
+      expect(filterBtn).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.queryByText(/Nice map overall/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+    });
+
+    it('restores all posts when filter is toggled off again', async () => {
+      renderPage();
+      await waitFor(() => expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument());
+
+      const user = userEvent.setup();
+      const filterBtn = screen.getByRole('button', { name: /Show Only Unresolved/i });
+      await user.click(filterBtn);
+      expect(screen.queryByText(/Nice map overall/i)).not.toBeInTheDocument();
+
+      await user.click(filterBtn);
+      await waitFor(() => expect(screen.getByText(/Nice map overall/i)).toBeInTheDocument());
+    });
+
+    it('keeps problem/suggestion timeline marker visible while filter is on', async () => {
+      renderPage();
+      await waitFor(() => expect(screen.getByTestId('timeline-marker-p1')).toBeInTheDocument());
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: /Show Only Unresolved/i }));
+
+      expect(screen.getByTestId('timeline-marker-p1')).toBeInTheDocument();
+    });
+  });
+
   describe('Split section', () => {
     async function openSplitModal() {
       const user = userEvent.setup();

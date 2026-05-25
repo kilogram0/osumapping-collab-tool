@@ -412,6 +412,8 @@
     "deleteDifficultyBodySuffix": "? This will permanently remove all its sections, posts, and uploaded .osu versions. ",
     "deleteUndoneWarning": "This cannot be undone.",
     "showAllPosts": "Show All Posts",
+    "showOnlyUnresolved": "Show Only Unresolved",
+    "noUnresolvedPosts": "No unresolved problem or suggestion posts.",
     "selectSection": "Select a section from the timeline above to view its details and posts.",
     "noSectionsYet": "No sections yet.",
     "allPostsHeading": "All Posts",

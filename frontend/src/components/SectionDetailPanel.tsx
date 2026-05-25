@@ -52,6 +52,7 @@ interface SectionDetailPanelProps {
   nextSection?: DecryptedSection | null;
   onMergeSection?: (section: DecryptedSection) => void | Promise<void>;
   onSplitSection?: (section: DecryptedSection) => void;
+  showOnlyUnresolved?: boolean;
 }
 
 function formatTime(ms: number): string {
@@ -90,6 +91,7 @@ export default function SectionDetailPanel({
   nextSection,
   onMergeSection,
   onSplitSection,
+  showOnlyUnresolved = false,
 }: SectionDetailPanelProps) {
   const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
@@ -161,6 +163,13 @@ export default function SectionDetailPanel({
   }, [sectionPosts]);
 
   const resolvedPostIds = useMemo(() => deriveResolvedRootIds(postTree), [postTree]);
+
+  const visibleTopLevel = useMemo(() => {
+    if (!showOnlyUnresolved) return postTree.topLevel;
+    return postTree.topLevel.filter(
+      (p) => canBeResolved(p.tag) && !resolvedPostIds.has(p.id),
+    );
+  }, [showOnlyUnresolved, postTree.topLevel, resolvedPostIds]);
 
   async function handleDownload() {
     if (!unlocked) return;
@@ -486,12 +495,12 @@ export default function SectionDetailPanel({
         )}
 
         <div className="space-y-3">
-          {postTree.topLevel.map((post) => renderPostNode(post, 0))}
+          {visibleTopLevel.map((post) => renderPostNode(post, 0))}
         </div>
 
-        {sectionPosts.length === 0 && (
+        {visibleTopLevel.length === 0 && (
           <p className="text-sm text-gray-500 italic">
-            {t('sectionDetail.empty')}
+            {sectionPosts.length === 0 ? t('sectionDetail.empty') : t('mapsetPage.noUnresolvedPosts')}
           </p>
         )}
       </div>
