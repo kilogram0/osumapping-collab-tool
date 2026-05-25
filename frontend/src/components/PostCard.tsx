@@ -22,6 +22,11 @@ interface PostCardProps {
   showReplyButton?: boolean;
   /** True when this root post has been resolved (last status reply has tag 'resolve'). */
   isResolved?: boolean;
+  /** Controlled collapse state. When `onToggleCollapse` is omitted the toggle
+   *  button is hidden and the body is always shown (used for reply posts —
+   *  collapse is owned by the root). */
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
   onReply?: (post: Post) => void;
   onEdit?: (post: Post) => void;
   onDelete?: (postId: string) => void;
@@ -45,10 +50,6 @@ const TAG_LABEL_KEYS = {
   reopen: 'postCard.tagReopen',
 } as const satisfies Record<PostTag, string>;
 
-function storageKey(userId: string, postId: string): string {
-  return `post-collapsed:${userId}:${postId}`;
-}
-
 export default function PostCard({
   post,
   mapsetId,
@@ -58,6 +59,8 @@ export default function PostCard({
   author,
   showReplyButton = true,
   isResolved = false,
+  isCollapsed = false,
+  onToggleCollapse,
   onReply,
   onEdit,
   onDelete,
@@ -66,13 +69,6 @@ export default function PostCard({
   const { isUnlocked, getKey } = useEncryption();
   const unlocked = isUnlocked(mapsetId);
   const [decryptedBody, setDecryptedBody] = useState<string | null>(propDecryptedBody ?? null);
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(storageKey(currentUserId, post.id)) === 'true';
-    } catch {
-      return false;
-    }
-  });
   const isAuthor = post.author_id === currentUserId;
   const canEdit = isAuthor;
   const canDelete = isAuthor || isOwner;
@@ -103,16 +99,6 @@ export default function PostCard({
     decryptBody();
     return () => { cancelled = true; };
   }, [unlocked, post, mapsetId, getKey, propDecryptedBody]);
-
-  const toggleCollapse = () => {
-    const next = !isCollapsed;
-    setIsCollapsed(next);
-    try {
-      localStorage.setItem(storageKey(currentUserId, post.id), String(next));
-    } catch {
-      // ignore
-    }
-  };
 
   // Alt text is excluded so timestamp-shaped alts don't become header chips.
   function stripImageAltText(text: string): string {
@@ -292,15 +278,17 @@ export default function PostCard({
             </div>
           )}
         </div>
-        <button
-          type="button"
-          onClick={toggleCollapse}
-          className="shrink-0 text-gray-500 hover:text-gray-300 transition-colors"
-          aria-label={isCollapsed ? t('postCard.expand') : t('postCard.collapse')}
-          title={isCollapsed ? t('postCard.expand') : t('postCard.collapse')}
-        >
-          {isCollapsed ? '▼' : '▲'}
-        </button>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="shrink-0 text-gray-500 hover:text-gray-300 transition-colors"
+            aria-label={isCollapsed ? t('postCard.expand') : t('postCard.collapse')}
+            title={isCollapsed ? t('postCard.expand') : t('postCard.collapse')}
+          >
+            {isCollapsed ? '▼' : '▲'}
+          </button>
+        )}
       </div>
     </div>
   );

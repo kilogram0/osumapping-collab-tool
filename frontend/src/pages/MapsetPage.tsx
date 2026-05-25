@@ -16,6 +16,7 @@ import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
 import PendingDifficultyList from '../components/PendingDifficultyList';
 import PostCard from '../components/PostCard';
+import CollapsibleBranch from '../components/CollapsibleBranch';
 import ResolveEvent from '../components/ResolveEvent';
 import RenameDifficultyModal from '../components/RenameDifficultyModal';
 import SectionDetailPanel from '../components/SectionDetailPanel';
@@ -497,15 +498,14 @@ export default function MapsetPage() {
     );
   }, [showOnlyUnresolved, globalPostTree.topLevel, resolvedPostIds]);
 
-  function renderGlobalPostNode(post: DecryptedPost, depth: number): JSX.Element | null {
-    const MAX_REPLY_DEPTH = 10;
+  const MAX_REPLY_DEPTH = 10;
+
+  function renderReplyNode(post: DecryptedPost, depth: number): JSX.Element | null {
     if (depth > MAX_REPLY_DEPTH) return null;
     const replies = globalPostTree.replyMap.get(post.id) ?? [];
-    const isReplyingToThis = replyingTo?.id === post.id;
     const isEditingThis = editingPost?.id === post.id;
-    const isResolved = depth === 0 && resolvedPostIds.has(post.id);
     return (
-      <div key={post.id} id={`post-${post.id}`} className={depth > 0 ? 'mt-2 ml-8 border-l-2 border-gray-700 pl-4' : ''}>
+      <div key={post.id} id={`post-${post.id}`} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
         <PostCard
           post={post}
           mapsetId={mapsetId}
@@ -513,13 +513,7 @@ export default function MapsetPage() {
           isOwner={isOwner}
           decryptedBody={post.decryptedBody}
           author={membersById.get(post.author_id) ?? null}
-          showReplyButton={depth === 0}
-          isResolved={isResolved}
-          onReply={(p) => {
-            setEditingPost(null);
-            setShowCreateForm(false);
-            setReplyingTo(p);
-          }}
+          showReplyButton={false}
           onEdit={(p) => {
             setReplyingTo(null);
             setShowCreateForm(false);
@@ -529,19 +523,6 @@ export default function MapsetPage() {
           }}
           onDelete={handleDeletePost}
         />
-
-        {isReplyingToThis && (
-          <div className={depth === 0 ? 'mt-2 ml-8 border-l-2 border-gray-700 pl-4' : 'mt-2'}>
-            <CreatePostForm
-              mapsetId={mapsetId}
-              difficultyId={selectedDifficultyId ?? ''}
-              onSubmit={handleCreatePost}
-              onCancel={() => setReplyingTo(null)}
-              parentPost={post}
-              resolveAction={depth === 0 && canBeResolved(post.tag) ? (resolvedPostIds.has(post.id) ? 'reopen' : 'resolve') : undefined}
-            />
-          </div>
-        )}
 
         {isEditingThis && (
           <div className="mt-2">
@@ -560,23 +541,102 @@ export default function MapsetPage() {
         )}
 
         {replies.map((reply) => {
-          if (depth === 0 && isStatusReply(reply.tag)) {
-            return (
-              <div key={reply.id} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
-                <ResolveEvent
-                  post={reply}
-                  author={membersById.get(reply.author_id) ?? null}
-                  currentUserId={user?.id ?? ''}
-                  isOwner={isOwner}
-                  onDelete={handleDeletePost}
-                />
-              </div>
-            );
-          }
+          // Status replies (resolve/reopen) only render under the root via
+          // ResolveEvent — silently skip them at deeper levels.
           if (isStatusReply(reply.tag)) return null;
-          return renderGlobalPostNode(reply, depth + 1);
+          return renderReplyNode(reply, depth + 1);
         })}
       </div>
+    );
+  }
+
+  function renderRootPostNode(post: DecryptedPost): JSX.Element {
+    const replies = globalPostTree.replyMap.get(post.id) ?? [];
+    const isReplyingToThis = replyingTo?.id === post.id;
+    const isEditingThis = editingPost?.id === post.id;
+    const isResolved = resolvedPostIds.has(post.id);
+    return (
+      <CollapsibleBranch key={post.id} userId={user?.id ?? ''} postId={post.id}>
+        {(collapsed, toggle) => (
+          <div id={`post-${post.id}`}>
+            <PostCard
+              post={post}
+              mapsetId={mapsetId}
+              currentUserId={user?.id ?? ''}
+              isOwner={isOwner}
+              decryptedBody={post.decryptedBody}
+              author={membersById.get(post.author_id) ?? null}
+              showReplyButton
+              isResolved={isResolved}
+              isCollapsed={collapsed}
+              onToggleCollapse={toggle}
+              onReply={(p) => {
+                setEditingPost(null);
+                setShowCreateForm(false);
+                setReplyingTo(p);
+              }}
+              onEdit={(p) => {
+                setReplyingTo(null);
+                setShowCreateForm(false);
+                setEditingPost(p);
+                const dp = decryptedPosts.find((x) => x.id === p.id);
+                setEditingPostBody(dp?.decryptedBody ?? '');
+              }}
+              onDelete={handleDeletePost}
+            />
+
+            {!collapsed && (
+              <>
+                {isReplyingToThis && (
+                  <div className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
+                    <CreatePostForm
+                      mapsetId={mapsetId}
+                      difficultyId={selectedDifficultyId ?? ''}
+                      onSubmit={handleCreatePost}
+                      onCancel={() => setReplyingTo(null)}
+                      parentPost={post}
+                      resolveAction={canBeResolved(post.tag) ? (resolvedPostIds.has(post.id) ? 'reopen' : 'resolve') : undefined}
+                    />
+                  </div>
+                )}
+
+                {isEditingThis && (
+                  <div className="mt-2">
+                    <CreatePostForm
+                      mapsetId={mapsetId}
+                      difficultyId={selectedDifficultyId ?? ''}
+                      onSubmit={handleUpdatePost}
+                      onCancel={() => {
+                        setEditingPost(null);
+                        setEditingPostBody('');
+                      }}
+                      editingPost={post}
+                      initialBody={editingPostBody}
+                    />
+                  </div>
+                )}
+
+                {replies.map((reply) => {
+                  if (isStatusReply(reply.tag)) {
+                    return (
+                      <div key={reply.id} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
+                        <ResolveEvent
+                          post={reply}
+                          author={membersById.get(reply.author_id) ?? null}
+                          currentUserId={user?.id ?? ''}
+                          isOwner={isOwner}
+                          onDelete={handleDeletePost}
+                        />
+                      </div>
+                    );
+                  }
+                  return renderReplyNode(reply, 1);
+                })}
+              </>
+            )}
+          </div>
+        )}
+      </CollapsibleBranch>
     );
   }
 
@@ -1381,7 +1441,7 @@ export default function MapsetPage() {
                 {detailLoading && <p className="text-gray-400">{t('mapsetPage.loadingPosts')}</p>}
 
                 <div className="space-y-4">
-                  {visibleTopLevel.map((post) => renderGlobalPostNode(post, 0))}
+                  {visibleTopLevel.map((post) => renderRootPostNode(post))}
                 </div>
 
                 {visibleTopLevel.length === 0 && !detailLoading && (

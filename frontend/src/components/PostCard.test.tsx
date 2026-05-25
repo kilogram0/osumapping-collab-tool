@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -164,29 +165,21 @@ describe('PostCard', () => {
     expect(onDelete).toHaveBeenCalledWith('p1');
   });
 
-  it('collapses and expands on toggle button click', async () => {
-    renderCard();
-    await act(async () => {});
-    await waitFor(() => {
-      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
-    });
-
-    const user = userEvent.setup();
-    const toggle = screen.getByRole('button', { name: /Collapse post/i });
-    await user.click(toggle);
-
-    expect(screen.queryByText(/these are too close/i)).not.toBeInTheDocument();
-
-    const expand = screen.getByRole('button', { name: /Expand post/i });
-    await user.click(expand);
-
-    await waitFor(() => {
-      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
-    });
-  });
-
-  it('persists collapse state to localStorage', async () => {
-    renderCard({ currentUserId: 'u1' });
+  it('collapses and expands when the controlled toggle is invoked', async () => {
+    function Controlled() {
+      const [collapsed, setCollapsed] = useState(false);
+      return (
+        <PostCard
+          post={BASE_POST}
+          mapsetId="ms1"
+          currentUserId="current-user-uuid"
+          isOwner={false}
+          isCollapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((c) => !c)}
+        />
+      );
+    }
+    render(<Controlled />);
     await act(async () => {});
     await waitFor(() => {
       expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
@@ -195,14 +188,27 @@ describe('PostCard', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /Collapse post/i }));
 
-    expect(localStorage.getItem('post-collapsed:u1:p1')).toBe('true');
+    expect(screen.queryByText(/these are too close/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Expand post/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
+    });
   });
 
-  it('restores collapse state from localStorage', async () => {
-    localStorage.setItem('post-collapsed:u1:p1', 'true');
-    renderCard({ currentUserId: 'u1' });
+  it('hides the collapse button when onToggleCollapse is not provided', async () => {
+    renderCard();
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: /Collapse post/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Expand post/i })).not.toBeInTheDocument();
+  });
+
+  it('hides the body when isCollapsed is true', async () => {
+    renderCard({ isCollapsed: true, onToggleCollapse: () => {} });
     await act(async () => {});
     expect(screen.queryByText(/these are too close/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Expand post/i })).toBeInTheDocument();
   });
 
   it('shows failure state when decrypt fails', async () => {

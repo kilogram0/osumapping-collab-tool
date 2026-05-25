@@ -235,6 +235,54 @@ describe('SectionDetailPanel', () => {
     expect(screen.getByText(/nested reply/i)).toBeInTheDocument();
   });
 
+  it('collapsing a root post hides its replies and resolve events; expanding restores them', async () => {
+    localStorage.clear();
+    const reply: DecryptedPost = {
+      id: 'r1',
+      difficulty_id: 'd1',
+      author_id: 'other-user-uuid',
+      parent_id: 'p1',
+      tag: 'general',
+      encrypted_body: 'enc:looks fine to me',
+      created_at: '2024-01-01T15:00:00Z',
+      updated_at: '2024-01-01T15:00:00Z',
+      decryptedBody: 'looks fine to me',
+      extractedMs: null,
+    };
+    const resolveEvent: DecryptedPost = {
+      id: 'rv1',
+      difficulty_id: 'd1',
+      author_id: 'other-user-uuid',
+      parent_id: 'p1',
+      tag: 'resolve',
+      encrypted_body: 'enc:',
+      created_at: '2024-01-01T16:00:00Z',
+      updated_at: '2024-01-01T16:00:00Z',
+      decryptedBody: '',
+      extractedMs: null,
+    };
+    renderPanel({ posts: [...POSTS, reply, resolveEvent] });
+
+    await waitFor(() => {
+      expect(screen.getByText(/too close/i)).toBeInTheDocument();
+      expect(screen.getByText(/looks fine to me/i)).toBeInTheDocument();
+    });
+    // Sanity: only the root has a collapse toggle — the reply has none.
+    expect(screen.getAllByRole('button', { name: /Collapse post/i })).toHaveLength(1);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Collapse post/i }));
+
+    // Root header stays visible; reply body and resolve event disappear.
+    expect(screen.queryByText(/looks fine to me/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/marked this as resolved/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Expand post/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/looks fine to me/i)).toBeInTheDocument();
+    });
+  });
+
   it('shows no-posts message when section has no posts', () => {
     renderPanel({ posts: [] });
     expect(screen.getByText(/No posts for this section yet/i)).toBeInTheDocument();
