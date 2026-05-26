@@ -641,33 +641,52 @@ When comparing a new candidate base against the currently active base, header li
 
 | Bucket | Lines | On mismatch (default) |
 | :--- | :--- | :--- |
-| **Critical** | All key/value lines in `[Difficulty]`; `AudioFilename` in `[General]` | **Reject the upload** with a frontend modal. Nothing is written. The uploader either cancels or confirms — see "Acknowledged critical mismatch" below. **Only the mapset `owner` can permanently change critical settings.** |
-| **Notice** | All other lines in `[General]`, `[Events]`, `[Metadata]` — **except `Version` in `[Metadata]`**, which mappers customize per-collaborator | The frontend sends both a new `DifficultyBaseOsuVersion` and a new `SectionOsuVersion` to the backend in a single transaction. The response includes a warning summarizing which keys changed. |
-| **Ignored** | `[Metadata] Version` (collab convention); `[TimingPoints]` (positive lines are folded into the base via the candidate filter, the rest are merged at download time); `[Colours]` (cosmetic, last-write-wins on the base); `[Editor]` (per-mapper editor state — bookmarks, distance spacing, beat divisor — never authoritative across the collab) | No effect on the base unless the line falls into a bucket above. |
+| **Critical** | All key/value lines in `[Difficulty]`; `AudioFilename` in `[General]`; positive `[TimingPoints]` (uninherited / BPM) | **Reject the upload** with a frontend modal. Nothing is written. The uploader either cancels or confirms — see "Acknowledged critical mismatch" below. **Only the mapset `owner` can permanently change critical settings.** |
+| **Notice** | All other lines in `[General]`, `[Events]`, `[Metadata]` — **except `Version` in `[Metadata]`**, which mappers customize per-collaborator | Role-dependent: see "Acknowledged notice mismatch" below. |
+| **Ignored** | `[Metadata] Version` (collab convention); inherited (negative) `[TimingPoints]` (per-section slider velocity, merged at download time); `[Colours]` (cosmetic, last-write-wins on the base); `[Editor]` (per-mapper editor state — bookmarks, distance spacing, beat divisor — never authoritative across the collab) | No effect on the base unless the line falls into a bucket above. |
 
-The positive `[TimingPoints]` content of the candidate base **is** compared against the active base — if BPM points changed, that's a notice-bucket update (it changes the base content but it's not user-facing settings).
+Positive `[TimingPoints]` (BPM) are critical: a section that disagrees with the base on BPM cannot be merged sensibly, so it gets the same modal treatment as a `[Difficulty]` change. Inherited (negative) `[TimingPoints]` remain per-section and are excluded from this comparison (they live inside the section, not the base).
+
+When the frontend surfaces a diff in the modal, **per-key fields** (everything in `[Difficulty]`, `General:AudioFilename`, the rest of `[General]`, `[Metadata]` except `Version`) are shown as a "base → yours" pair so the uploader can see exactly what's about to change or be normalized away. Line-list fields (`[Events]`, `[TimingPoints]`) are shown by name only — their content is too large for an inline comparison.
 
 #### Acknowledged critical mismatch
 
 When the frontend detects a critical mismatch, it shows a role-aware modal. On confirm, it re-submits the upload with the user's choice encoded into the payload:
 
-- **Owner:** treats the new file as authoritative. The frontend sends the new section version + a new base version (with the new critical settings) to the backend. The backend stores them verbatim in a single transaction. The frontend should present this as a destructive confirmation: *"CRITICAL: are you sure? You're about to change `OverallDifficulty`, `AudioFilename`, … on the base. Every collaborator's section will use these settings going forward."*
-- **Mapper:** the base wins. The frontend rewrites the section's critical lines to match the active base's values **before encrypting**, then sends the (rewritten) section version to the backend. The base is **not** changed. The frontend should present this as a non-destructive warning: *"Your diff's `OverallDifficulty`, `AudioFilename`, … differ from the base. Make sure you're uploading the correct difficulty. (Cancel) (I'm aware)"* — clicking "I'm aware" accepts that their file's critical fields will be normalized.
-- **Modder:** can't reach this code path; modders cannot upload `.osu` at all (`403`).
+- **Owner:** sees `owner-critical` modal listing changed fields as base-vs-yours, and chooses between **Promote** (treat the new file as authoritative — sends section + new base) and **Discard my changes** (rewrites the section against the active base on both critical AND notice scopes, sends section only, no new base). Promote gets a destructive framing: *"CRITICAL: are you sure? You're about to change `OverallDifficulty`, `AudioFilename`, … on the base. Every collaborator's section will use these settings going forward."* Discard shows a warning banner naming every dropped field across both scopes.
+- **Mapper:** the base wins. The frontend rewrites the section against the active base on both critical AND notice scopes **before encrypting** (including replacing the section's positive timing points with the base's, while keeping the section's inherited / negative TPs), then sends the rewritten section version to the backend. The base is **not** changed.
+- **Modder:** can't reach this code path; modders cannot upload `.osu` at all. The frontend gate hard-errors before any server work; the backend route also rejects with `403`.
 
-This split is deliberate. Owners are the only role with authority over critical mapset properties (difficulty, audio); mappers can iterate on their section's hit objects and timing details but not silently change the difficulty's identity.
+When a critical and a notice diff exist simultaneously, the critical modal lists the critical fields as the primary list and surfaces the notice fields in a secondary "Also Changed" panel. Both Discard and Promote act on the union — never leaving notice changes silently in the section content after a Discard.
+
+This split is deliberate. Owners are the only role with authority over critical mapset properties (difficulty, audio, BPM); mappers can iterate on their section's hit objects and SV details but not silently change the difficulty's identity.
+
+#### Acknowledged notice mismatch
+
+A notice diff (background image, metadata edit, break placement, etc.) is also role-gated. Mappers cannot create new base versions silently from notice changes — that was the original "anyone can create a new base version" footgun.
+
+- **Owner:** sees an `owner-notice` modal listing the changed fields with base-vs-yours values, and chooses between **Promote** (treat the new file as the authoritative base — sends section + new base) and **Discard my changes** (rewrites the section's notice fields to match the active base, sends section only, no new base).
+- **Mapper:** no modal. The frontend silently rewrites the section's notice fields to match the active base (positive TPs are unaffected — they're already in critical) and uploads the rewritten section with no new base version. A non-blocking warning banner lists which fields were overwritten so the mapper notices that, e.g., their break edits or background change were dropped.
+
+Notice normalization rewrites: non-`AudioFilename` keys in `[General]` to the base's values, non-`Version` keys in `[Metadata]` to the base's values, and replaces the section's `[Events]` data lines wholesale with the base's. Keys missing from one side or the other are left as-is — the normalizer is idempotent and never invents lines.
 
 #### Algorithm — on every section upload (frontend)
 
 1. Validate the file is well-formed (contains `[HitObjects]`) and ≤ 1 MB.
-2. Parse and compute the candidate base.
-3. **No active base for this difficulty (first upload):** encrypt the section content and the candidate base, then send both to the backend. The backend inserts the section version first, then the candidate base as version 1 with `source_section_version_id` pointing at it. Because all primary keys are client-generated UUIDs, both IDs are known before the transaction begins; the ordering is required only to satisfy the FK constraint (the base references the section), not to "obtain" an id.
-4. **Active base exists** — diff candidate against active base:
-   - **Critical mismatch and user has not confirmed →** show modal, abort upload. Nothing is written.
-   - **Critical mismatch with owner confirmation:** encrypt section as-is, encrypt new base, send both to backend. Backend inserts section version first, then base version, in one transaction. (Section-first ordering satisfies the FK constraint; both IDs are client-generated and known in advance.)
-   - **Critical mismatch with mapper confirmation:** rewrite section's critical lines to match active base, encrypt the rewritten section, send to backend. Backend inserts section version only (base untouched) in one transaction.
-   - **Notice mismatch (or any positive timing-point-line diff):** encrypt section, encrypt new base, send both to backend. Backend inserts section version first, then base version, in one transaction. (Section-first ordering satisfies the FK constraint; both IDs are client-generated and known in advance.)
+2. Reject if `role` is not `owner` or `mapper` (modders are review-only; `null` means we couldn't determine membership). The backend also `403`s, but the frontend hard-errors before sending so the user gets a clear message instead of a generic server error.
+3. Parse and compute the candidate base.
+4. **No active base for this difficulty (first upload):** **owner only**. Encrypt the section content and the candidate base, then send both to the backend. The backend inserts the section version first, then the candidate base as version 1 with `source_section_version_id` pointing at it. Non-owners get a hard error asking them to wait for the owner to seed the base.
+5. **Active base exists** — diff candidate against active base:
+   - **Critical mismatch:** show role-specific modal (with notice fields shown under "Also Changed" if both buckets diff), abort the implicit upload.
+     - *Owner Promote:* encrypt section as-is, encrypt new base, send both. Backend inserts section first, then base, in one transaction.
+     - *Owner Discard my changes:* rewrite section against active base on critical + notice, encrypt, send section only. Base untouched. Warning banner names the discarded fields from both buckets.
+     - *Mapper "I'm aware":* rewrite section against active base on critical + notice, encrypt, send section only. Base untouched.
+   - **Notice-only mismatch:** role-dependent.
+     - *Owner:* show `owner-notice` modal. **Promote** sends section + new base; **Discard my changes** rewrites notice fields to match base and sends section only.
+     - *Mapper:* rewrite notice fields to match base silently, upload section with no new base, show a warning banner listing the overwritten fields.
    - **No diff:** encrypt section, send to backend. Backend inserts section version only in one transaction. Base untouched.
+
+The backend enforces the owner-only base-write policy independently: any `POST /difficulties/{did}/sections/{sid}/osu` with a non-null `base_version` field by a non-owner role returns `403`. This is the source of truth — a crafted request cannot bypass the frontend gates.
 
 > **Insert order matters.** Whenever a base version is created, its `source_section_version_id` references the section version produced by the same upload. The backend must insert the section version first, then the base — otherwise the FK fails at INSERT time (the constraint is not deferred). Both IDs are client-generated UUIDs sent in the same payload; the ordering is a transaction-level FK requirement, not an id-discovery round-trip.
 >

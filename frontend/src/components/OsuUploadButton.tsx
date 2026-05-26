@@ -17,7 +17,7 @@ import {
   MAX_OSU_BYTES,
   type SectionFilterCounts,
 } from '../utils/osuParser';
-import { diffBase, type DiffReport, normalizeCriticalLines } from '../utils/osuBase';
+import { diffBase, type DiffReport, normalizeFromBase } from '../utils/osuBase';
 import { logger } from '../utils/logger';
 
 interface OsuUploadButtonProps {
@@ -43,7 +43,7 @@ interface UploadState {
   warning: string | null;
 }
 
-type ModalMode = 'owner-critical' | 'mapper-critical' | 'legacy' | 'sanitize';
+type ModalMode = 'owner-critical' | 'mapper-critical' | 'owner-notice' | 'sanitize';
 
 export default function OsuUploadButton({
   difficultyId,
@@ -70,9 +70,8 @@ export default function OsuUploadButton({
   });
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<ModalMode>('legacy');
+  const [modalMode, setModalMode] = useState<ModalMode>('sanitize');
   const [diffReport, setDiffReport] = useState<DiffReport | null>(null);
-  const [normalizeCritical, setNormalizeCritical] = useState(false);
   const [pendingUpload, setPendingUpload] = useState<{
     sectionContent: string;
     candidateBase: string;
@@ -109,7 +108,17 @@ export default function OsuUploadButton({
   }, [modalOpen]);
 
   const performUpload = useCallback(
-    async (key: CryptoKey, sectionContent: string, candidateBase: string | null): Promise<boolean> => {
+    async (
+      key: CryptoKey,
+      sectionContent: string,
+      candidateBase: string | null,
+      successWarning: string | null = null,
+    ): Promise<boolean> => {
+      // successWarning lets the caller set the post-success banner
+      // atomically with success=true. The previous pattern of doing
+      // setUploadState((s) => ({ ...s, warning })) after the await
+      // worked but coupled call sites to performUpload's internal
+      // state shape — pass the warning here instead.
       setUploadState({ loading: true, error: null, success: false, warning: null });
 
       try {
@@ -145,7 +154,7 @@ export default function OsuUploadButton({
         queryClient.invalidateQueries({ queryKey: ['section-osu-versions', difficultyId, sectionId] });
         queryClient.invalidateQueries({ queryKey: ['base-osu-versions', difficultyId] });
 
-        setUploadState({ loading: false, error: null, success: true, warning: null });
+        setUploadState({ loading: false, error: null, success: true, warning: successWarning });
         if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
         successTimeoutRef.current = setTimeout(() => setUploadState((s) => ({ ...s, success: false })), 3000);
         return true;
@@ -186,6 +195,15 @@ export default function OsuUploadButton({
           return;
         }
 
+        // Only owners and mappers can upload .osu — matches the backend
+        // allowlist in routers/sections.upload_section_osu and the spec
+        // (modders are review-only, null role means we couldn't
+        // determine membership). Fail fast before any server work.
+        if (role !== 'owner' && role !== 'mapper') {
+          setUploadState({ loading: false, error: t('osuUpload.errorCannotUpload'), success: false, warning: null });
+          return;
+        }
+
         let activeBase: string | null = null;
         try {
           const baseResp = await downloadBaseOsu(difficultyId);
@@ -199,40 +217,53 @@ export default function OsuUploadButton({
         }
 
         if (activeBase === null) {
+          // No base yet — only the owner is allowed to seed it. Other
+          // roles must wait until an owner uploads first; otherwise a
+          // mapper could establish the base for everyone.
+          if (role !== 'owner') {
+            setUploadState({
+              loading: false,
+              error: t('osuUpload.errorFirstBaseOwnerOnly'),
+              success: false,
+              warning: null,
+            });
+            return;
+          }
           await performUpload(key, sectionText, candidateBase);
-        } else {
-          const report = diffBase(candidateBase, activeBase);
-          if (report.critical.length > 0) {
-            if (role === 'owner') {
-              setModalMode('owner-critical');
-            } else if (role === 'mapper' || role === 'modder') {
-              setModalMode('mapper-critical');
-            } else {
-              setModalMode('legacy');
-              setNormalizeCritical(false);
-            }
+          return;
+        }
+
+        const report = diffBase(candidateBase, activeBase);
+        if (report.critical.length > 0) {
+          // Critical diff: opens role-specific modal. (`role` is
+          // narrowed to 'owner' | 'mapper' by the gate above.)
+          setModalMode(role === 'owner' ? 'owner-critical' : 'mapper-critical');
+          setDiffReport(report);
+          setPendingUpload({ sectionContent: sectionText, candidateBase, activeBase });
+          setModalOpen(true);
+          setUploadState({ loading: false, error: null, success: false, warning: null });
+        } else if (report.notice.length > 0) {
+          if (role === 'owner') {
+            // Owner notice-only diff: confirm intent (promote vs normalize).
+            setModalMode('owner-notice');
             setDiffReport(report);
             setPendingUpload({ sectionContent: sectionText, candidateBase, activeBase });
             setModalOpen(true);
             setUploadState({ loading: false, error: null, success: false, warning: null });
-          } else if (report.notice.length > 0 || report.timingPointsChanged) {
-            const ok = await performUpload(key, sectionText, candidateBase);
-            if (ok) {
-              // notice entries come from the diff utility as .osu-section
-              // identifiers (e.g. "AudioFilename"); keep TimingPoints as the
-              // same kind of identifier so the message stays consistent rather
-              // than mixing translated UI text with untranslated field names.
-              const parts = [...report.notice];
-              if (report.timingPointsChanged) parts.push('TimingPoints');
-              setUploadState((s) => ({
-                ...s,
-                loading: false,
-                warning: parts.length > 0 ? t('osuUpload.noticePrefix', { parts: parts.join(', ') }) : null,
-              }));
-            }
           } else {
-            await performUpload(key, sectionText, null);
+            // Mapper notice-only diff: silently normalize the section
+            // to match the base, skip creating a new base version, and
+            // warn the user about what was overwritten.
+            const normalized = normalizeFromBase(sectionText, activeBase, { critical: false, notice: true });
+            await performUpload(
+              key,
+              normalized,
+              null,
+              t('osuUpload.noticeNormalizedWarning', { parts: report.notice.join(', ') }),
+            );
           }
+        } else {
+          await performUpload(key, sectionText, null);
         }
       } catch (err) {
         logger.warn('Upload failed:', err);
@@ -330,46 +361,84 @@ export default function OsuUploadButton({
     await proceedAfterSanitize(pending.original, pending.sanitized);
   }, [pendingSanitized, proceedAfterSanitize]);
 
-  const handleConfirmUpload = useCallback(async () => {
+  // Promote = treat the uploaded file as authoritative: section as-is +
+  // new base. Same behavior whether the diff was critical or notice;
+  // wired to "Confirm" on owner-critical and "Promote to base" on
+  // owner-notice.
+  const handleConfirmPromote = useCallback(async () => {
     if (!pendingUpload) return;
     setModalOpen(false);
-
     const key = await getKey(mapsetId);
     if (!key) {
       setUploadState({ loading: false, error: t('osuUpload.errorKeyMissing'), success: false, warning: null });
       return;
     }
-
-    if (modalMode === 'owner-critical') {
-      // Owner treats new file as authoritative: section as-is + new base.
-      await performUpload(key, pendingUpload.sectionContent, pendingUpload.candidateBase);
-    } else if (modalMode === 'mapper-critical') {
-      // Mapper accepts base wins: normalize critical lines, section only.
-      const normalized = pendingUpload.activeBase
-        ? normalizeCriticalLines(pendingUpload.sectionContent, pendingUpload.activeBase)
-        : pendingUpload.sectionContent;
-      await performUpload(key, normalized, null);
-    } else {
-      // Legacy fallback: respect checkbox.
-      let finalSection = pendingUpload.sectionContent;
-      let finalBase: string | null = pendingUpload.candidateBase;
-      if (normalizeCritical && pendingUpload.activeBase) {
-        finalSection = normalizeCriticalLines(pendingUpload.sectionContent, pendingUpload.activeBase);
-        finalBase = null;
-      }
-      await performUpload(key, finalSection, finalBase);
-    }
-
+    await performUpload(key, pendingUpload.sectionContent, pendingUpload.candidateBase);
     setPendingUpload(null);
     setDiffReport(null);
-    setNormalizeCritical(false);
-  }, [pendingUpload, mapsetId, getKey, performUpload, modalMode, normalizeCritical, t]);
+  }, [pendingUpload, mapsetId, getKey, performUpload, t]);
+
+  // Discard / "I'm aware" = rewrite the section to match the active
+  // base on BOTH scopes (critical and notice), upload section only, no
+  // new base. We normalize notice too even though only critical is in
+  // the modal — otherwise a combined critical+notice diff would silently
+  // keep the notice changes in the section content, which is the same
+  // footgun this whole change is trying to close.
+  // Wired to "I'm aware" on mapper-critical and "Discard my changes" on
+  // owner-critical. The owner-critical path shows a banner listing what
+  // was overwritten so the owner sees their discarded edits.
+  const handleConfirmNormalizeCritical = useCallback(async () => {
+    if (!pendingUpload) return;
+    setModalOpen(false);
+    const key = await getKey(mapsetId);
+    if (!key) {
+      setUploadState({ loading: false, error: t('osuUpload.errorKeyMissing'), success: false, warning: null });
+      return;
+    }
+    const normalized = pendingUpload.activeBase
+      ? normalizeFromBase(pendingUpload.sectionContent, pendingUpload.activeBase, {
+          critical: true,
+          notice: true,
+        })
+      : pendingUpload.sectionContent;
+    const banner =
+      diffReport && modalMode === 'owner-critical'
+        ? t('osuUpload.criticalNormalizedWarning', {
+            parts: [...diffReport.critical, ...diffReport.notice].join(', '),
+          })
+        : null;
+    await performUpload(key, normalized, null, banner);
+    setPendingUpload(null);
+    setDiffReport(null);
+  }, [pendingUpload, diffReport, modalMode, mapsetId, getKey, performUpload, t]);
+
+  // Normalize notice = rewrite the section's notice fields to match the
+  // active base, upload section only, no new base. Wired to "Discard my
+  // changes" on owner-notice.
+  const handleConfirmNormalizeNotice = useCallback(async () => {
+    if (!pendingUpload || !pendingUpload.activeBase) return;
+    setModalOpen(false);
+    const key = await getKey(mapsetId);
+    if (!key) {
+      setUploadState({ loading: false, error: t('osuUpload.errorKeyMissing'), success: false, warning: null });
+      return;
+    }
+    const normalized = normalizeFromBase(pendingUpload.sectionContent, pendingUpload.activeBase, {
+      critical: false,
+      notice: true,
+    });
+    const banner = diffReport
+      ? t('osuUpload.noticeNormalizedWarning', { parts: diffReport.notice.join(', ') })
+      : null;
+    await performUpload(key, normalized, null, banner);
+    setPendingUpload(null);
+    setDiffReport(null);
+  }, [pendingUpload, diffReport, mapsetId, getKey, performUpload, t]);
 
   const handleCancelModal = useCallback(() => {
     setModalOpen(false);
     setPendingUpload(null);
     setDiffReport(null);
-    setNormalizeCritical(false);
     setSanitizeReport(null);
     setPendingSanitized(null);
     setUploadState({ loading: false, error: null, success: false, warning: null });
@@ -423,6 +492,32 @@ export default function OsuUploadButton({
 
     if (!pendingUpload || !diffReport) return null;
 
+    // Render one diff entry. If the field has a (candidate, active) pair
+    // in `values` we show a "base → yours" comparison. Line-list fields
+    // (Events, TimingPoints) don't have a useful pair to show — they get
+    // a localized hint instead.
+    const renderEntry = (field: string, tone: 'critical' | 'notice') => {
+      const pair = diffReport.values[field];
+      const toneClass = tone === 'critical' ? 'text-red-300' : 'text-yellow-300';
+      const labelClass = tone === 'critical' ? 'text-red-400' : 'text-yellow-400';
+      const renderValue = (v: string | null) =>
+        v === null ? <em className="text-gray-500">{t('osuUpload.diffMissingValue')}</em> : <code className="text-gray-200">{v}</code>;
+      return (
+        <li key={field} className={toneClass}>
+          <span className={`font-medium ${labelClass}`}>{field}</span>
+          {pair ? (
+            <span className="ml-2 text-xs text-gray-400">
+              {t('osuUpload.diffBaseLabel')} {renderValue(pair.active)}
+              {' → '}
+              {t('osuUpload.diffYoursLabel')} {renderValue(pair.candidate)}
+            </span>
+          ) : (
+            <span className="ml-2 text-xs text-gray-400">{t('osuUpload.diffLineListHint')}</span>
+          )}
+        </li>
+      );
+    };
+
     if (modalMode === 'owner-critical') {
       return (
         <>
@@ -434,13 +529,19 @@ export default function OsuUploadButton({
           </p>
           <div className="mb-3">
             <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">{t('osuUpload.criticalChanges')}</p>
-            <ul className="list-disc list-inside text-sm text-red-300">
-              {diffReport.critical.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
+            <ul className="list-disc list-inside text-sm">
+              {diffReport.critical.map((c) => renderEntry(c, 'critical'))}
             </ul>
           </div>
-          <div className="flex gap-3 justify-end mt-5">
+          {diffReport.notice.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">{t('osuUpload.alsoChanged')}</p>
+              <ul className="list-disc list-inside text-sm">
+                {diffReport.notice.map((n) => renderEntry(n, 'notice'))}
+              </ul>
+            </div>
+          )}
+          <div className="flex gap-3 justify-end mt-5 flex-wrap">
             <button
               type="button"
               onClick={handleCancelModal}
@@ -450,10 +551,17 @@ export default function OsuUploadButton({
             </button>
             <button
               type="button"
-              onClick={handleConfirmUpload}
+              onClick={handleConfirmNormalizeCritical}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white text-sm font-medium rounded transition-colors"
+            >
+              {t('osuUpload.ownerCriticalNormalize')}
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmPromote}
               className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded transition-colors"
             >
-              {t('common.confirm')}
+              {t('osuUpload.ownerCriticalPromote')}
             </button>
           </div>
         </>
@@ -471,12 +579,18 @@ export default function OsuUploadButton({
           </p>
           <div className="mb-3">
             <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">{t('osuUpload.differences')}</p>
-            <ul className="list-disc list-inside text-sm text-red-300">
-              {diffReport.critical.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
+            <ul className="list-disc list-inside text-sm">
+              {diffReport.critical.map((c) => renderEntry(c, 'critical'))}
             </ul>
           </div>
+          {diffReport.notice.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">{t('osuUpload.alsoChanged')}</p>
+              <ul className="list-disc list-inside text-sm">
+                {diffReport.notice.map((n) => renderEntry(n, 'notice'))}
+              </ul>
+            </div>
+          )}
           <p className="text-sm text-gray-400 mb-4">
             {t('osuUpload.mapperFootnote')}
           </p>
@@ -490,7 +604,7 @@ export default function OsuUploadButton({
             </button>
             <button
               type="button"
-              onClick={handleConfirmUpload}
+              onClick={handleConfirmNormalizeCritical}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
             >
               {t('osuUpload.imAware')}
@@ -500,48 +614,22 @@ export default function OsuUploadButton({
       );
     }
 
-    // Legacy fallback modal (used when no role is provided).
+    // owner-notice
     return (
       <>
         <h3 id="upload-confirm-title" className="text-lg font-semibold text-white mb-3">
-          {t('osuUpload.legacyTitle')}
+          {t('osuUpload.ownerNoticeTitle')}
         </h3>
         <p className="text-sm text-gray-300 mb-4">
-          {t('osuUpload.legacyBody')}
+          {t('osuUpload.ownerNoticeBody')}
         </p>
-
-        {diffReport.critical.length > 0 && (
-          <div className="mb-3">
-            <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-1">{t('osuUpload.criticalChanges')}</p>
-            <ul className="list-disc list-inside text-sm text-red-300">
-              {diffReport.critical.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
-            </ul>
-            <label className="flex items-center gap-2 mt-2 text-sm text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={normalizeCritical}
-                onChange={(e) => setNormalizeCritical(e.target.checked)}
-                className="rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500"
-              />
-              {t('osuUpload.normalize')}
-            </label>
-          </div>
-        )}
-
-        {diffReport.notice.length > 0 && (
-          <div className="mb-3">
-            <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">{t('osuUpload.noticeChanges')}</p>
-            <ul className="list-disc list-inside text-sm text-yellow-300">
-              {diffReport.notice.map((n) => (
-                <li key={n}>{n}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div className="flex gap-3 justify-end mt-5">
+        <div className="mb-3">
+          <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">{t('osuUpload.noticeChanges')}</p>
+          <ul className="list-disc list-inside text-sm">
+            {diffReport.notice.map((n) => renderEntry(n, 'notice'))}
+          </ul>
+        </div>
+        <div className="flex gap-3 justify-end mt-5 flex-wrap">
           <button
             type="button"
             onClick={handleCancelModal}
@@ -551,10 +639,17 @@ export default function OsuUploadButton({
           </button>
           <button
             type="button"
-            onClick={handleConfirmUpload}
+            onClick={handleConfirmNormalizeNotice}
+            className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white text-sm font-medium rounded transition-colors"
+          >
+            {t('osuUpload.ownerNoticeNormalize')}
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmPromote}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
           >
-            {t('osuUpload.uploadAnyway')}
+            {t('osuUpload.ownerNoticePromote')}
           </button>
         </div>
       </>

@@ -1039,6 +1039,100 @@ async def test_upload_section_osu_rejects_modder(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_upload_section_osu_rejects_mapper_creating_base_version(
+    client: AsyncClient,
+):
+    """A mapper may upload section .osu but cannot bundle a base_version.
+
+    Guards the frontend role policy from being bypassed by a crafted
+    request — only the owner is allowed to mint a new base.
+    """
+    owner = await _seed_user(82010)
+    mapper_user = await _seed_user(82011)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+    sec = _section_payload()
+    await client.post(
+        f"/api/difficulties/{diff['id']}/sections", json=sec, headers=CSRF_HEADERS
+    )
+
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+
+    # With base_version bundled: rejected.
+    resp = await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=_osu_payload_with_base(),
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 403
+
+    # Without base_version: accepted (mapper can still upload sections).
+    resp_ok = await client.post(
+        f"/api/difficulties/{diff['id']}/sections/{sec['id']}/osu",
+        json=_osu_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert resp_ok.status_code == 201, resp_ok.text
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_upload_section_osu_owner_can_replace_existing_base(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Regression: the owner-only base gate must not break the
+    promote-a-new-base path after a base already exists.  Owner uploads
+    twice with base_version; both succeed and the second deactivates the
+    first.
+    """
+    _, _, difficulty_id = authed_user_with_difficulty
+    section = _section_payload()
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/sections",
+        json=section,
+        headers=CSRF_HEADERS,
+    )
+
+    first = _osu_payload_with_base(content="encrypted:v1", base_content="encrypted:base1")
+    resp1 = await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=first,
+        headers=CSRF_HEADERS,
+    )
+    assert resp1.status_code == 201, resp1.text
+
+    second = _osu_payload_with_base(content="encrypted:v2", base_content="encrypted:base2")
+    resp2 = await client.post(
+        f"/api/difficulties/{difficulty_id}/sections/{section['id']}/osu",
+        json=second,
+        headers=CSRF_HEADERS,
+    )
+    assert resp2.status_code == 201, resp2.text
+    assert resp2.json()["version"] == 2
+
+
+@pytest.mark.asyncio
 async def test_upload_section_osu_returns_404_for_unknown_section(
     client: AsyncClient, authed_user_with_difficulty
 ):

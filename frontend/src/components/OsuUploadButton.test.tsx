@@ -77,10 +77,10 @@ vi.mock('../utils/osuBase', () => ({
   diffBase: vi.fn(() => ({
     critical: [],
     notice: [],
-    timingPointsChanged: false,
+    values: {},
     hasDiff: false,
   })),
-  normalizeCriticalLines: vi.fn((section: string) => section),
+  normalizeFromBase: vi.fn((section: string) => section),
 }));
 
 vi.mock('../utils/logger', () => ({
@@ -95,6 +95,7 @@ function renderButton(props?: Partial<React.ComponentProps<typeof OsuUploadButto
         difficultyId="d1"
         sectionId="s1"
         mapsetId="ms1"
+        role="owner"
         {...props}
       />
     </QueryClientProvider>,
@@ -112,14 +113,15 @@ describe('OsuUploadButton', () => {
       (err as any).response = { status: 404 };
       return err;
     })());
-    const { diffBase } = await import('../utils/osuBase');
+    const { diffBase, normalizeFromBase } = await import('../utils/osuBase');
     vi.mocked(diffBase).mockReset();
     vi.mocked(diffBase).mockReturnValue({
       critical: [],
       notice: [],
-      timingPointsChanged: false,
+      values: {},
       hasDiff: false,
     });
+    vi.mocked(normalizeFromBase).mockImplementation((section: string) => section);
   });
 
   it('renders upload button', () => {
@@ -150,8 +152,38 @@ describe('OsuUploadButton', () => {
     });
   });
 
-  it('uploads section without base on first upload (404 base)', async () => {
-    renderButton();
+  it('blocks upload when role is null (read-only fallback)', async () => {
+    renderButton({ role: null });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/doesn't allow uploading/i);
+    });
+    expect(mockUploadSectionOsu).not.toHaveBeenCalled();
+  });
+
+  it('blocks modder uploads at the role gate (matches backend 403)', async () => {
+    // Modders are review-only per spec; the backend
+    // (upload_section_osu) also returns 403. Verify the frontend never
+    // even reaches the diff/modal code, regardless of whether a base
+    // exists — otherwise a modder would walk through the modal flow
+    // only to hit a 403 they can't recover from.
+    renderButton({ role: 'modder' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/doesn't allow uploading/i);
+    });
+    expect(mockUploadSectionOsu).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('owner can seed the first base (404 path)', async () => {
+    renderButton({ role: 'owner' });
     const user = userEvent.setup();
     const input = screen.getByLabelText(/Upload \.osu file/i);
     const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
@@ -160,24 +192,45 @@ describe('OsuUploadButton', () => {
       expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
     });
     const payload = mockUploadSectionOsu.mock.calls[0][2];
-    expect(payload.encrypted_content).toMatch(/^enc:/);
     expect(payload.base_version).toBeDefined();
-    expect(payload.base_version.encrypted_content).toMatch(/^enc:base-content/);
   });
 
-  it('shows confirmation modal when diff is detected', async () => {
+  it('mapper cannot seed the first base (404 path)', async () => {
+    renderButton({ role: 'mapper' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/only the mapset owner/i);
+    });
+    expect(mockUploadSectionOsu).not.toHaveBeenCalled();
+  });
+
+  it('uploads section only when no diff detected', async () => {
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'mapper' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
+    });
+    const payload = mockUploadSectionOsu.mock.calls[0][2];
+    expect(payload.base_version).toBeUndefined();
+  });
+
+  it('owner sees critical modal and sends section + base on confirm', async () => {
     const { diffBase } = await import('../utils/osuBase');
     vi.mocked(diffBase).mockReturnValue({
       critical: ['Difficulty:HPDrainRate'],
       notice: [],
-      timingPointsChanged: false,
+      values: { 'Difficulty:HPDrainRate': { candidate: '9', active: '4' } },
       hasDiff: true,
     });
-    mockDownloadBaseOsu.mockResolvedValue({
-      id: 'b1',
-      encrypted_content: 'enc:base',
-    });
-    renderButton();
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
     const user = userEvent.setup();
     const input = screen.getByLabelText(/Upload \.osu file/i);
     const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
@@ -185,24 +238,136 @@ describe('OsuUploadButton', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
-    expect(screen.getByRole('heading', { name: /Upload Confirmation/i })).toBeInTheDocument();
-    expect(screen.getByText(/Critical Changes/i)).toBeInTheDocument();
-    expect(screen.getByText(/Difficulty:HPDrainRate/i)).toBeInTheDocument();
+    expect(screen.getByText(/CRITICAL: Are you sure/i)).toBeInTheDocument();
+    // Value diff visible: base 4, yours 9.
+    expect(screen.getByText('4')).toBeInTheDocument();
+    expect(screen.getByText('9')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Promote to base/i }));
+    await waitFor(() => {
+      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
+    });
+    const payload = mockUploadSectionOsu.mock.calls[0][2];
+    expect(payload.base_version).toBeDefined();
   });
 
-  it('cancels upload from modal', async () => {
+  it('owner critical Discard normalizes both scopes, no new base, banner shown', async () => {
+    const { diffBase, normalizeFromBase } = await import('../utils/osuBase');
+    vi.mocked(diffBase).mockReturnValue({
+      critical: ['Difficulty:HPDrainRate'],
+      notice: [],
+      values: { 'Difficulty:HPDrainRate': { candidate: '9', active: '4' } },
+      hasDiff: true,
+    });
+    vi.mocked(normalizeFromBase).mockReturnValue('normalized-critical');
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Discard my changes/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Discard my changes/i }));
+    await waitFor(() => {
+      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
+    });
+    // Both scopes normalized — closes the critical+notice footgun.
+    expect(normalizeFromBase).toHaveBeenCalledWith('osu content [HitObjects]', 'base', {
+      critical: true,
+      notice: true,
+    });
+    const payload = mockUploadSectionOsu.mock.calls[0][2];
+    expect(payload.base_version).toBeUndefined();
+    await waitFor(() => {
+      expect(screen.getByText(/Your critical changes to Difficulty:HPDrainRate were discarded/)).toBeInTheDocument();
+    });
+  });
+
+  it('mapper sees critical modal and sends normalized section only on confirm', async () => {
+    const { diffBase, normalizeFromBase } = await import('../utils/osuBase');
+    vi.mocked(diffBase).mockReturnValue({
+      critical: ['Difficulty:HPDrainRate'],
+      notice: [],
+      values: { 'Difficulty:HPDrainRate': { candidate: '9', active: '4' } },
+      hasDiff: true,
+    });
+    vi.mocked(normalizeFromBase).mockReturnValue('normalized-content');
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'mapper' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Differs from Base/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /I'm aware/i }));
+    await waitFor(() => {
+      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
+    });
+    expect(normalizeFromBase).toHaveBeenCalledWith('osu content [HitObjects]', 'base', {
+      critical: true,
+      notice: true,
+    });
+    const payload = mockUploadSectionOsu.mock.calls[0][2];
+    expect(payload.base_version).toBeUndefined();
+  });
+
+  it('combined critical+notice Discard: normalizes BOTH and banner lists both', async () => {
+    // Closes the footgun: previously, Discard on a combined diff only
+    // normalized critical, silently keeping notice changes in the
+    // section. Now both buckets get normalized and the banner names
+    // everything that was rolled back.
+    const { diffBase, normalizeFromBase } = await import('../utils/osuBase');
+    vi.mocked(diffBase).mockReturnValue({
+      critical: ['Difficulty:HPDrainRate'],
+      notice: ['General:PreviewTime', 'Events'],
+      values: {
+        'Difficulty:HPDrainRate': { candidate: '9', active: '4' },
+        'General:PreviewTime': { candidate: '8000', active: '-1' },
+      },
+      hasDiff: true,
+    });
+    vi.mocked(normalizeFromBase).mockReturnValue('fully-normalized');
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Discard my changes/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Discard my changes/i }));
+    await waitFor(() => {
+      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
+    });
+    expect(normalizeFromBase).toHaveBeenCalledWith('osu content [HitObjects]', 'base', {
+      critical: true,
+      notice: true,
+    });
+    const payload = mockUploadSectionOsu.mock.calls[0][2];
+    expect(payload.base_version).toBeUndefined();
+    await waitFor(() => {
+      const banner = screen.getByText(/were discarded/);
+      expect(banner).toHaveTextContent(/Difficulty:HPDrainRate/);
+      expect(banner).toHaveTextContent(/General:PreviewTime/);
+      expect(banner).toHaveTextContent(/Events/);
+    });
+  });
+
+  it('cancels critical upload from modal', async () => {
     const { diffBase } = await import('../utils/osuBase');
     vi.mocked(diffBase).mockReturnValue({
       critical: ['Difficulty:HPDrainRate'],
       notice: [],
-      timingPointsChanged: false,
+      values: { 'Difficulty:HPDrainRate': { candidate: '9', active: '4' } },
       hasDiff: true,
     });
-    mockDownloadBaseOsu.mockResolvedValue({
-      id: 'b1',
-      encrypted_content: 'enc:base',
-    });
-    renderButton();
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
     const user = userEvent.setup();
     const input = screen.getByLabelText(/Upload \.osu file/i);
     const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
@@ -217,152 +382,17 @@ describe('OsuUploadButton', () => {
     expect(mockUploadSectionOsu).not.toHaveBeenCalled();
   });
 
-  it('confirms upload from modal without normalizing critical lines', async () => {
-    const { diffBase, normalizeCriticalLines } = await import('../utils/osuBase');
-    vi.mocked(diffBase).mockReturnValue({
-      critical: ['Difficulty:HPDrainRate'],
-      notice: ['General:PreviewTime'],
-      timingPointsChanged: false,
-      hasDiff: true,
-    });
-    mockDownloadBaseOsu.mockResolvedValue({
-      id: 'b1',
-      encrypted_content: 'enc:base',
-    });
-    renderButton();
-    const user = userEvent.setup();
-    const input = screen.getByLabelText(/Upload \.osu file/i);
-    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
-    await user.upload(input, file);
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Upload Anyway/i })).toBeInTheDocument();
-    });
-    await user.click(screen.getByRole('button', { name: /Upload Anyway/i }));
-    await waitFor(() => {
-      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
-    });
-    expect(normalizeCriticalLines).not.toHaveBeenCalled();
-  });
-
-  it('normalizes critical lines when checkbox is checked before confirming', async () => {
-    const { diffBase, normalizeCriticalLines } = await import('../utils/osuBase');
-    vi.mocked(diffBase).mockReturnValue({
-      critical: ['Difficulty:HPDrainRate'],
-      notice: [],
-      timingPointsChanged: false,
-      hasDiff: true,
-    });
-    mockDownloadBaseOsu.mockResolvedValue({
-      id: 'b1',
-      encrypted_content: 'enc:base',
-    });
-    renderButton();
-    const user = userEvent.setup();
-    const input = screen.getByLabelText(/Upload \.osu file/i);
-    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
-    await user.upload(input, file);
-    await waitFor(() => {
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
-    });
-    const checkbox = screen.getByRole('checkbox', { name: /Normalize critical lines/i });
-    await user.click(checkbox);
-    await user.click(screen.getByRole('button', { name: /Upload Anyway/i }));
-    await waitFor(() => {
-      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
-    });
-    expect(normalizeCriticalLines).toHaveBeenCalled();
-  });
-
-  it('uploads section only when no diff detected', async () => {
-    mockDownloadBaseOsu.mockResolvedValue({
-      id: 'b1',
-      encrypted_content: 'enc:base',
-    });
-    renderButton();
-    const user = userEvent.setup();
-    const input = screen.getByLabelText(/Upload \.osu file/i);
-    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
-    await user.upload(input, file);
-    await waitFor(() => {
-      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
-    });
-    const payload = mockUploadSectionOsu.mock.calls[0][2];
-    expect(payload.base_version).toBeUndefined();
-  });
-
-  it('owner sees destructive modal and sends section + base on confirm', async () => {
-    const { diffBase } = await import('../utils/osuBase');
-    vi.mocked(diffBase).mockReturnValue({
-      critical: ['Difficulty:HPDrainRate'],
-      notice: [],
-      timingPointsChanged: false,
-      hasDiff: true,
-    });
-    mockDownloadBaseOsu.mockResolvedValue({
-      id: 'b1',
-      encrypted_content: 'enc:base',
-    });
-    renderButton({ role: 'owner' });
-    const user = userEvent.setup();
-    const input = screen.getByLabelText(/Upload \.osu file/i);
-    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
-    await user.upload(input, file);
-    await waitFor(() => {
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
-    });
-    expect(screen.getByText(/CRITICAL: Are you sure/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Confirm/i }));
-    await waitFor(() => {
-      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
-    });
-    const payload = mockUploadSectionOsu.mock.calls[0][2];
-    expect(payload.base_version).toBeDefined();
-  });
-
-  it('mapper sees awareness modal and sends normalized section only on confirm', async () => {
-    const { diffBase, normalizeCriticalLines } = await import('../utils/osuBase');
-    vi.mocked(diffBase).mockReturnValue({
-      critical: ['Difficulty:HPDrainRate'],
-      notice: [],
-      timingPointsChanged: false,
-      hasDiff: true,
-    });
-    vi.mocked(normalizeCriticalLines).mockReturnValue('normalized-content');
-    mockDownloadBaseOsu.mockResolvedValue({
-      id: 'b1',
-      encrypted_content: 'enc:base',
-    });
-    renderButton({ role: 'mapper' });
-    const user = userEvent.setup();
-    const input = screen.getByLabelText(/Upload \.osu file/i);
-    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
-    await user.upload(input, file);
-    await waitFor(() => {
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
-    });
-    expect(screen.getByText(/Differs from Base/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /I'm aware/i }));
-    await waitFor(() => {
-      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
-    });
-    expect(normalizeCriticalLines).toHaveBeenCalled();
-    const payload = mockUploadSectionOsu.mock.calls[0][2];
-    expect(payload.base_version).toBeUndefined();
-  });
-
-  it('auto-uploads section + base on notice-only diff without modal', async () => {
-    const { diffBase } = await import('../utils/osuBase');
+  it('mapper notice-only diff: no modal, silent normalize, no new base, warning shown', async () => {
+    const { diffBase, normalizeFromBase } = await import('../utils/osuBase');
     vi.mocked(diffBase).mockReturnValue({
       critical: [],
       notice: ['General:PreviewTime'],
-      timingPointsChanged: false,
+      values: { 'General:PreviewTime': { candidate: '8000', active: '-1' } },
       hasDiff: true,
     });
-    mockDownloadBaseOsu.mockResolvedValue({
-      id: 'b1',
-      encrypted_content: 'enc:base',
-    });
-    renderButton({ role: 'owner' });
+    vi.mocked(normalizeFromBase).mockReturnValue('normalized-section');
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'mapper' });
     const user = userEvent.setup();
     const input = screen.getByLabelText(/Upload \.osu file/i);
     const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
@@ -371,7 +401,153 @@ describe('OsuUploadButton', () => {
       expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
     });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(normalizeFromBase).toHaveBeenCalledWith('osu content [HitObjects]', 'base', {
+      critical: false,
+      notice: true,
+    });
+    const payload = mockUploadSectionOsu.mock.calls[0][2];
+    expect(payload.base_version).toBeUndefined();
+    await waitFor(() => {
+      expect(screen.getByText(/Your changes to General:PreviewTime were discarded/)).toBeInTheDocument();
+    });
+  });
+
+  it('owner notice-only diff: opens owner-notice modal with Promote + Normalize', async () => {
+    const { diffBase } = await import('../utils/osuBase');
+    vi.mocked(diffBase).mockReturnValue({
+      critical: [],
+      notice: ['General:PreviewTime', 'Events'],
+      values: { 'General:PreviewTime': { candidate: '8000', active: '-1' } },
+      hasDiff: true,
+    });
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Notice changes detected/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Promote to base/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Discard my changes/i })).toBeInTheDocument();
+    // Value diff for the keyed field, and line-list hint for Events.
+    expect(screen.getByText('-1')).toBeInTheDocument();
+    expect(screen.getByText('8000')).toBeInTheDocument();
+    expect(screen.getByText(/see file/i)).toBeInTheDocument();
+    expect(mockUploadSectionOsu).not.toHaveBeenCalled();
+  });
+
+  it('owner notice-only diff: Promote sends section + base', async () => {
+    const { diffBase } = await import('../utils/osuBase');
+    vi.mocked(diffBase).mockReturnValue({
+      critical: [],
+      notice: ['General:PreviewTime'],
+      values: { 'General:PreviewTime': { candidate: '8000', active: '-1' } },
+      hasDiff: true,
+    });
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Promote to base/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Promote to base/i }));
+    await waitFor(() => {
+      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
+    });
     const payload = mockUploadSectionOsu.mock.calls[0][2];
     expect(payload.base_version).toBeDefined();
+  });
+
+  it('owner notice-only diff: Cancel closes modal without uploading', async () => {
+    const { diffBase } = await import('../utils/osuBase');
+    vi.mocked(diffBase).mockReturnValue({
+      critical: [],
+      notice: ['General:PreviewTime'],
+      values: { 'General:PreviewTime': { candidate: '8000', active: '-1' } },
+      hasDiff: true,
+    });
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Cancel/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Cancel/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(mockUploadSectionOsu).not.toHaveBeenCalled();
+  });
+
+  it('combined critical+notice diff: critical modal surfaces notice as "also changed"', async () => {
+    // Both buckets diff -> critical modal opens, lists critical fields
+    // as the primary list, and surfaces the notice fields in a
+    // secondary "also changed" panel so the uploader knows what else
+    // is on the table (Promote rolls everything into the new base;
+    // Discard normalizes both).
+    const { diffBase } = await import('../utils/osuBase');
+    vi.mocked(diffBase).mockReturnValue({
+      critical: ['Difficulty:HPDrainRate'],
+      notice: ['General:PreviewTime'],
+      values: {
+        'Difficulty:HPDrainRate': { candidate: '9', active: '4' },
+        'General:PreviewTime': { candidate: '8000', active: '-1' },
+      },
+      hasDiff: true,
+    });
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByText(/CRITICAL: Are you sure/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Difficulty:HPDrainRate/i)).toBeInTheDocument();
+    expect(screen.getByText(/Also Changed/i)).toBeInTheDocument();
+    expect(screen.getByText(/General:PreviewTime/i)).toBeInTheDocument();
+  });
+
+  it('owner notice-only diff: Discard normalizes + no new base + warning', async () => {
+    const { diffBase, normalizeFromBase } = await import('../utils/osuBase');
+    vi.mocked(diffBase).mockReturnValue({
+      critical: [],
+      notice: ['General:PreviewTime'],
+      values: { 'General:PreviewTime': { candidate: '8000', active: '-1' } },
+      hasDiff: true,
+    });
+    vi.mocked(normalizeFromBase).mockReturnValue('normalized-section');
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+    renderButton({ role: 'owner' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File(['osu content [HitObjects]'], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Discard my changes/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Discard my changes/i }));
+    await waitFor(() => {
+      expect(mockUploadSectionOsu).toHaveBeenCalledTimes(1);
+    });
+    expect(normalizeFromBase).toHaveBeenCalledWith('osu content [HitObjects]', 'base', {
+      critical: false,
+      notice: true,
+    });
+    const payload = mockUploadSectionOsu.mock.calls[0][2];
+    expect(payload.base_version).toBeUndefined();
+    await waitFor(() => {
+      expect(screen.getByText(/Your changes to General:PreviewTime were discarded/)).toBeInTheDocument();
+    });
   });
 });

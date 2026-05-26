@@ -354,6 +354,16 @@ async def upload_section_osu(
     ):
         raise _forbidden()
 
+    # Only the owner may create a new base version (either as part of the
+    # first-base seed or by promoting a section .osu later).  This mirrors
+    # the frontend role policy and prevents a mapper from bypassing the UI
+    # gate by crafting a request with `base_version` set.
+    if (
+        payload.base_version is not None
+        and membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
+        raise _forbidden()
+
     # Compute next version number for this section.
     # Two concurrent uploads may race and compute the same next_version.
     # The partial unique index on (section_id, version) rejects the loser,

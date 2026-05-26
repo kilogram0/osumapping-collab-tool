@@ -4,16 +4,22 @@
  * Compares a candidate base against the active base and classifies
  * differences into Critical / Notice / Ignored buckets.
  *
- * Also provides `normalizeCriticalLines` for the mapper-confirmation
- * upload path (rewrite the section so critical lines match the base).
+ * Also provides `normalizeFromBase` for the role-based upload paths
+ * (rewrite the section so the chosen buckets match the active base).
  */
 
-import { parseSections, OsuSection, stringifySections } from './osuParser';
+import { parseSections, OsuSection, stringifySections, parseTimingPoints, isPositiveTimingPoint } from './osuParser';
 
 export interface DiffReport {
   critical: string[];
   notice: string[];
-  timingPointsChanged: boolean;
+  /**
+   * Field-level (candidate, active) pairs keyed by the same identifier
+   * strings as `critical` / `notice` — used to render "base vs yours" in
+   * the modal. Only populated for keyed (`key:value`) fields; line-list
+   * fields (`Events`, `TimingPoints`) have no entry here.
+   */
+  values: Record<string, { candidate: string | null; active: string | null }>;
   hasDiff: boolean;
 }
 
@@ -51,12 +57,17 @@ function diffMaps(
   candidate: Map<string, string>,
   active: Map<string, string>,
   prefix: string,
+  values: Record<string, { candidate: string | null; active: string | null }>,
 ): string[] {
   const diffs: string[] = [];
   const allKeys = new Set([...candidate.keys(), ...active.keys()]);
   for (const key of allKeys) {
-    if (candidate.get(key) !== active.get(key)) {
-      diffs.push(`${prefix}${key}`);
+    const c = candidate.get(key);
+    const a = active.get(key);
+    if (c !== a) {
+      const field = `${prefix}${key}`;
+      diffs.push(field);
+      values[field] = { candidate: c ?? null, active: a ?? null };
     }
   }
   return diffs;
@@ -74,31 +85,47 @@ function arraysEqual(a: string[], b: string[]): boolean {
  * Diff a candidate base against the active base.
  *
  * Buckets (per SPECIFICATION.md §8):
- * - **Critical**: every key/value in `[Difficulty]`; `AudioFilename` in `[General]`.
+ * - **Critical**: every key/value in `[Difficulty]`; `AudioFilename` in
+ *   `[General]`; `[TimingPoints]` (positive lines — the base only contains
+ *   uninherited points by construction).
  * - **Notice**: rest of `[General]`, `[Events]`, `[Metadata]` (except `Version`).
- * - **Ignored**: `[Metadata] Version`, `[TimingPoints]` (handled separately),
- *   `[Colours]`, `[Editor]`, pre-header line.
+ * - **Ignored**: `[Metadata] Version`, `[Colours]`, `[Editor]`, pre-header line.
  *
- * Timing points are compared independently because a change in positive
- * (uninherited) timing points triggers the same action as a Notice mismatch.
+ * Any per-key field diff also gets an entry in `values` so the UI can
+ * render "base vs yours" rows.
  */
 export function diffBase(candidateBase: string, activeBase: string): DiffReport {
   const candidate = parseSections(candidateBase);
   const active = parseSections(activeBase);
+  const values: Record<string, { candidate: string | null; active: string | null }> = {};
 
   // --- Critical bucket ---
   const candidateDifficulty = getSection(candidate, 'Difficulty');
   const activeDifficulty = getSection(active, 'Difficulty');
   const candidateDiffMap = getKeyValueMap(candidateDifficulty?.lines ?? []);
   const activeDiffMap = getKeyValueMap(activeDifficulty?.lines ?? []);
-  const critical = diffMaps(candidateDiffMap, activeDiffMap, 'Difficulty:');
+  const critical = diffMaps(candidateDiffMap, activeDiffMap, 'Difficulty:', values);
 
   const candidateGeneral = getSection(candidate, 'General');
   const activeGeneral = getSection(active, 'General');
   const candidateGenMap = getKeyValueMap(candidateGeneral?.lines ?? []);
   const activeGenMap = getKeyValueMap(activeGeneral?.lines ?? []);
-  if (candidateGenMap.get('AudioFilename') !== activeGenMap.get('AudioFilename')) {
+  const candAudio = candidateGenMap.get('AudioFilename');
+  const actAudio = activeGenMap.get('AudioFilename');
+  if (candAudio !== actAudio) {
     critical.push('General:AudioFilename');
+    values['General:AudioFilename'] = { candidate: candAudio ?? null, active: actAudio ?? null };
+  }
+
+  // TimingPoints (positive only — buildCandidateBase already filtered the
+  // candidate; the active base contains only positives by construction).
+  // Line-list comparison, so no per-key entry in `values`.
+  const candidateTiming = getSection(candidate, 'TimingPoints');
+  const activeTiming = getSection(active, 'TimingPoints');
+  const candidateTpLines = getDataLines(candidateTiming?.lines ?? []);
+  const activeTpLines = getDataLines(activeTiming?.lines ?? []);
+  if (!arraysEqual(candidateTpLines, activeTpLines)) {
+    critical.push('TimingPoints');
   }
 
   // --- Notice bucket ---
@@ -106,7 +133,7 @@ export function diffBase(candidateBase: string, activeBase: string): DiffReport 
   noticeGenCand.delete('AudioFilename');
   const noticeGenAct = new Map(activeGenMap);
   noticeGenAct.delete('AudioFilename');
-  const notice = diffMaps(noticeGenCand, noticeGenAct, 'General:');
+  const notice = diffMaps(noticeGenCand, noticeGenAct, 'General:', values);
 
   const candidateMetadata = getSection(candidate, 'Metadata');
   const activeMetadata = getSection(active, 'Metadata');
@@ -114,7 +141,7 @@ export function diffBase(candidateBase: string, activeBase: string): DiffReport 
   const activeMetaMap = getKeyValueMap(activeMetadata?.lines ?? []);
   candidateMetaMap.delete('Version');
   activeMetaMap.delete('Version');
-  notice.push(...diffMaps(candidateMetaMap, activeMetaMap, 'Metadata:'));
+  notice.push(...diffMaps(candidateMetaMap, activeMetaMap, 'Metadata:', values));
 
   const candidateEvents = getSection(candidate, 'Events');
   const activeEvents = getSection(active, 'Events');
@@ -124,48 +151,59 @@ export function diffBase(candidateBase: string, activeBase: string): DiffReport 
     notice.push('Events');
   }
 
-  // --- TimingPoints (positive only, since that's what the base contains) ---
-  const candidateTiming = getSection(candidate, 'TimingPoints');
-  const activeTiming = getSection(active, 'TimingPoints');
-  const candidateTpLines = getDataLines(candidateTiming?.lines ?? []);
-  const activeTpLines = getDataLines(activeTiming?.lines ?? []);
-  const timingPointsChanged = !arraysEqual(candidateTpLines, activeTpLines);
-  if (timingPointsChanged) {
-    notice.push('TimingPoints');
-  }
-
   const hasDiff = critical.length > 0 || notice.length > 0;
 
   return {
     critical,
     notice,
-    timingPointsChanged,
+    values,
     hasDiff,
   };
 }
 
 /**
- * Rewrite a full .osu section file so that its critical lines match the
- * active base. Used in the mapper-confirmation upload path.
+ * Rewrite the section so the requested buckets match the active base.
  *
- * Critical lines rewritten:
- * - `[Difficulty]`: every key/value line
- * - `[General]`: `AudioFilename` only
+ * - `critical: true` rewrites `[Difficulty]` keys, `[General] AudioFilename`,
+ *   and `[TimingPoints]` positive lines (the section's inherited / negative
+ *   timing points are preserved; positives are taken from the active base
+ *   and reinserted in time order).
+ * - `notice: true` rewrites the rest of `[General]`, `[Metadata]` (except
+ *   `Version`), and replaces the data lines of `[Events]` wholesale with
+ *   the active base's.
  *
- * All other sections and lines are preserved verbatim.
+ * Only existing key/value lines are rewritten — keys missing from the
+ * section are not added back, and keys missing from the base are left
+ * unchanged. This mirrors the diff semantics (we surface missing keys via
+ * the diff so they can be fixed at the source) and keeps the function
+ * idempotent.
  */
-export function normalizeCriticalLines(
+export function normalizeFromBase(
   sectionContent: string,
   activeBase: string,
+  scope: { critical: boolean; notice: boolean },
 ): string {
+  // No-op fast path: parse/stringify is not strictly lossless (a leading
+  // blank line can grow on roundtrip), so callers that pass an all-off
+  // scope (e.g. defensive `normalizeFromBase(x, base, scope)` where
+  // scope happens to be empty) deserve to get their input back verbatim
+  // rather than a structurally-equivalent-but-byte-different string.
+  if (!scope.critical && !scope.notice) {
+    return sectionContent;
+  }
+
   const section = parseSections(sectionContent);
   const base = parseSections(activeBase);
 
   const baseDiffMap = getKeyValueMap(getSection(base, 'Difficulty')?.lines ?? []);
   const baseGenMap = getKeyValueMap(getSection(base, 'General')?.lines ?? []);
+  const baseMetaMap = getKeyValueMap(getSection(base, 'Metadata')?.lines ?? []);
+  baseMetaMap.delete('Version');
+  const baseEventsLines = getSection(base, 'Events')?.lines ?? [];
+  const baseTpLines = getSection(base, 'TimingPoints')?.lines ?? [];
 
   for (const sec of section) {
-    if (sec.name === 'Difficulty') {
+    if (sec.name === 'Difficulty' && scope.critical) {
       sec.lines = sec.lines.map((line) => {
         const trimmed = line.trim();
         if (trimmed === '' || trimmed.startsWith('//')) return line;
@@ -180,13 +218,77 @@ export function normalizeCriticalLines(
         const trimmed = line.trim();
         if (trimmed === '' || trimmed.startsWith('//')) return line;
         const kv = parseKeyValue(line);
-        if (kv && kv.key === 'AudioFilename' && baseGenMap.has('AudioFilename')) {
+        if (!kv) return line;
+        if (scope.critical && kv.key === 'AudioFilename' && baseGenMap.has('AudioFilename')) {
           return `AudioFilename:${baseGenMap.get('AudioFilename')}`;
+        }
+        if (scope.notice && kv.key !== 'AudioFilename' && baseGenMap.has(kv.key)) {
+          return `${kv.key}:${baseGenMap.get(kv.key)}`;
         }
         return line;
       });
+    } else if (sec.name === 'Metadata' && scope.notice) {
+      sec.lines = sec.lines.map((line) => {
+        const trimmed = line.trim();
+        if (trimmed === '' || trimmed.startsWith('//')) return line;
+        const kv = parseKeyValue(line);
+        if (kv && kv.key !== 'Version' && baseMetaMap.has(kv.key)) {
+          return `${kv.key}:${baseMetaMap.get(kv.key)}`;
+        }
+        return line;
+      });
+    } else if (sec.name === 'Events' && scope.notice) {
+      // Whole-section replace: events are a line list, there's no
+      // per-key mapping to do. Use the base's events verbatim.
+      sec.lines = [...baseEventsLines];
+    } else if (sec.name === 'TimingPoints' && scope.critical) {
+      // Replace positives (uninherited) with the base's positives, keep
+      // the section's inherited / negative points. Reinsert in time
+      // order so the file remains chronologically sorted; tie-break by
+      // priority so a positive at offset T sits before a negative at
+      // the same offset (osu! convention — uninherited establishes the
+      // BPM/timing, inherited then modifies SV from that point).
+      // Lines that fail to parse as timing points are dropped:
+      // [TimingPoints] has a fixed grammar, so anything unparseable is
+      // junk that doesn't belong here, and we have no defensible place
+      // to put it in the sorted output anyway.
+      type TpRow = { line: string; time: number; priority: number };
+      const sectionRows: TpRow[] = [];
+      for (const line of sec.lines) {
+        const trimmed = line.trim();
+        if (trimmed === '' || trimmed.startsWith('//')) continue;
+        const tp = parseTimingPoints([line]);
+        if (tp.length === 0) continue;
+        if (!isPositiveTimingPoint(tp[0])) {
+          sectionRows.push({ line, time: tp[0].time, priority: 1 });
+        }
+        // Section positives are dropped — base's positives replace them.
+      }
+      const baseRows: TpRow[] = [];
+      for (const line of baseTpLines) {
+        const trimmed = line.trim();
+        if (trimmed === '' || trimmed.startsWith('//')) continue;
+        const tp = parseTimingPoints([line]);
+        if (tp.length === 0) continue;
+        if (isPositiveTimingPoint(tp[0])) {
+          baseRows.push({ line, time: tp[0].time, priority: 0 });
+        }
+      }
+      const merged = [...baseRows, ...sectionRows].sort((a, b) => {
+        if (a.time !== b.time) return a.time - b.time;
+        return a.priority - b.priority;
+      });
+      sec.lines = merged.map((r) => r.line);
     }
   }
 
   return stringifySections(section);
+}
+
+/**
+ * Convenience wrapper kept for the mapper-critical confirmation path.
+ * Equivalent to `normalizeFromBase(content, base, { critical: true, notice: false })`.
+ */
+export function normalizeCriticalLines(sectionContent: string, activeBase: string): string {
+  return normalizeFromBase(sectionContent, activeBase, { critical: true, notice: false });
 }

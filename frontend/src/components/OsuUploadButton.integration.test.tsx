@@ -132,13 +132,13 @@ describe('OsuUploadButton integration', () => {
     mockGetKey.mockResolvedValue({ key: 'mock-key' } as unknown as CryptoKey);
   });
 
-  it('detects critical diff using real parser and shows modal', async () => {
+  it('detects critical diff using real parser and shows owner-critical modal', async () => {
     mockDownloadBaseOsu.mockResolvedValue({
       id: 'b1',
       encrypted_content: 'enc:' + BASE_OSU,
     });
 
-    renderButton();
+    renderButton({ role: 'owner' });
     const user = userEvent.setup();
     const input = screen.getByLabelText(/Upload \.osu file/i);
     const file = new File([SECTION_OSU_DIFFERENT_HP], 'test.osu', { type: 'text/plain' });
@@ -150,7 +150,57 @@ describe('OsuUploadButton integration', () => {
 
     expect(screen.getByText(/Critical Changes/i)).toBeInTheDocument();
     expect(screen.getByText(/Difficulty:HPDrainRate/i)).toBeInTheDocument();
+    // PreviewTime is a notice-bucket diff; the owner-critical modal now
+    // surfaces it under "Also Changed" so the owner sees what else will
+    // roll up into the new base (or get normalized on Discard).
+    expect(screen.getByText(/Also Changed/i)).toBeInTheDocument();
     expect(screen.getByText(/General:PreviewTime/i)).toBeInTheDocument();
+  });
+
+  it('positive [TimingPoints] change opens the critical modal end-to-end', async () => {
+    // Regression guard for the TimingPoints-to-critical reclassification.
+    // Before this change, a BPM edit landed in `notice` and silently
+    // created a new base; now it must be modal-gated like Difficulty.
+    const SECTION_DIFFERENT_BPM = `osu file format v14
+[General]
+AudioFilename: audio.mp3
+AudioLeadIn: 0
+PreviewTime: 5000
+[Metadata]
+Title:Test
+Artist:Test
+Creator:Tester
+Version:Normal
+[Difficulty]
+HPDrainRate:4
+CircleSize:4
+OverallDifficulty:6
+ApproachRate:5
+SliderMultiplier:1.4
+SliderTickRate:1
+[TimingPoints]
+0,400,4,2,0,50,1,0
+[HitObjects]
+64,192,0,1,0
+`;
+    mockDownloadBaseOsu.mockResolvedValue({
+      id: 'b1',
+      encrypted_content: 'enc:' + BASE_OSU,
+    });
+
+    renderButton({ role: 'owner' });
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/Upload \.osu file/i);
+    const file = new File([SECTION_DIFFERENT_BPM], 'test.osu', { type: 'text/plain' });
+    await user.upload(input, file);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    // Critical owner modal — not the silent notice-auto-upload path.
+    expect(screen.getByText(/CRITICAL: Are you sure/i)).toBeInTheDocument();
+    expect(screen.getByText(/TimingPoints/i)).toBeInTheDocument();
   });
 
   it('uploads without modal when file matches base exactly', async () => {
@@ -159,7 +209,7 @@ describe('OsuUploadButton integration', () => {
       encrypted_content: 'enc:' + BASE_OSU,
     });
 
-    renderButton();
+    renderButton({ role: 'owner' });
     const user = userEvent.setup();
     const input = screen.getByLabelText(/Upload \.osu file/i);
     const file = new File([BASE_OSU], 'test.osu', { type: 'text/plain' });
