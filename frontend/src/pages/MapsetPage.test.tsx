@@ -259,6 +259,9 @@ vi.mock('../hooks/useDifficulty', () => ({
   useAssignSection: () => ({
     mutateAsync: vi.fn(),
   }),
+  useSectionOsuVersions: () => ({
+    data: undefined,
+  }),
   useDeleteDifficulty: () => ({
     mutateAsync: mockDeleteDifficulty,
     isPending: false,
