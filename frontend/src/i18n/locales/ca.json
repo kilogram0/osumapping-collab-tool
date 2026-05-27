@@ -333,6 +333,15 @@
     "unknownUploader": "Desconegut",
     "close": "Tanca"
   },
+  "fullUpload": {
+    "ariaLabel": "Puja el fitxer .osu complet de la dificultat",
+    "button": "Puja la dificultat completa",
+    "uploading": "S'està pujant…",
+    "success": "Totes les seccions pujades!",
+    "errorUploadFailed": "La pujada ha fallat",
+    "errorNoSections": "No hi ha seccions definides. Afegeix seccions abans de pujar una dificultat completa.",
+    "noSectionsTooltip": "No hi ha seccions definides"
+  },
   "importBookmarks": {
     "ariaLabel": "Importa seccions des dels marcadors .osu",
     "button": "Importa marcadors",

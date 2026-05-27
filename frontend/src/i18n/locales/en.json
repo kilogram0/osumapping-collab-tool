@@ -333,6 +333,15 @@
     "unknownUploader": "Unknown",
     "close": "Close"
   },
+  "fullUpload": {
+    "ariaLabel": "Upload full difficulty .osu file",
+    "button": "Upload Full Difficulty",
+    "uploading": "Uploading…",
+    "success": "All sections uploaded!",
+    "errorUploadFailed": "Upload failed",
+    "errorNoSections": "No sections defined. Add sections before uploading a full difficulty.",
+    "noSectionsTooltip": "No sections defined"
+  },
   "importBookmarks": {
     "ariaLabel": "Import sections from .osu bookmarks",
     "button": "Import Bookmarks",

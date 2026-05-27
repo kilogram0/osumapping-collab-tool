@@ -9,6 +9,7 @@ import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyTabs from '../components/DifficultyTabs';
 import EditSectionModal from '../components/EditSectionModal';
 import SplitSectionModal from '../components/SplitSectionModal';
+import FullDifficultyUploadButton from '../components/FullDifficultyUploadButton';
 import ImportBookmarksButton from '../components/ImportBookmarksButton';
 import TopBar from '../components/TopBar';
 import ManageMembersModal from '../components/ManageMembersModal';
@@ -1316,6 +1317,13 @@ export default function MapsetPage() {
                       )
                     }
                     onError={(msg) => showToast(msg, 'error')}
+                  />
+                )}
+                {isOwner && selectedDifficultyId && (
+                  <FullDifficultyUploadButton
+                    difficultyId={selectedDifficultyId}
+                    mapsetId={mapsetId}
+                    sections={decryptedSections}
                   />
                 )}
                 {isOwner && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
