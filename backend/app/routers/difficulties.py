@@ -56,7 +56,10 @@ async def create_difficulty(
 ) -> Difficulty:
     """Create a difficulty inside a mapset.
 
-    Permitted for ``owner`` and ``mapper`` roles only.
+    Permitted for ``owner`` and ``mapper`` roles. Note the asymmetry: mappers
+    can create a difficulty, but renaming/deleting it and adding sections to
+    it are owner-only — a mapper contributes a guest difficulty whose
+    structure the owner curates.
     """
     mapset = await db.get(Mapset, mapset_id)
     if mapset is None:
@@ -225,7 +228,7 @@ async def update_difficulty(
 ) -> Difficulty:
     """Partially update a difficulty (PATCH semantics).
 
-    Permitted for ``owner`` and ``mapper`` roles only.
+    Permitted for ``owner`` role only.
     """
     difficulty = await db.get(Difficulty, difficulty_id)
     if difficulty is None:
@@ -234,7 +237,7 @@ async def update_difficulty(
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
     if (
         classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
     ):
         raise _forbidden()
 

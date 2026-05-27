@@ -228,6 +228,45 @@ async def test_create_section_rejects_modder(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_create_section_rejects_mapper(client: AsyncClient):
+    owner = await _seed_user(80050)
+    mapper_user = await _seed_user(80051)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    resp = await client.post(
+        f"/api/difficulties/{diff['id']}/sections",
+        json=_section_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
 async def test_create_section_rejects_duplicate_id(
     client: AsyncClient, authed_user_with_difficulty
 ):

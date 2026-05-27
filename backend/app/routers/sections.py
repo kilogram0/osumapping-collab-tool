@@ -85,14 +85,14 @@ async def create_section(
 ) -> Section:
     """Create a section inside a difficulty.
 
-    Permitted for ``owner`` and ``mapper`` roles only.
+    Permitted for ``owner`` role only.
     """
     difficulty = await _get_difficulty(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
     if (
         classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
+        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
     ):
         raise _forbidden()
 

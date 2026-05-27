@@ -430,7 +430,44 @@ async def test_patch_difficulty_empty_body_is_noop(
 
 
 @pytest.mark.asyncio
-async def test_patch_difficulty_mapper_can_update(client: AsyncClient):
+async def test_create_difficulty_mapper_can_create(client: AsyncClient):
+    """Mappers retain create-difficulty rights — the asymmetry with
+    rename/delete/add-section (all owner-only) is intentional."""
+    owner = await _seed_user(70008)
+    mapper_user = await _seed_user(70009)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    resp = await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties",
+        json=_difficulty_payload(),
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 201, resp.text
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_patch_difficulty_mapper_cannot_update(client: AsyncClient):
     owner = await _seed_user(70010)
     mapper_user = await _seed_user(70011)
 
@@ -462,8 +499,7 @@ async def test_patch_difficulty_mapper_can_update(client: AsyncClient):
         json={"encrypted_name": "encrypted:mapper-rename"},
         headers=CSRF_HEADERS,
     )
-    assert resp.status_code == 200
-    assert resp.json()["encrypted_name"] == "encrypted:mapper-rename"
+    assert resp.status_code == 403
 
     await _delete_user_and_mapsets(owner.id)
     await _delete_user_and_mapsets(mapper_user.id)

@@ -390,7 +390,7 @@ describe('MapsetPage', () => {
     expect(screen.getByRole('heading', { name: /Add Section/i })).toBeInTheDocument();
   });
 
-  it('shows Add buttons for mapper role', async () => {
+  it('shows Add Difficulty but hides owner-only buttons for mapper role', async () => {
     mockUseMyMembership.mockReturnValue({
       data: {
         id: 'member-2',
@@ -406,7 +406,9 @@ describe('MapsetPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Add Difficulty/i })).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /Add Section/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Add Section/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Rename Difficulty/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Delete Difficulty/i })).not.toBeInTheDocument();
   });
 
   it('hides Add buttons for modder role', async () => {

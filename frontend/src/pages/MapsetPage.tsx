@@ -459,7 +459,7 @@ export default function MapsetPage() {
     const ro = new ResizeObserver(checkAll);
     if (viewToggleRowRef.current) ro.observe(viewToggleRowRef.current);
     return () => ro.disconnect();
-  }, [canEditStructure, isOwner, selectedDifficultyId, selectedDifficultyName, i18n.language]);
+  }, [isOwner, selectedDifficultyId, selectedDifficultyName, i18n.language]);
 
   // Build reply trees for global posts view
   const globalPostTree = useMemo(() => {
@@ -1292,7 +1292,7 @@ export default function MapsetPage() {
             {/* View toggle */}
             <div ref={viewToggleRowRef} className="flex items-start justify-between">
               <div ref={leftGroupRef} data-testid="view-toggle-left" className={leftGroupWrapped ? 'flex flex-col items-start gap-2' : 'flex items-center gap-3'}>
-                {canEditStructure && (
+                {isOwner && (
                   <button
                     type="button"
                     onClick={() => setShowCreateSection(true)}
@@ -1301,7 +1301,7 @@ export default function MapsetPage() {
                     {t('mapsetPage.addSection')}
                   </button>
                 )}
-                {canEditStructure && selectedDifficultyId && (
+                {isOwner && selectedDifficultyId && (
                   <ImportBookmarksButton
                     difficultyId={selectedDifficultyId}
                     mapsetId={mapsetId}
@@ -1318,7 +1318,7 @@ export default function MapsetPage() {
                     onError={(msg) => showToast(msg, 'error')}
                   />
                 )}
-                {canEditStructure && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
+                {isOwner && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
                   <button
                     type="button"
                     onClick={() => setShowRenameDifficulty(true)}
