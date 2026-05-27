@@ -206,7 +206,9 @@
     "claim": "Claim",
     "split": "Split",
     "merge": "Merge with next",
-    "mergeConfirm": "Merge \"{{name}}\" with \"{{nextName}}\"? The two sections will be combined into one. Hit objects from the second section will be moved into the first. This cannot be undone."
+    "mergeConfirm": "Merge \"{{name}}\" with \"{{nextName}}\"? The two sections will be combined into one. Hit objects from the second section will be moved into the first. This cannot be undone.",
+    "latestUpload": "Latest upload: {{time}}",
+    "latestUploadBy": "Latest upload: {{time}} by @{{username}}"
   },
   "splitSectionModal": {
     "title": "Split Section",

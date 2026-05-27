@@ -206,7 +206,9 @@
     "claim": "Reclama",
     "split": "Divideix",
     "merge": "Fusiona amb la següent",
-    "mergeConfirm": "Vols fusionar \"{{name}}\" amb \"{{nextName}}\"? Les dues seccions es combinaran en una. Els hit objects de la segona secció es mouran a la primera. No es pot desfer."
+    "mergeConfirm": "Vols fusionar \"{{name}}\" amb \"{{nextName}}\"? Les dues seccions es combinaran en una. Els hit objects de la segona secció es mouran a la primera. No es pot desfer.",
+    "latestUpload": "Última pujada: {{time}}",
+    "latestUploadBy": "Última pujada: {{time}} per @{{username}}"
   },
   "splitSectionModal": {
     "title": "Divideix la secció",

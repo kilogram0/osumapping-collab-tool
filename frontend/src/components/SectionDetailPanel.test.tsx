@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import SectionDetailPanel from './SectionDetailPanel';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
+import type { MemberWithUser } from '../api/endpoints';
 
 const mockIsUnlocked = vi.fn(() => true);
 const mockGetKey = vi.fn(async () => ({ key: 'mock-key' } as unknown as CryptoKey));
@@ -35,6 +36,14 @@ vi.mock('../utils/crypto', async (importOriginal) => {
 
 vi.mock('../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn() },
+}));
+
+const mockSectionVersions = vi.fn(() => ({ data: undefined, isLoading: false, error: null }));
+
+vi.mock('../hooks/useDifficulty', () => ({
+  useSectionOsuVersions: (...args: unknown[]) => mockSectionVersions(...args),
+  useActivateSectionOsuVersion: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useBaseOsuVersions: vi.fn(() => ({ data: [] })),
 }));
 
 vi.mock('../api/endpoints', async (importOriginal) => {
@@ -129,12 +138,56 @@ describe('SectionDetailPanel', () => {
     vi.clearAllMocks();
     mockIsUnlocked.mockReturnValue(true);
     mockGetKey.mockResolvedValue({ key: 'mock-key' } as unknown as CryptoKey);
+    mockSectionVersions.mockReturnValue({ data: undefined, isLoading: false, error: null });
   });
 
   it('renders section name and time range', () => {
     renderPanel();
     expect(screen.getByText('Intro')).toBeInTheDocument();
     expect(screen.getByText(/00:00\.000 – 00:30\.000/i)).toBeInTheDocument();
+  });
+
+  it('shows latest upload time without username when uploader matches assignee', () => {
+    mockSectionVersions.mockReturnValue({
+      data: [{ id: 'v1', version: 1, uploaded_by: 'u1', created_at: '2024-06-01T10:00:00Z' }],
+      isLoading: false,
+      error: null,
+    });
+    const membersById = new Map([['u1', { user_id: 'u1', username: 'mapper1' } as MemberWithUser]]);
+    renderPanel({ section: { ...SECTION, assignedTo: 'u1' }, membersById });
+    expect(screen.getByText(/Latest upload:/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Latest upload:.*@mapper1/i)).not.toBeInTheDocument();
+  });
+
+  it('shows latest upload time with username when uploader differs from assignee', () => {
+    mockSectionVersions.mockReturnValue({
+      data: [{ id: 'v1', version: 1, uploaded_by: 'u2', created_at: '2024-06-01T10:00:00Z' }],
+      isLoading: false,
+      error: null,
+    });
+    const membersById = new Map([
+      ['u1', { user_id: 'u1', username: 'assignee' } as MemberWithUser],
+      ['u2', { user_id: 'u2', username: 'modifier' } as MemberWithUser],
+    ]);
+    renderPanel({ section: { ...SECTION, assignedTo: 'u1' }, membersById });
+    expect(screen.getByText(/Latest upload:.*@modifier/i)).toBeInTheDocument();
+  });
+
+  it('shows latest upload with username when there is no assignee', () => {
+    mockSectionVersions.mockReturnValue({
+      data: [{ id: 'v1', version: 1, uploaded_by: 'u2', created_at: '2024-06-01T10:00:00Z' }],
+      isLoading: false,
+      error: null,
+    });
+    const membersById = new Map([['u2', { user_id: 'u2', username: 'modifier' } as MemberWithUser]]);
+    renderPanel({ section: { ...SECTION, assignedTo: null }, membersById });
+    expect(screen.getByText(/Latest upload:.*@modifier/i)).toBeInTheDocument();
+  });
+
+  it('does not show latest upload when no versions exist', () => {
+    mockSectionVersions.mockReturnValue({ data: [], isLoading: false, error: null });
+    renderPanel();
+    expect(screen.queryByText(/Latest upload:/i)).not.toBeInTheDocument();
   });
 
   it('shows post count in header', () => {

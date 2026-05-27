@@ -16,6 +16,7 @@ import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { logger } from '../utils/logger';
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
 import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
+import { useSectionOsuVersions } from '../hooks/useDifficulty';
 
 interface SectionDetailPanelProps {
   section: DecryptedSection;
@@ -98,6 +99,12 @@ export default function SectionDetailPanel({
   const { isUnlocked, getKey } = useEncryption();
   const unlocked = isUnlocked(mapsetId);
   const [showHistory, setShowHistory] = useState(false);
+
+  const { data: sectionVersions } = useSectionOsuVersions(difficultyId, section.id);
+  const latestVersion = useMemo(() => {
+    if (!sectionVersions || sectionVersions.length === 0) return null;
+    return sectionVersions.reduce((best, v) => (v.version > best.version ? v : best));
+  }, [sectionVersions]);
   const [showAssignSelect, setShowAssignSelect] = useState(false);
   const [replyingTo, setReplyingTo] = useState<DecryptedPost | null>(null);
   const [editingPost, setEditingPost] = useState<DecryptedPost | null>(null);
@@ -384,6 +391,18 @@ export default function SectionDetailPanel({
           <p className="text-sm text-gray-400">
             {formatTime(section.startTimeMs)} – {formatTime(section.endTimeMs)}
           </p>
+          {latestVersion && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              {latestVersion.uploaded_by !== section.assignedTo
+                ? t('sectionDetail.latestUploadBy', {
+                    time: new Date(latestVersion.created_at).toLocaleString(),
+                    username: membersById?.get(latestVersion.uploaded_by)?.username ?? t('sectionDetail.unknownMember'),
+                  })
+                : t('sectionDetail.latestUpload', {
+                    time: new Date(latestVersion.created_at).toLocaleString(),
+                  })}
+            </p>
+          )}
           {/* Assignment row */}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             {section.assignedTo ? (
