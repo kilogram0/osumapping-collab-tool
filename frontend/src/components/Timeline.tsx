@@ -5,6 +5,14 @@ import type { DecryptedPost } from '../types';
 import type { PostTag } from '../api/endpoints';
 import { formatTimestamp } from '../utils/extractTimestamp';
 
+function PlusIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
+      <path d="M10 4v12M4 10h12" />
+    </svg>
+  );
+}
+
 // Higher-priority tags get higher z-index so they dominate visually when markers overlap.
 // resolve/reopen are excluded: replies never appear in the timeline.
 const TAG_MARKER: Partial<Record<PostTag, { color: string; z: number }>> = {
@@ -27,6 +35,12 @@ interface TimelineProps {
   sectionHitObjectMap?: Map<string, boolean>;
   /** IDs of root posts whose last status reply has tag 'resolve'. */
   resolvedPostIds?: Set<string>;
+  /**
+   * Owner-only: opens the create-section flow. When provided and there is
+   * still song time after the last section, an inline "+" button fills the
+   * remaining width of the bar (with a clickable minimum size).
+   */
+  onAddSection?: () => void;
 }
 
 // OKLCH hue sweep: 20° (orange-red) → 310° (violet), 290° total range.
@@ -52,6 +66,7 @@ export default function Timeline({
   membersById,
   sectionHitObjectMap,
   resolvedPostIds,
+  onAddSection,
 }: TimelineProps) {
   const { t } = useTranslation();
   const [tooltip, setTooltip] = useState<{
@@ -92,11 +107,26 @@ export default function Timeline({
 
   if (songLengthMs <= 0) {
     return (
-      <div className="w-full h-16 bg-gray-800 border border-gray-700 rounded-lg flex items-center justify-center">
+      <div className="w-full h-32 bg-gray-800 border border-gray-700 rounded-lg flex items-center justify-center">
         <p className="text-sm text-gray-500">{t('timeline.unavailable')}</p>
       </div>
     );
   }
+
+  // The add-section affordance occupies whatever song time is left after the
+  // furthest section end. With no sections it spans the whole bar; once
+  // sections cover the song it disappears entirely.
+  const lastEndMs = sortedSections.reduce((max, s) => Math.max(max, s.endTimeMs), 0);
+  const coveredFraction = Math.min(1, lastEndMs / songLengthMs);
+  const songFilled = lastEndMs >= songLengthMs;
+  const showAddSection = !!onAddSection && !songFilled;
+  // Reserve a fixed strip for the "+" so it always stays comfortably clickable
+  // and never overlaps the last section. Sections are laid out inside a content
+  // area shrunk by this reserve (only while the "+" is shown); the "+" then fills
+  // everything from the last section's end through the reserved strip. The reserve
+  // matches the width of the icon-only upload button (px-4 + 16px icon = 3rem).
+  const ADD_RESERVE = '3rem';
+  const contentWidth = showAddSection ? `calc(100% - ${ADD_RESERVE})` : '100%';
 
   function handleMarkerClick(postId: string) {
     onJumpToPost?.(postId);
@@ -106,9 +136,13 @@ export default function Timeline({
     <div className="w-full">
       {/* Timeline bar */}
       <div
-        className="relative w-full h-16 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden"
+        className="relative w-full h-32 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden"
         data-testid="timeline-bar"
       >
+        {/* Content area: sections and markers map over the full song into this
+            box, which is narrowed by ADD_RESERVE while the "+" is shown so the
+            "+" strip can never collide with the last section. */}
+        <div className="absolute inset-y-0 left-0" style={{ width: contentWidth }}>
         {sortedSections.map((section, index) => {
           const duration = section.endTimeMs - section.startTimeMs;
           const widthPercent = (duration / songLengthMs) * 100;
@@ -210,6 +244,28 @@ export default function Timeline({
             />
           );
         })}
+        </div>
+
+        {/* Add-section affordance: starts where the last section ends (in the
+            shrunk content space) and fills through to the right edge — so it
+            covers the empty remaining song time plus the reserved strip, never
+            overlapping a section. */}
+        {showAddSection && (
+          <button
+            type="button"
+            data-testid="timeline-add-section"
+            onClick={onAddSection}
+            aria-label={t('mapsetPage.addSection')}
+            title={t('mapsetPage.addSection')}
+            className={`absolute top-0 bottom-0 flex items-center justify-center text-gray-400 hover:bg-gray-700/50 hover:text-white transition-colors ${
+              sortedSections.length > 0 ? 'border-l-2 border-dashed border-gray-600' : ''
+            }`}
+            style={{ left: `calc(${coveredFraction} * (100% - ${ADD_RESERVE}))`, right: 0 }}
+          >
+            <PlusIcon />
+          </button>
+        )}
+
       </div>
 
       {/* Tooltip */}

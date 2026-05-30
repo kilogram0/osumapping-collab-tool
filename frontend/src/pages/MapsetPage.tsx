@@ -142,11 +142,9 @@ export default function MapsetPage() {
   const [emulatedRole, setEmulatedRole] = useState<MapsetRole | null>(null);
   const [emulateGhost, setEmulateGhost] = useState(false);
   const viewToggleRowRef = useRef<HTMLDivElement>(null);
-  const leftGroupRef = useRef<HTMLDivElement>(null);
   const rightGroupRef = useRef<HTMLDivElement>(null);
   // Tracks the stable wrap state for hysteresis — updated inside checkAll, not in render.
   const isWrappedRef = useRef(false);
-  const [leftGroupWrapped, setLeftGroupWrapped] = useState(false);
   const [rightGroupWrapped, setRightGroupWrapped] = useState(false);
 
   const realIsGhost = !!(myMembership?.kicked_at);
@@ -428,13 +426,14 @@ export default function MapsetPage() {
     setTimeout(() => el.classList.remove('post-flash'), 3000);
   }, [jumpTarget, showAllPosts]);
 
-  // Detect when the two button groups together no longer fit side-by-side.
-  // Clone each group's children into an off-screen probe (position:fixed, width:max-content)
-  // to read unconstrained natural widths — no mutations to the real layout, no feedback loop.
-  // useLayoutEffect avoids the first-paint flash: the correct layout is applied before the
-  // browser paints. Gap is hardcoded to the row-mode value per group (left: gap-3=12px,
-  // right: gap-2=8px) because getComputedStyle(el).gap would return the column-mode gap
-  // when already wrapped, underestimating the natural row width.
+  // Detect when the view-toggle button group no longer fits on its row and
+  // should stack into a column. Clone the group's children into an off-screen
+  // probe (position:fixed, width:max-content) to read its unconstrained natural
+  // width — no mutations to the real layout, no feedback loop.
+  // useLayoutEffect avoids the first-paint flash: the correct layout is applied
+  // before the browser paints. Gap is hardcoded to the row-mode value (gap-2=8px)
+  // because getComputedStyle(el).gap would return the column-mode gap when already
+  // wrapped, underestimating the natural row width.
   const selectedDifficultyName = selectedDifficultyId ? (difficultyNames[selectedDifficultyId] ?? null) : null;
   useLayoutEffect(() => {
     function measureNaturalRowWidth(el: HTMLDivElement, rowGapPx: number): number {
@@ -452,19 +451,19 @@ export default function MapsetPage() {
       document.body.removeChild(probe);
       return width;
     }
+    // NOTE: only the right group is measured. If a left-side control is ever
+    // re-added to this row, restore the dual measurement (sum both groups'
+    // natural widths) rather than just adding back the div.
     const checkAll = () => {
       const outerEl = viewToggleRowRef.current;
-      const leftEl = leftGroupRef.current;
       const rightEl = rightGroupRef.current;
-      if (!outerEl || !leftEl || !rightEl) return;
-      const leftNatural = measureNaturalRowWidth(leftEl, 12);  // gap-3 in row mode
+      if (!outerEl || !rightEl) return;
       const rightNatural = measureNaturalRowWidth(rightEl, 8); // gap-2 in row mode
       // Hysteresis: wider dead-zone to exit column mode than to enter it,
       // preventing oscillation right at the threshold during resize.
       const buffer = isWrappedRef.current ? 48 : 16;
-      const needsWrap = leftNatural + rightNatural + buffer > outerEl.clientWidth;
+      const needsWrap = rightNatural + buffer > outerEl.clientWidth;
       isWrappedRef.current = needsWrap;
-      setLeftGroupWrapped(needsWrap);
       setRightGroupWrapped(needsWrap);
     };
     checkAll();
@@ -1268,6 +1267,16 @@ export default function MapsetPage() {
                 sections={decryptedSections}
               />
             )}
+            {selectedDifficultyId && (
+              <button
+                type="button"
+                onClick={handleCopyAssignments}
+                disabled={decryptedSections.length === 0}
+                className="px-4 py-3.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-800 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {t('mapsetPage.copyAssignments')}
+              </button>
+            )}
           </div>
 
           {activeDifficulties.length === 0 && !difficultiesLoading && (
@@ -1277,8 +1286,9 @@ export default function MapsetPage() {
 
         {selectedDifficultyId && (
           <div className="space-y-6">
-            {/* Timeline */}
-            {songLengthMs !== null && decryptedSections.length > 0 && (
+            {/* Timeline. Rendered for owners even with zero sections so the
+                inline add-section "+" (which fills the empty bar) is reachable. */}
+            {songLengthMs !== null && (decryptedSections.length > 0 || isOwner) && (
               <Timeline
                 sections={decryptedSections}
                 posts={postsForTimeline}
@@ -1287,6 +1297,7 @@ export default function MapsetPage() {
                 membersById={membersById}
                 sectionHitObjectMap={sectionHitObjectMap}
                 resolvedPostIds={resolvedPostIds}
+                onAddSection={isOwner ? () => setShowCreateSection(true) : undefined}
                 onJumpToPost={(postId) => {
                   setShowAllPosts(true);
                   setSelectedSectionId(null);
@@ -1309,28 +1320,11 @@ export default function MapsetPage() {
               />
             )}
 
-            {/* View toggle */}
-            <div ref={viewToggleRowRef} className="flex items-start justify-between">
-              <div ref={leftGroupRef} data-testid="view-toggle-left" className={leftGroupWrapped ? 'flex flex-col items-start gap-2' : 'flex items-center gap-3'}>
-                {decryptedSections.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleCopyAssignments}
-                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
-                  >
-                    {t('mapsetPage.copyAssignments')}
-                  </button>
-                )}
-                {isOwner && (
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateSection(true)}
-                    className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
-                  >
-                    {t('mapsetPage.addSection')}
-                  </button>
-                )}
-              </div>
+            {/* View toggle. Add Section and Copy Assignments now live elsewhere
+                (the inline "+" on the timeline, and the difficulties toolbar),
+                so only this filter group remains — right-aligned, stacking into
+                a column when it no longer fits on one row. */}
+            <div ref={viewToggleRowRef} className="flex items-start justify-end">
               <div ref={rightGroupRef} data-testid="view-toggle-right" className={rightGroupWrapped ? 'flex flex-col items-end gap-2' : 'flex items-center gap-2'}>
                 <button
                   type="button"

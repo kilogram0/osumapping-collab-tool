@@ -207,6 +207,7 @@ const mockDeleteSection = vi.fn().mockResolvedValue({});
 const mockUpdateSection = vi.fn().mockResolvedValue({});
 const mockCreateSection = vi.fn().mockResolvedValue({});
 const mockUseDifficulties = vi.fn(() => ({ data: MOCK_DIFFICULTIES, isLoading: false }));
+const mockUseDifficultyDetail = vi.fn(() => ({ data: MOCK_DIFFICULTY_DETAIL, isLoading: false }));
 
 const mockRedistributeForMerge = vi.fn().mockResolvedValue({ movedCount: 0 });
 const mockRedistributeForShorten = vi.fn().mockResolvedValue({ movedCount: 0 });
@@ -246,10 +247,7 @@ vi.mock('../hooks/useMapset', () => ({
 vi.mock('../hooks/useDifficulty', () => ({
   useDifficulties: (mapsetId: string, options?: { includePending?: boolean }) =>
     mockUseDifficulties(mapsetId, options),
-  useDifficultyDetail: () => ({
-    data: MOCK_DIFFICULTY_DETAIL,
-    isLoading: false,
-  }),
+  useDifficultyDetail: () => mockUseDifficultyDetail(),
   useCreateDifficulty: () => ({
     mutateAsync: vi.fn(),
   }),
@@ -339,6 +337,7 @@ describe('MapsetPage', () => {
     mockRedistributeForShorten.mockReset();
     mockRedistributeForShorten.mockResolvedValue({ movedCount: 0 });
     mockUseDifficulties.mockReturnValue({ data: MOCK_DIFFICULTIES, isLoading: false });
+    mockUseDifficultyDetail.mockReturnValue({ data: MOCK_DIFFICULTY_DETAIL, isLoading: false });
     mockUseMyMembership.mockReturnValue({
       data: {
         id: 'member-1',
@@ -416,6 +415,29 @@ describe('MapsetPage', () => {
     });
     await user.click(screen.getByRole('button', { name: /Add Section/i }));
     expect(screen.getByRole('heading', { name: /Add Section/i })).toBeInTheDocument();
+  });
+
+  it('copies assignments to the clipboard from the toolbar button', async () => {
+    renderPage();
+    const user = userEvent.setup();
+    // Define after setup(): userEvent installs its own clipboard stub on setup.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Copy Assignments/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Copy Assignments/i }));
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows Copy Assignments disabled when the difficulty has no sections', async () => {
+    mockUseDifficultyDetail.mockReturnValue({
+      data: { ...MOCK_DIFFICULTY_DETAIL, sections: [] },
+      isLoading: false,
+    });
+    renderPage();
+    const btn = await screen.findByRole('button', { name: /Copy Assignments/i });
+    expect(btn).toBeDisabled();
   });
 
   it('shows Add Difficulty but hides owner-only buttons for mapper role', async () => {
@@ -745,12 +767,14 @@ describe('MapsetPage', () => {
   });
 
   describe('view toggle button group wrap layout', () => {
-    // measureNaturalRowWidth clones children into a probe and reads probe.offsetWidth.
+    // measureNaturalRowWidth clones the group's children into a probe and reads
+    // probe.offsetWidth. Only the right (filter) group remains, so it alone drives
+    // wrapping.
     // In jsdom all layout values are 0, so probe.offsetWidth=0 and outerEl.clientWidth=0
-    // → 0+0+16 > 0 is true → both groups start in column mode by default.
-    // Entry threshold (from row): leftNatural+rightNatural+16 > clientWidth → 116 > cw
-    // Exit threshold (from col):  leftNatural+rightNatural+48 > clientWidth → 148 > cw
-    // Hysteresis dead-zone: 116 ≤ clientWidth < 148
+    // → 0+16 > 0 is true → the group starts in column mode by default.
+    // Entry threshold (from row): rightNatural+16 > clientWidth → 66 > cw
+    // Exit threshold (from col):  rightNatural+48 > clientWidth → 98 > cw
+    // Hysteresis dead-zone: 66 ≤ clientWidth < 98
 
     let resizeCallback: (() => void) | null = null;
 
@@ -767,22 +791,20 @@ describe('MapsetPage', () => {
       })));
     });
 
-    it('stacks both groups in column when container is too narrow (jsdom default)', async () => {
-      // offsetWidth=0, clientWidth=0 → 0+0+16 > 0 → wrapped
+    it('stacks the group in a column when container is too narrow (jsdom default)', async () => {
+      // offsetWidth=0, clientWidth=0 → 0+16 > 0 → wrapped
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).toBeInTheDocument());
-      expect(screen.getByTestId('view-toggle-left')).toHaveClass('flex-col');
+      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).toBeInTheDocument());
       expect(screen.getByTestId('view-toggle-right')).toHaveClass('flex-col');
     });
 
-    it('keeps both groups in a row when the container is wide enough', async () => {
-      // probe.offsetWidth=50 per group → combined=100; clientWidth=1000 → 100+16=116 < 1000
+    it('keeps the group in a row when the container is wide enough', async () => {
+      // probe.offsetWidth=50; clientWidth=1000 → 50+16=66 < 1000
       const offsetSpy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(50);
       const clientSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
 
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).toBeInTheDocument());
-      expect(screen.getByTestId('view-toggle-left')).not.toHaveClass('flex-col');
+      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).toBeInTheDocument());
       expect(screen.getByTestId('view-toggle-right')).not.toHaveClass('flex-col');
 
       offsetSpy.mockRestore();
@@ -795,22 +817,22 @@ describe('MapsetPage', () => {
       const clientSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => cw);
 
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).not.toHaveClass('flex-col'));
+      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).not.toHaveClass('flex-col'));
 
-      // Narrow below entry threshold (116 > 100 → col)
-      cw = 100;
+      // Narrow below entry threshold (66 > 50 → col)
+      cw = 50;
       act(() => { resizeCallback?.(); });
-      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).toHaveClass('flex-col'));
+      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).toHaveClass('flex-col'));
 
-      // Widen into dead-zone (148 > 130 → stays col)
-      cw = 130;
+      // Widen into dead-zone (98 > 80 → stays col)
+      cw = 80;
       act(() => { resizeCallback?.(); });
-      expect(screen.getByTestId('view-toggle-left')).toHaveClass('flex-col');
+      expect(screen.getByTestId('view-toggle-right')).toHaveClass('flex-col');
 
-      // Widen above exit threshold (148 > 200 is false → row)
-      cw = 200;
+      // Widen above exit threshold (98 > 120 is false → row)
+      cw = 120;
       act(() => { resizeCallback?.(); });
-      await waitFor(() => expect(screen.getByTestId('view-toggle-left')).not.toHaveClass('flex-col'));
+      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).not.toHaveClass('flex-col'));
 
       offsetSpy.mockRestore();
       clientSpy.mockRestore();

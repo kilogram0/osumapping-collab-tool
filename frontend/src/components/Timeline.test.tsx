@@ -255,4 +255,54 @@ describe('Timeline', () => {
     const marker = screen.getByTestId('timeline-marker-root');
     expect(marker.style.backgroundColor).toBe('rgb(239, 68, 68)');
   });
+
+  describe('inline add-section affordance', () => {
+    it('renders the add-section button when there is unfilled song time', () => {
+      // SECTIONS end at 90000; song is longer, so there is room to add more.
+      renderTimeline({ songLengthMs: 120000, onAddSection: vi.fn() });
+      expect(screen.getByTestId('timeline-add-section')).toBeInTheDocument();
+    });
+
+    it('hides the add-section button when sections fill the whole song', () => {
+      // SECTIONS already cover 0–90000 and songLengthMs defaults to 90000.
+      renderTimeline({ onAddSection: vi.fn() });
+      expect(screen.queryByTestId('timeline-add-section')).not.toBeInTheDocument();
+    });
+
+    it('does not render the add-section button without an onAddSection handler', () => {
+      renderTimeline({ songLengthMs: 120000 });
+      expect(screen.queryByTestId('timeline-add-section')).not.toBeInTheDocument();
+    });
+
+    it('still renders the add button when there are no sections', () => {
+      renderTimeline({ sections: [], songLengthMs: 120000, onAddSection: vi.fn() });
+      // coveredFraction = 0 → the button starts at the left edge and fills the bar.
+      expect(screen.getByTestId('timeline-add-section')).toBeInTheDocument();
+    });
+
+    it('shows a dashed divider only when there is a section to its left', () => {
+      const { rerender } = renderTimeline({ songLengthMs: 120000, onAddSection: vi.fn() });
+      expect(screen.getByTestId('timeline-add-section').className).toContain('border-dashed');
+
+      rerender(
+        <Timeline
+          sections={[]}
+          posts={POSTS}
+          songLengthMs={120000}
+          selectedSectionId={null}
+          onSelectSection={vi.fn()}
+          onAddSection={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('timeline-add-section').className).not.toContain('border-dashed');
+    });
+
+    it('calls onAddSection when clicked', async () => {
+      const onAddSection = vi.fn();
+      renderTimeline({ songLengthMs: 120000, onAddSection });
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId('timeline-add-section'));
+      expect(onAddSection).toHaveBeenCalledTimes(1);
+    });
+  });
 });
