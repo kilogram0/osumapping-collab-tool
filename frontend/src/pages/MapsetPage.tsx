@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import BaseVersionHistory from '../components/BaseVersionHistory';
+import ResourcesPanel from '../components/ResourcesPanel';
 import CreateDifficultyModal from '../components/CreateDifficultyModal';
 import CreatePostForm from '../components/CreatePostForm';
 import CreateSectionModal from '../components/CreateSectionModal';
@@ -1184,6 +1185,7 @@ export default function MapsetPage() {
               </button>
             )}
           </div>
+          <ResourcesPanel mapsetId={mapsetId} isOwner={isOwner} />
         </div>
 
         {/* Difficulties */}

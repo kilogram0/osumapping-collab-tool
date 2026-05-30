@@ -2,19 +2,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   cancelMapsetDeletion,
   createMapset,
+  createResource,
   deleteMapset,
+  deleteResource,
   fetchKickedMapsets,
   fetchMapset,
   fetchMapsets,
   fetchMembers,
   fetchMyMembership,
   fetchQuota,
+  fetchResources,
   inviteMember,
   removeMember,
   scheduleMapsetDeletion,
   updateMapset,
   updateMemberRole,
   type CreateMapsetPayload,
+  type CreateMapsetResourcePayload,
   type MapsetRole,
   type UpdateMapsetPayload,
 } from '../api/endpoints';
@@ -148,6 +152,34 @@ export function useCancelMapsetDeletion() {
     onSuccess: () => {
       // prefix match — also invalidates ['mapsets', id]
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+    },
+  });
+}
+
+export function useResources(mapsetId: string) {
+  return useQuery({
+    queryKey: ['resources', mapsetId],
+    queryFn: () => fetchResources(mapsetId),
+    enabled: !!mapsetId,
+  });
+}
+
+export function useCreateResource(mapsetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateMapsetResourcePayload) => createResource(mapsetId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resources', mapsetId] });
+    },
+  });
+}
+
+export function useDeleteResource(mapsetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (resourceId: string) => deleteResource(mapsetId, resourceId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resources', mapsetId] });
     },
   });
 }

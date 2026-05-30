@@ -20,6 +20,7 @@ vi.mock('../contexts/EncryptionContext', () => ({
     unlockWithKey: mockUnlockWithKey,
     lockMapset: vi.fn(),
     clearAll: vi.fn(),
+    getPassphrase: vi.fn(() => null),
   }),
 }));
 
@@ -85,6 +86,14 @@ vi.mock('../api/endpoints', async (importOriginal) => {
 
 vi.mock('../components/MergedDownloadButton', () => ({
   default: () => <button type="button">Download Full Difficulty (.osu)</button>,
+}));
+
+const mockResourcesPanelProps = vi.fn();
+vi.mock('../components/ResourcesPanel', () => ({
+  default: (props: Record<string, unknown>) => {
+    mockResourcesPanelProps(props);
+    return null;
+  },
 }));
 
 const MOCK_MAPSET = {
@@ -226,6 +235,12 @@ vi.mock('../hooks/useMapset', () => ({
     isLoading: false,
     isError: false,
   }),
+  useResources: () => ({ data: [] }),
+  useCreateResource: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteResource: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useInviteMember: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateMemberRole: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRemoveMember: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('../hooks/useDifficulty', () => ({
@@ -432,6 +447,57 @@ describe('MapsetPage', () => {
     });
     expect(screen.queryByRole('button', { name: /Add Difficulty/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Add Section/i })).not.toBeInTheDocument();
+  });
+
+  it('passes isOwner=true to ResourcesPanel for real owner', async () => {
+    mockResourcesPanelProps.mockClear();
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Test Mapset')).toBeInTheDocument());
+    expect(mockResourcesPanelProps).toHaveBeenCalledWith(
+      expect.objectContaining({ isOwner: true }),
+    );
+  });
+
+  it('passes isOwner=false to ResourcesPanel for mapper role', async () => {
+    mockResourcesPanelProps.mockClear();
+    mockUseMyMembership.mockReturnValue({
+      data: {
+        id: 'member-2',
+        mapset_id: 'ms1',
+        user_id: 'current-user-uuid',
+        role: 'mapper',
+        created_at: '',
+        updated_at: '',
+      },
+      isLoading: false,
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Test Mapset')).toBeInTheDocument());
+    expect(mockResourcesPanelProps).toHaveBeenCalledWith(
+      expect.objectContaining({ isOwner: false }),
+    );
+  });
+
+  it('passes isOwner=false to ResourcesPanel when owner emulates mapper role', async () => {
+    mockResourcesPanelProps.mockClear();
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Test Mapset')).toBeInTheDocument());
+
+    // At render time the owner has isOwner=true.
+    expect(mockResourcesPanelProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isOwner: true }),
+    );
+
+    // Open Manage Members modal and select mapper in the emulate-role combobox.
+    await userEvent.click(screen.getByRole('button', { name: /manage members/i }));
+    const emulateSelect = await screen.findByRole('combobox', { name: /preview/i });
+    await userEvent.selectOptions(emulateSelect, 'mapper');
+
+    await waitFor(() =>
+      expect(mockResourcesPanelProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({ isOwner: false }),
+      ),
+    );
   });
 
   it('shows Show All Posts toggle', async () => {

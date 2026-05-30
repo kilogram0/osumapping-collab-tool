@@ -334,6 +334,37 @@ class PostRead(BaseModel):
     updated_at: datetime
 
 
+_RESOURCE_NAME_CT_MAX = 2_048
+_RESOURCE_URL_CT_MAX = 4_096
+
+
+class MapsetResourceCreate(BaseModel):
+    """Request body for ``POST /mapsets/{id}/resources``.
+
+    The client generates the UUID before encrypting (bound into the AAD as
+    ``MapsetResource|{id}|{mapset_id}``), so ``id`` is part of the payload.
+    """
+
+    id: UUID
+    encrypted_name: str = Field(min_length=1, max_length=_RESOURCE_NAME_CT_MAX)
+    encrypted_url: str = Field(min_length=1, max_length=_RESOURCE_URL_CT_MAX)
+    position: int = Field(default=0, ge=0)
+
+
+class MapsetResourceRead(BaseModel):
+    """MapsetResource row as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    mapset_id: UUID
+    encrypted_name: str
+    encrypted_url: str
+    position: int
+    created_at: datetime
+    updated_at: datetime
+
+
 class MemberInviteRequest(BaseModel):
     """Request body for ``POST /mapsets/{id}/members``."""
 

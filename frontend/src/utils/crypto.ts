@@ -69,6 +69,10 @@ export function postFieldAad(postId: string, mapsetId: string): string {
   return `Post|${postId}|${mapsetId}`;
 }
 
+export function mapsetResourceAad(resourceId: string, mapsetId: string): string {
+  return `MapsetResource|${resourceId}|${mapsetId}`;
+}
+
 /**
  * Decode the uniform JSON envelope `{"v":<version>,"ms":<value>}`.
  *

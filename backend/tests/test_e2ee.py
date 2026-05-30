@@ -55,6 +55,7 @@ FORBIDDEN_BARE_KEYS = {
     "start_time_ms",
     "end_time_ms",
     "sort_order",
+    "url",
 }
 
 
@@ -305,6 +306,26 @@ async def test_e2ee_no_plaintext_in_api_responses(e2ee_client):
     assert resp.status_code == 200
     _check(resp.json())
 
+    # --- Create resource ---
+    resource_id = str(uuid4())
+    resp = await client.post(
+        f"/api/mapsets/{mapset_id}/resources",
+        json={
+            "id": resource_id,
+            "encrypted_name": _FAKE_ENC,
+            "encrypted_url": _FAKE_ENC,
+            "position": 0,
+        },
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 201, resp.text
+    _check(resp.json())
+
+    # GET /mapsets/{id}/resources
+    resp = await client.get(f"/api/mapsets/{mapset_id}/resources")
+    assert resp.status_code == 200
+    _check(resp.json())
+
 
 def test_e2ee_rejects_short_encrypted_value():
     """Unit-level: _assert_encrypted_values_are_valid_base64 rejects < 28 bytes."""
@@ -322,7 +343,7 @@ def test_e2ee_rejects_non_base64():
 def test_e2ee_rejects_bare_field_names():
     """Unit-level: _assert_no_bare_content_keys rejects forbidden bare field names."""
     for field in ("description", "name", "body", "content", "song_length_ms",
-                  "start_time_ms", "end_time_ms", "sort_order"):
+                  "start_time_ms", "end_time_ms", "sort_order", "url"):
         with pytest.raises(AssertionError, match=f"'{field}'"):
             _assert_no_bare_content_keys({field: "some value"})
 

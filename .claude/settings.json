@@ -24,7 +24,8 @@
       "Bash(git add *)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(f'{k}: {json.dumps\\(v\\)[:80]}'\\) for k,v in d.items\\(\\) if k in \\('postCard','createPostForm','timeline'\\)]\")",
       "Bash(python3 -c \"import json; d=json.load\\(open\\('/home/potato/Documents/Repositories/osu-modding-project/frontend/src/i18n/locales/en.json'\\)\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if k in \\('postCard','createPostForm','timeline'\\)}, indent=2\\)\\)\")",
-      "Bash(python3 -c \"import json; d=json.load\\(open\\('/home/potato/Documents/Repositories/osu-modding-project/frontend/src/i18n/locales/ca.json'\\)\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if k in \\('postCard','createPostForm','timeline'\\)}, indent=2\\)\\)\")"
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/home/potato/Documents/Repositories/osu-modding-project/frontend/src/i18n/locales/ca.json'\\)\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if k in \\('postCard','createPostForm','timeline'\\)}, indent=2\\)\\)\")",
+      "Bash(python3 -c \"import json; d = json.load\\(open\\('/home/potato/Documents/Repositories/osu-modding-project/frontend/src/i18n/locales/en.json'\\)\\); print\\(d.get\\('mapsetPage', {}\\).get\\('manageMembers', 'NOT FOUND'\\)\\)\")"
     ],
     "additionalDirectories": [
       "/tmp"

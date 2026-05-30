@@ -461,3 +461,41 @@ export async function activateBaseOsuVersion(
   );
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Resources
+// ---------------------------------------------------------------------------
+
+export interface MapsetResource {
+  id: string;
+  mapset_id: string;
+  encrypted_name: string;
+  encrypted_url: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateMapsetResourcePayload {
+  id: string;
+  encrypted_name: string;
+  encrypted_url: string;
+  position?: number;
+}
+
+export async function fetchResources(mapsetId: string): Promise<MapsetResource[]> {
+  const { data } = await client.get<MapsetResource[]>(`/mapsets/${mapsetId}/resources`);
+  return data;
+}
+
+export async function createResource(
+  mapsetId: string,
+  payload: CreateMapsetResourcePayload,
+): Promise<MapsetResource> {
+  const { data } = await client.post<MapsetResource>(`/mapsets/${mapsetId}/resources`, payload);
+  return data;
+}
+
+export async function deleteResource(mapsetId: string, resourceId: string): Promise<void> {
+  await client.delete(`/mapsets/${mapsetId}/resources/${resourceId}`);
+}

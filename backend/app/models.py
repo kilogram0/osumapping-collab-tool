@@ -138,6 +138,7 @@ class Mapset(SQLModel, table=True):
     owner: User = Relationship(back_populates="owned_mapsets")
     members: list["MapsetMember"] = Relationship(back_populates="mapset")
     difficulties: list["Difficulty"] = Relationship(back_populates="mapset")
+    resources: list["MapsetResource"] = Relationship(back_populates="mapset")
 
 
 class MapsetMember(SQLModel, table=True):
@@ -442,6 +443,49 @@ class DifficultyBaseOsuVersion(SQLModel, table=True):
     source_section_version: SectionOsuVersion | None = Relationship(
         back_populates="base_versions"
     )
+
+
+class MapsetResource(SQLModel, table=True):
+    """An encrypted named link (resource) attached to a mapset."""
+
+    __tablename__ = "mapsetresource"
+
+    __table_args__ = (
+        sa.Index("ix_mapsetresource_mapset_id", "mapset_id"),
+    )
+
+    # Client-generated UUID — bound into AAD before encryption, same as other
+    # encrypted-content tables. No server_default here by design.
+    id: UUID = Field(primary_key=True)
+    mapset_id: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("mapset.id", ondelete="CASCADE"), nullable=False
+        )
+    )
+    encrypted_name: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    encrypted_url: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    position: int = Field(
+        default=0,
+        sa_column=sa.Column(sa.Integer, nullable=False, server_default="0"),
+    )
+    created_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+        },
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+            "onupdate": func.clock_timestamp(),
+        },
+    )
+
+    # Relationships
+    mapset: Mapset = Relationship(back_populates="resources")
 
 
 class Post(SQLModel, table=True):
