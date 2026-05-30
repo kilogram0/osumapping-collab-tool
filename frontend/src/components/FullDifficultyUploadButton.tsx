@@ -24,6 +24,16 @@ interface Props {
   difficultyId: string;
   mapsetId: string;
   sections: DecryptedSection[];
+  /** Render as a compact icon button instead of a labelled button. */
+  iconOnly?: boolean;
+}
+
+function UploadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 10.5v-8M5 5.5l3-3 3 3M3 12.5h10" />
+    </svg>
+  );
 }
 
 type ModalMode = 'owner-critical' | 'owner-notice';
@@ -41,7 +51,7 @@ interface PendingData {
   activeBase: string;
 }
 
-export default function FullDifficultyUploadButton({ difficultyId, mapsetId, sections }: Props) {
+export default function FullDifficultyUploadButton({ difficultyId, mapsetId, sections, iconOnly = false }: Props) {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -425,15 +435,28 @@ export default function FullDifficultyUploadButton({ difficultyId, mapsetId, sec
         onChange={handleFileSelect}
         aria-label={t('fullUpload.ariaLabel')}
       />
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={loading || sections.length === 0}
-        title={sections.length === 0 ? t('fullUpload.noSectionsTooltip') : undefined}
-        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-900 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors"
-      >
-        {loading ? t('fullUpload.uploading') : t('fullUpload.button')}
-      </button>
+      {iconOnly ? (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={loading || sections.length === 0}
+          aria-label={t('fullUpload.button')}
+          title={sections.length === 0 ? t('fullUpload.noSectionsTooltip') : t('fullUpload.button')}
+          className="px-4 py-3.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+        >
+          <UploadIcon />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={loading || sections.length === 0}
+          title={sections.length === 0 ? t('fullUpload.noSectionsTooltip') : undefined}
+          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-900 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors"
+        >
+          {loading ? t('fullUpload.uploading') : t('fullUpload.button')}
+        </button>
+      )}
       {error && (
         <p className="text-xs text-red-400" role="alert">
           {error}

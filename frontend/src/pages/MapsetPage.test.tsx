@@ -305,6 +305,18 @@ function renderPage() {
   );
 }
 
+/**
+ * Opens the difficulty dropdown so its inner rows — (Add Difficulty), each
+ * difficulty's rename/delete icons, and the deleted-difficulty rows — become
+ * queryable. The dropdown is closed by default.
+ */
+async function openDifficultyMenu(user: ReturnType<typeof userEvent.setup>) {
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: /Toggle difficulty list/i })).toBeInTheDocument(),
+  );
+  await user.click(screen.getByRole('button', { name: /Toggle difficulty list/i }));
+}
+
 describe('MapsetPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -365,20 +377,18 @@ describe('MapsetPage', () => {
     expect(screen.getByText('04:05')).toBeInTheDocument();
   });
 
-  it('shows Add Difficulty button for owner', async () => {
+  it('shows Add Difficulty option for owner', async () => {
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Add Difficulty/i })).toBeInTheDocument();
-    });
+    const user = userEvent.setup();
+    await openDifficultyMenu(user);
+    expect(screen.getByRole('button', { name: /\(Add Difficulty\)/i })).toBeInTheDocument();
   });
 
   it('opens create difficulty modal when Add Difficulty is clicked', async () => {
     renderPage();
     const user = userEvent.setup();
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Add Difficulty/i })).toBeInTheDocument();
-    });
-    await user.click(screen.getByRole('button', { name: /Add Difficulty/i }));
+    await openDifficultyMenu(user);
+    await user.click(screen.getByRole('button', { name: /\(Add Difficulty\)/i }));
     expect(screen.getByRole('heading', { name: /Add Difficulty/i })).toBeInTheDocument();
   });
 
@@ -421,9 +431,9 @@ describe('MapsetPage', () => {
       isLoading: false,
     });
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Add Difficulty/i })).toBeInTheDocument();
-    });
+    const user = userEvent.setup();
+    await openDifficultyMenu(user);
+    expect(screen.getByRole('button', { name: /\(Add Difficulty\)/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Add Section/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Rename Difficulty/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Delete Difficulty/i })).not.toBeInTheDocument();
@@ -584,7 +594,8 @@ describe('MapsetPage', () => {
     });
 
     // Switch difficulty — should reset to all-posts view
-    await user.click(screen.getByRole('tab', { name: /Normal/i }));
+    await openDifficultyMenu(user);
+    await user.click(screen.getByRole('option', { name: /Normal/i }));
     await waitFor(() => {
       expect(screen.queryByTestId('section-detail-panel')).not.toBeInTheDocument();
     });
@@ -807,14 +818,14 @@ describe('MapsetPage', () => {
   });
 
   describe('Delete Difficulty', () => {
-    it('shows Delete Difficulty button for owner when a difficulty is selected', async () => {
+    it('shows the Delete Difficulty row icon for owner inside the dropdown', async () => {
       renderPage();
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
-      });
+      const user = userEvent.setup();
+      await openDifficultyMenu(user);
+      expect(screen.getByRole('button', { name: /Delete Difficulty: Hard/i })).toBeInTheDocument();
     });
 
-    it('hides Delete Difficulty button for mapper role', async () => {
+    it('hides Delete Difficulty for mapper role', async () => {
       mockUseMyMembership.mockReturnValue({
         data: {
           id: 'member-2',
@@ -827,13 +838,13 @@ describe('MapsetPage', () => {
         isLoading: false,
       });
       renderPage();
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Add Difficulty/i })).toBeInTheDocument();
-      });
+      const user = userEvent.setup();
+      await openDifficultyMenu(user);
+      expect(screen.getByRole('button', { name: /\(Add Difficulty\)/i })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Delete Difficulty/i })).not.toBeInTheDocument();
     });
 
-    it('hides Delete Difficulty button for modder role', async () => {
+    it('hides Delete Difficulty for modder role', async () => {
       mockUseMyMembership.mockReturnValue({
         data: {
           id: 'member-3',
@@ -846,19 +857,16 @@ describe('MapsetPage', () => {
         isLoading: false,
       });
       renderPage();
-      await waitFor(() => {
-        expect(screen.getByText('Test Mapset')).toBeInTheDocument();
-      });
+      const user = userEvent.setup();
+      await openDifficultyMenu(user);
       expect(screen.queryByRole('button', { name: /Delete Difficulty/i })).not.toBeInTheDocument();
     });
 
     it('opens confirmation modal with difficulty name when Delete Difficulty is clicked', async () => {
       renderPage();
       const user = userEvent.setup();
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await openDifficultyMenu(user);
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty: Hard/i }));
       await waitFor(() => {
         expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
       });
@@ -870,10 +878,8 @@ describe('MapsetPage', () => {
     it('cancels and closes modal without calling delete', async () => {
       renderPage();
       const user = userEvent.setup();
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await openDifficultyMenu(user);
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty: Hard/i }));
       await waitFor(() => {
         expect(screen.getByRole('dialog', { name: /Delete Difficulty/i })).toBeInTheDocument();
       });
@@ -885,10 +891,8 @@ describe('MapsetPage', () => {
     it('calls delete mutation and closes modal on confirm', async () => {
       renderPage();
       const user = userEvent.setup();
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await openDifficultyMenu(user);
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty: Hard/i }));
       const dialog = await screen.findByRole('dialog', { name: /Delete Difficulty/i });
       await user.click(within(dialog).getByRole('button', { name: /^Delete$/i }));
       await waitFor(() => {
@@ -901,10 +905,8 @@ describe('MapsetPage', () => {
       mockDeleteDifficulty.mockRejectedValueOnce(new Error('Server error'));
       renderPage();
       const user = userEvent.setup();
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await openDifficultyMenu(user);
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty: Hard/i }));
       const dialog = await screen.findByRole('dialog', { name: /Delete Difficulty/i });
       await user.click(within(dialog).getByRole('button', { name: /^Delete$/i }));
       await waitFor(() => {
@@ -914,7 +916,7 @@ describe('MapsetPage', () => {
     });
   });
 
-  describe('Pending-deletion toggle', () => {
+  describe('Deleted difficulties', () => {
     const PENDING_DIFF = {
       id: 'd-pending',
       mapset_id: 'ms1',
@@ -928,16 +930,15 @@ describe('MapsetPage', () => {
     // downstream decrypt effects.
     const WITH_PENDING = [...MOCK_DIFFICULTIES, PENDING_DIFF];
 
-    it('shows Show-deleted toggle for owner only', async () => {
+    it('fetches pending difficulties (includePending=true) for owners', async () => {
       renderPage();
       await waitFor(() => {
-        expect(
-          screen.getByRole('button', { name: /Show deleted difficulties/i }),
-        ).toBeInTheDocument();
+        const calls = mockUseDifficulties.mock.calls;
+        expect(calls.some(([, opts]) => opts?.includePending === true)).toBe(true);
       });
     });
 
-    it('hides Show-deleted toggle for mapper role', async () => {
+    it('does not fetch pending difficulties for mapper role', async () => {
       mockUseMyMembership.mockReturnValue({
         data: {
           id: 'member-1',
@@ -953,76 +954,24 @@ describe('MapsetPage', () => {
       await waitFor(() => {
         expect(screen.getByText('Test Mapset')).toBeInTheDocument();
       });
-      expect(
-        screen.queryByRole('button', { name: /Show deleted difficulties/i }),
-      ).not.toBeInTheDocument();
+      const calls = mockUseDifficulties.mock.calls;
+      expect(calls.every(([, opts]) => opts?.includePending !== true)).toBe(true);
     });
 
-    it('calls useDifficulties with include_pending=true when toggle is on', async () => {
-      // First render — toggle off, includePending should be false (default).
-      mockUseDifficulties.mockImplementation(
-        (_mapsetId: string, options?: { includePending?: boolean }) => {
-          // When the toggle is on, return the pending row alongside active.
-          if (options?.includePending) {
-            return { data: WITH_PENDING, isLoading: false };
-          }
-          return { data: MOCK_DIFFICULTIES, isLoading: false };
-        },
-      );
+    it('lists deleted difficulties with a Restore icon inside the dropdown', async () => {
+      mockUseDifficulties.mockReturnValue({ data: WITH_PENDING, isLoading: false });
       renderPage();
       const user = userEvent.setup();
-      await waitFor(() => {
-        expect(
-          screen.getByRole('button', { name: /Show deleted difficulties/i }),
-        ).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /Show deleted difficulties/i }));
-
-      await waitFor(() => {
-        const calls = mockUseDifficulties.mock.calls;
-        expect(
-          calls.some(([, opts]) => opts?.includePending === true),
-        ).toBe(true);
-      });
-    });
-
-    it('renders pending difficulties with a Restore button', async () => {
-      mockUseDifficulties.mockImplementation(
-        (_mapsetId: string, options?: { includePending?: boolean }) =>
-          options?.includePending
-            ? { data: WITH_PENDING, isLoading: false }
-            : { data: MOCK_DIFFICULTIES, isLoading: false },
-      );
-      renderPage();
-      const user = userEvent.setup();
-      await waitFor(() => {
-        expect(
-          screen.getByRole('button', { name: /Show deleted difficulties/i }),
-        ).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /Show deleted difficulties/i }));
-
-      const pendingList = await screen.findByTestId('pending-difficulty-list');
-      expect(within(pendingList).getByRole('button', { name: /Restore/i })).toBeInTheDocument();
+      await openDifficultyMenu(user);
+      expect(screen.getByRole('button', { name: /Restore: Insane/i })).toBeInTheDocument();
     });
 
     it('calls restore mutation and shows success toast on click', async () => {
-      mockUseDifficulties.mockImplementation(
-        (_mapsetId: string, options?: { includePending?: boolean }) =>
-          options?.includePending
-            ? { data: WITH_PENDING, isLoading: false }
-            : { data: MOCK_DIFFICULTIES, isLoading: false },
-      );
+      mockUseDifficulties.mockReturnValue({ data: WITH_PENDING, isLoading: false });
       renderPage();
       const user = userEvent.setup();
-      await waitFor(() => {
-        expect(
-          screen.getByRole('button', { name: /Show deleted difficulties/i }),
-        ).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /Show deleted difficulties/i }));
-      const pendingList = await screen.findByTestId('pending-difficulty-list');
-      await user.click(within(pendingList).getByRole('button', { name: /Restore/i }));
+      await openDifficultyMenu(user);
+      await user.click(screen.getByRole('button', { name: /Restore: Insane/i }));
 
       await waitFor(() => {
         expect(mockRestoreDifficulty).toHaveBeenCalledWith(PENDING_DIFF.id);
@@ -1043,10 +992,8 @@ describe('MapsetPage', () => {
       mockDeleteDifficulty.mockRejectedValueOnce(axiosError);
       renderPage();
       const user = userEvent.setup();
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Delete Difficulty/i })).toBeInTheDocument();
-      });
-      await user.click(screen.getByRole('button', { name: /Delete Difficulty/i }));
+      await openDifficultyMenu(user);
+      await user.click(screen.getByRole('button', { name: /Delete Difficulty: Hard/i }));
       const dialog = await screen.findByRole('dialog', { name: /Delete Difficulty/i });
       await user.click(within(dialog).getByRole('button', { name: /^Delete$/i }));
       await waitFor(() => {

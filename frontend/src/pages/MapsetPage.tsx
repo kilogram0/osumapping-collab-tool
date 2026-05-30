@@ -7,7 +7,7 @@ import ResourcesPanel from '../components/ResourcesPanel';
 import CreateDifficultyModal from '../components/CreateDifficultyModal';
 import CreatePostForm from '../components/CreatePostForm';
 import CreateSectionModal from '../components/CreateSectionModal';
-import DifficultyTabs from '../components/DifficultyTabs';
+import DifficultyDropdown from '../components/DifficultyDropdown';
 import EditSectionModal from '../components/EditSectionModal';
 import SplitSectionModal from '../components/SplitSectionModal';
 import FullDifficultyUploadButton from '../components/FullDifficultyUploadButton';
@@ -16,7 +16,6 @@ import TopBar from '../components/TopBar';
 import ManageMembersModal from '../components/ManageMembersModal';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
-import PendingDifficultyList from '../components/PendingDifficultyList';
 import PostCard from '../components/PostCard';
 import CollapsibleBranch from '../components/CollapsibleBranch';
 import ResolveEvent from '../components/ResolveEvent';
@@ -73,9 +72,17 @@ export default function MapsetPage() {
     for (const m of members ?? []) map.set(m.user_id, m);
     return map;
   }, [members]);
-  const [showPendingDifficulties, setShowPendingDifficulties] = useState(false);
+  // Owners always fetch soft-deleted difficulties so they appear at the bottom
+  // of the difficulty dropdown. Non-owners can't see them, so don't fetch them.
+  // This intentionally reads the *raw* membership rather than the derived
+  // `isOwner`/`effectiveRole` below — those don't exist yet at this point in the
+  // hook order, and folding them in here would let role emulation change a
+  // network request. Owner-preview-as-modder still renders no pending rows (the
+  // dropdown gates them on the derived `isOwner`), so the only divergence is
+  // that the wire request keeps includePending=true during emulation — harmless.
+  const canSeePending = !!myMembership && myMembership.role === 'owner' && !myMembership.kicked_at;
   const { data: difficulties, isLoading: difficultiesLoading } = useDifficulties(mapsetId, {
-    includePending: showPendingDifficulties,
+    includePending: canSeePending,
   });
   const [selectedDifficultyId, setSelectedDifficultyId] = useState<string | null>(null);
   const { data: difficultyDetail, isLoading: detailLoading } = useDifficultyDetail(selectedDifficultyId);
@@ -98,8 +105,10 @@ export default function MapsetPage() {
 
   const [downloadingPendingId, setDownloadingPendingId] = useState<string | null>(null);
   const [showCreateDifficulty, setShowCreateDifficulty] = useState(false);
-  const [showRenameDifficulty, setShowRenameDifficulty] = useState(false);
-  const [showDeleteDifficultyConfirm, setShowDeleteDifficultyConfirm] = useState(false);
+  // Rename/delete act on whichever difficulty row the user clicked — not
+  // necessarily the selected one — so the target id+name is captured per action.
+  const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [showCreateSection, setShowCreateSection] = useState(false);
   const [showEditSection, setShowEditSection] = useState(false);
   const [showSplitSection, setShowSplitSection] = useState(false);
@@ -950,11 +959,11 @@ export default function MapsetPage() {
   }
 
   async function handleDeleteDifficulty() {
-    if (!selectedDifficultyId) return;
+    if (!deleteTarget) return;
     try {
-      await deleteDifficultyMutation.mutateAsync(selectedDifficultyId);
-      setSelectedDifficultyId(null);
-      setShowDeleteDifficultyConfirm(false);
+      await deleteDifficultyMutation.mutateAsync(deleteTarget.id);
+      if (selectedDifficultyId === deleteTarget.id) setSelectedDifficultyId(null);
+      setDeleteTarget(null);
       showToast(t('mapsetPage.toastDifficultyDeleted'), 'success');
     } catch (err) {
       showToast(
@@ -1206,74 +1215,65 @@ export default function MapsetPage() {
         </div>
 
         {/* Difficulties */}
-        <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-          <h2 className="text-lg font-semibold text-gray-200">{t('mapsetPage.difficultiesHeading')}</h2>
-          <div className="flex items-center gap-2">
-            {isOwner && (
-              <button
-                type="button"
-                onClick={() => setShowPendingDifficulties((v) => !v)}
-                aria-pressed={showPendingDifficulties}
-                className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-                  showPendingDifficulties
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                {showPendingDifficulties
-                  ? t('mapsetPage.hidePendingDifficulties')
-                  : t('mapsetPage.showPendingDifficulties')}
-              </button>
-            )}
-            {canEditStructure && (
-              <button
-                type="button"
-                onClick={() => setShowCreateDifficulty(true)}
-                className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
-              >
-                {t('mapsetPage.addDifficulty')}
-              </button>
-            )}
-          </div>
-        </div>
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-gray-200 mb-3">{t('mapsetPage.difficultiesHeading')}</h2>
 
-        {difficultiesLoading && <p className="text-gray-400">{t('mapsetPage.loadingDifficulties')}</p>}
+          {difficultiesLoading && <p className="text-gray-400 mb-2">{t('mapsetPage.loadingDifficulties')}</p>}
 
-        {activeDifficulties.length > 0 && (
-          <div className="mb-6">
-            <DifficultyTabs
-              difficulties={activeDifficulties}
+          <div className="flex items-center gap-2 flex-wrap">
+            <DifficultyDropdown
+              activeDifficulties={activeDifficulties}
+              pendingDifficulties={pendingDifficulties}
               selectedId={selectedDifficultyId}
               onSelect={setSelectedDifficultyId}
               mapsetId={mapsetId}
               onDecrypted={setDifficultyNames}
-            />
-          </div>
-        )}
-
-        {activeDifficulties.length === 0 && !difficultiesLoading && (
-          <p className="text-gray-400 italic mb-6">{t('mapsetPage.noDifficulties')}</p>
-        )}
-
-        {isOwner && showPendingDifficulties && (
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-gray-300 mb-2">
-              {t('mapsetPage.pendingDifficultiesHeading')}
-            </h3>
-            <PendingDifficultyList
-              difficulties={pendingDifficulties}
-              mapsetId={mapsetId}
-              onRestore={handleRestoreDifficulty}
+              canAdd={canEditStructure}
+              isOwner={isOwner}
+              onAddDifficulty={() => setShowCreateDifficulty(true)}
+              onRenameDifficulty={(diffId, name) => setRenameTarget({ id: diffId, name })}
+              onDeleteDifficulty={(diffId, name) => setDeleteTarget({ id: diffId, name })}
+              onRestoreDifficulty={handleRestoreDifficulty}
+              onDownloadDifficulty={handleDownloadPendingDifficulty}
               restoringId={
                 restoreDifficultyMutation.isPending
                   ? (restoreDifficultyMutation.variables ?? null)
                   : null
               }
-              onDownload={handleDownloadPendingDifficulty}
               downloadingId={downloadingPendingId}
             />
+            {isOwner && selectedDifficultyId && (
+              <ImportBookmarksButton
+                iconOnly
+                difficultyId={selectedDifficultyId}
+                mapsetId={mapsetId}
+                existingSections={decryptedSections}
+                songLengthMs={songLengthMs}
+                onSuccess={(count, prepopulated) =>
+                  showToast(
+                    prepopulated
+                      ? t('mapsetPage.toastImported', { count })
+                      : t('mapsetPage.toastImportedNoPrefill', { count }),
+                    'success',
+                  )
+                }
+                onError={(msg) => showToast(msg, 'error')}
+              />
+            )}
+            {isOwner && selectedDifficultyId && (
+              <FullDifficultyUploadButton
+                iconOnly
+                difficultyId={selectedDifficultyId}
+                mapsetId={mapsetId}
+                sections={decryptedSections}
+              />
+            )}
           </div>
-        )}
+
+          {activeDifficulties.length === 0 && !difficultiesLoading && (
+            <p className="text-gray-400 italic mt-2">{t('mapsetPage.noDifficulties')}</p>
+          )}
+        </div>
 
         {selectedDifficultyId && (
           <div className="space-y-6">
@@ -1328,48 +1328,6 @@ export default function MapsetPage() {
                     className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium rounded transition-colors"
                   >
                     {t('mapsetPage.addSection')}
-                  </button>
-                )}
-                {isOwner && selectedDifficultyId && (
-                  <ImportBookmarksButton
-                    difficultyId={selectedDifficultyId}
-                    mapsetId={mapsetId}
-                    existingSections={decryptedSections}
-                    songLengthMs={songLengthMs}
-                    onSuccess={(count, prepopulated) =>
-                      showToast(
-                        prepopulated
-                          ? t('mapsetPage.toastImported', { count })
-                          : t('mapsetPage.toastImportedNoPrefill', { count }),
-                        'success',
-                      )
-                    }
-                    onError={(msg) => showToast(msg, 'error')}
-                  />
-                )}
-                {isOwner && selectedDifficultyId && (
-                  <FullDifficultyUploadButton
-                    difficultyId={selectedDifficultyId}
-                    mapsetId={mapsetId}
-                    sections={decryptedSections}
-                  />
-                )}
-                {isOwner && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
-                  <button
-                    type="button"
-                    onClick={() => setShowRenameDifficulty(true)}
-                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
-                  >
-                    {t('mapsetPage.renameDifficulty')}
-                  </button>
-                )}
-                {isOwner && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
-                  <button
-                    type="button"
-                    onClick={() => setShowDeleteDifficultyConfirm(true)}
-                    className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded transition-colors"
-                  >
-                    {t('mapsetPage.deleteDifficulty')}
                   </button>
                 )}
               </div>
@@ -1560,17 +1518,17 @@ export default function MapsetPage() {
         />
       )}
 
-      {showRenameDifficulty && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
+      {renameTarget && (
         <RenameDifficultyModal
           mapsetId={mapsetId}
-          difficultyId={selectedDifficultyId}
-          currentName={difficultyNames[selectedDifficultyId]}
-          onSuccess={() => setShowRenameDifficulty(false)}
-          onCancel={() => setShowRenameDifficulty(false)}
+          difficultyId={renameTarget.id}
+          currentName={renameTarget.name}
+          onSuccess={() => setRenameTarget(null)}
+          onCancel={() => setRenameTarget(null)}
         />
       )}
 
-      {showDeleteDifficultyConfirm && selectedDifficultyId && difficultyNames[selectedDifficultyId] && (
+      {deleteTarget && (
         <div
           role="dialog"
           aria-modal="true"
@@ -1584,7 +1542,7 @@ export default function MapsetPage() {
             <p className="text-sm text-gray-300 mb-5">
               {t('mapsetPage.deleteDifficultyBodyPrefix')}
               <strong className="text-white">
-                {difficultyNames[selectedDifficultyId]}
+                {deleteTarget.name}
               </strong>
               {t('mapsetPage.deleteDifficultyBodySuffix')}
               <span className="text-red-400">{t('mapsetPage.deleteUndoneWarning')}</span>
@@ -1592,7 +1550,7 @@ export default function MapsetPage() {
             <div className="flex gap-3 justify-end">
               <button
                 type="button"
-                onClick={() => setShowDeleteDifficultyConfirm(false)}
+                onClick={() => setDeleteTarget(null)}
                 disabled={deleteDifficultyMutation.isPending}
                 className="px-4 py-2 text-gray-300 hover:text-white transition-colors disabled:opacity-50"
               >

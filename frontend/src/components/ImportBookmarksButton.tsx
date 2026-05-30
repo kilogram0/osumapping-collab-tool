@@ -14,6 +14,17 @@ interface ImportBookmarksButtonProps {
   songLengthMs: number | null;
   onSuccess: (count: number, prepopulated: boolean) => void;
   onError: (message: string) => void;
+  /** Render as a compact icon button instead of a labelled button. */
+  iconOnly?: boolean;
+}
+
+function BookIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 3.5h4a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 0 7 10.5H3z" />
+      <path d="M13 3.5H9A1.5 1.5 0 0 0 7.5 5v7A1.5 1.5 0 0 1 9 10.5h4z" />
+    </svg>
+  );
 }
 
 export default function ImportBookmarksButton({
@@ -23,6 +34,7 @@ export default function ImportBookmarksButton({
   songLengthMs,
   onSuccess,
   onError,
+  iconOnly = false,
 }: ImportBookmarksButtonProps) {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -104,14 +116,27 @@ export default function ImportBookmarksButton({
         onChange={handleFileSelect}
         aria-label={t('importBookmarks.ariaLabel')}
       />
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={importing}
-        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
-      >
-        {importing ? t('importBookmarks.importing') : t('importBookmarks.button')}
-      </button>
+      {iconOnly ? (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importing}
+          aria-label={t('importBookmarks.button')}
+          title={importing ? t('importBookmarks.importing') : t('importBookmarks.button')}
+          className="px-4 py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+        >
+          <BookIcon />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importing}
+          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
+        >
+          {importing ? t('importBookmarks.importing') : t('importBookmarks.button')}
+        </button>
+      )}
     </>
   );
 }

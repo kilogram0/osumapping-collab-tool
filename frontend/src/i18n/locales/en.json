@@ -178,6 +178,13 @@
     "noDifficulties": "No difficulties yet.",
     "encrypted": "🔒 Encrypted Difficulty"
   },
+  "difficultyDropdown": {
+    "placeholder": "Select difficulty",
+    "toggle": "Toggle difficulty list",
+    "ariaLabel": "Difficulties",
+    "addDifficulty": "(Add Difficulty)",
+    "deletedHeading": "Deleted"
+  },
   "sectionList": {
     "ariaLabel": "Sections",
     "empty": "No sections yet.",
@@ -450,10 +457,6 @@
     "toastDifficultyDeleted": "Difficulty scheduled for deletion. You can restore it within 7 days.",
     "toastDifficultyRestored": "Difficulty restored.",
     "toastFailedRestoreDifficulty": "Failed to restore difficulty.",
-    "showPendingDifficulties": "Show deleted difficulties",
-    "hidePendingDifficulties": "Hide deleted difficulties",
-    "pendingDifficultiesHeading": "Pending deletion",
-    "noPendingDifficulties": "No difficulties pending deletion.",
     "pendingExpiresInDays_one": "Expires in {{count}} day",
     "pendingExpiresInDays_other": "Expires in {{count}} days",
     "pendingExpiresImminent": "Expires today",

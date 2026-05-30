@@ -178,6 +178,13 @@
     "noDifficulties": "Encara no hi ha cap dificultat.",
     "encrypted": "🔒 Dificultat xifrada"
   },
+  "difficultyDropdown": {
+    "placeholder": "Selecciona dificultat",
+    "toggle": "Mostra o amaga la llista de dificultats",
+    "ariaLabel": "Dificultats",
+    "addDifficulty": "(Afegeix dificultat)",
+    "deletedHeading": "Suprimides"
+  },
   "sectionList": {
     "ariaLabel": "Seccions",
     "empty": "Encara no hi ha cap secció.",
@@ -450,10 +457,6 @@
     "toastDifficultyDeleted": "Dificultat programada per a la supressió. La pots restaurar en 7 dies.",
     "toastDifficultyRestored": "Dificultat restaurada.",
     "toastFailedRestoreDifficulty": "No s'ha pogut restaurar la dificultat.",
-    "showPendingDifficulties": "Mostra les dificultats suprimides",
-    "hidePendingDifficulties": "Amaga les dificultats suprimides",
-    "pendingDifficultiesHeading": "Pendents de supressió",
-    "noPendingDifficulties": "No hi ha dificultats pendents de supressió.",
     "pendingExpiresInDays_one": "Caduca en {{count}} dia",
     "pendingExpiresInDays_other": "Caduca en {{count}} dies",
     "pendingExpiresImminent": "Caduca avui",
