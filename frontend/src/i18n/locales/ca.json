@@ -485,6 +485,11 @@
     "toastImportedNoPrefill_one": "S'ha importat {{count}} secció dels marcadors. (Ja hi ha historial de base, per això no s'ha preomplert el contingut.)",
     "toastImportedNoPrefill_other": "S'han importat {{count}} seccions dels marcadors. (Ja hi ha historial de base, per això no s'ha preomplert el contingut.)",
     "ghostBanner": "Has estat eliminat d'aquest mapset. L'accés de només lectura expira el {{date}}.",
-    "ghostBannerDismiss": "Tanca"
+    "ghostBannerDismiss": "Tanca",
+    "copyAssignments": "Copia les assignacions",
+    "unassigned": "Sense assignar",
+    "unknownUser": "Usuari desconegut",
+    "toastAssignmentsCopied": "Assignacions copiades al porta-retalls",
+    "toastFailedCopyAssignments": "No s'han pogut copiar les assignacions"
   }
 }

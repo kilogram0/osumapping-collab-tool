@@ -86,7 +86,7 @@ export default function ResourcesPanel({ mapsetId, isOwner }: Props) {
       setAddUrl('');
       setShowAddForm(false);
     } catch (err) {
-      setAddError(extractApiErrorMessage(err) ?? 'Failed to add resource');
+      setAddError(extractApiErrorMessage(err, 'Failed to add resource'));
     }
   }
 
@@ -95,7 +95,7 @@ export default function ResourcesPanel({ mapsetId, isOwner }: Props) {
     try {
       await deleteMutation.mutateAsync(resourceId);
     } catch (err) {
-      setDeleteError(extractApiErrorMessage(err) ?? 'Failed to remove resource');
+      setDeleteError(extractApiErrorMessage(err, 'Failed to remove resource'));
     }
   }
 

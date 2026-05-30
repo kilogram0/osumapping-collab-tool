@@ -51,6 +51,7 @@ import { composeOsuFilename } from '../utils/osuFilename';
 import { mergeOsu } from '../utils/osuMerge';
 import { redistributeForDelete, redistributeForMerge, redistributeForShorten, hasSectionOsu } from '../utils/sectionRedistribute';
 import { findNextSection, sortSections } from '../utils/sectionOrder';
+import { buildAssignmentText, toAssignmentInputs } from '../utils/sectionAssignments';
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
 import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
@@ -924,6 +925,22 @@ export default function MapsetPage() {
     }
   }
 
+  async function handleCopyAssignments() {
+    const text = buildAssignmentText(
+      toAssignmentInputs(decryptedSections, {
+        resolveUsername: (id) => membersById.get(id)?.username,
+        unassignedLabel: t('mapsetPage.unassigned'),
+        unknownUserLabel: t('mapsetPage.unknownUser'),
+      }),
+    );
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(t('mapsetPage.toastAssignmentsCopied'), 'success');
+    } catch {
+      showToast(t('mapsetPage.toastFailedCopyAssignments'), 'error');
+    }
+  }
+
   async function handleAssignSection(sectionId: string, userId: string | null) {
     try {
       await assignSectionMutation.mutateAsync({ sectionId, userId });
@@ -1295,6 +1312,15 @@ export default function MapsetPage() {
             {/* View toggle */}
             <div ref={viewToggleRowRef} className="flex items-start justify-between">
               <div ref={leftGroupRef} data-testid="view-toggle-left" className={leftGroupWrapped ? 'flex flex-col items-start gap-2' : 'flex items-center gap-3'}>
+                {decryptedSections.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleCopyAssignments}
+                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
+                  >
+                    {t('mapsetPage.copyAssignments')}
+                  </button>
+                )}
                 {isOwner && (
                   <button
                     type="button"

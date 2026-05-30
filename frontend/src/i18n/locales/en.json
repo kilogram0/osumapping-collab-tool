@@ -485,6 +485,11 @@
     "toastImportedNoPrefill_one": "Imported {{count}} section from bookmarks. (Base history exists, so section content was not pre-filled.)",
     "toastImportedNoPrefill_other": "Imported {{count}} sections from bookmarks. (Base history exists, so section content was not pre-filled.)",
     "ghostBanner": "You were removed from this mapset. Read-only access expires on {{date}}.",
-    "ghostBannerDismiss": "Dismiss"
+    "ghostBannerDismiss": "Dismiss",
+    "copyAssignments": "Copy Assignments",
+    "unassigned": "Unassigned",
+    "unknownUser": "Unknown user",
+    "toastAssignmentsCopied": "Assignments copied to clipboard",
+    "toastFailedCopyAssignments": "Failed to copy assignments"
   }
 }
