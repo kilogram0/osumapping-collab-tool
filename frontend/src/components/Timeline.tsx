@@ -107,7 +107,7 @@ export default function Timeline({
 
   if (songLengthMs <= 0) {
     return (
-      <div className="w-full h-32 bg-gray-800 border border-gray-700 rounded-lg flex items-center justify-center">
+      <div className="w-full h-24 bg-gray-800 border border-gray-700 rounded-lg flex items-center justify-center">
         <p className="text-sm text-gray-500">{t('timeline.unavailable')}</p>
       </div>
     );
@@ -136,7 +136,7 @@ export default function Timeline({
     <div className="w-full">
       {/* Timeline bar */}
       <div
-        className="relative w-full h-32 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden"
+        className="relative w-full h-24 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden"
         data-testid="timeline-bar"
       >
         {/* Content area: sections and markers map over the full song into this
