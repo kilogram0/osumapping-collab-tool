@@ -146,10 +146,18 @@ describe('SectionDetailPanel', () => {
     expect(screen.getByText(/Latest upload:.*@modifier/i)).toBeInTheDocument();
   });
 
-  it('does not show latest upload when no versions exist', () => {
+  it('shows a placeholder (keeping panel height stable) when no versions exist', () => {
     mockSectionVersions.mockReturnValue({ data: [], isLoading: false, error: null });
     renderPanel();
-    expect(screen.queryByText(/Latest upload:/i)).not.toBeInTheDocument();
+    // The line is always rendered to avoid layout flicker once the on-demand
+    // latest version loads; with no version it falls back to placeholder copy.
+    expect(screen.getByText(/No uploads yet/i)).toBeInTheDocument();
+  });
+
+  it('shows a placeholder while the latest version is still loading', () => {
+    mockSectionVersions.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    renderPanel();
+    expect(screen.getByText(/No uploads yet/i)).toBeInTheDocument();
   });
 
   it('shows upload and edit buttons when canEditStructure is true', () => {

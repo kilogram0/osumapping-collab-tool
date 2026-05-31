@@ -127,9 +127,14 @@ export default function SectionDetailPanel({
           <p className="text-sm text-gray-400">
             {formatTime(section.startTimeMs)} – {formatTime(section.endTimeMs)}
           </p>
-          {latestVersion && (
-            <p className="text-xs text-gray-500 mt-0.5">
-              {latestVersion.uploaded_by !== section.assignedTo
+          {/* Always render this line — even before the latest version loads on
+              demand — so the panel height stays stable. Until (or unless) a
+              version exists, show a "No uploads yet" placeholder rather than
+              nothing. */}
+          <p className="text-xs text-gray-500 mt-0.5">
+            {!latestVersion
+              ? t('sectionDetail.latestUploadPlaceholder')
+              : latestVersion.uploaded_by !== section.assignedTo
                 ? t('sectionDetail.latestUploadBy', {
                     time: new Date(latestVersion.created_at).toLocaleString(),
                     username: membersById?.get(latestVersion.uploaded_by)?.username ?? t('sectionDetail.unknownMember'),
@@ -137,8 +142,7 @@ export default function SectionDetailPanel({
                 : t('sectionDetail.latestUpload', {
                     time: new Date(latestVersion.created_at).toLocaleString(),
                   })}
-            </p>
-          )}
+          </p>
           {/* Assignment row */}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             {section.assignedTo ? (
