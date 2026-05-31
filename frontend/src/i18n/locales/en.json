@@ -361,9 +361,12 @@
   "mergedDownload": {
     "titleLocked": "Unlock mapset to download",
     "titleEmpty": "No sections to merge",
-    "button": "Download Full Difficulty (.osu)",
+    "button": "Download (.osu)",
     "buttonShort": "Download",
-    "assembling": "Assembling…"
+    "assembling": "Assembling…",
+    "menuLabel": "Download options",
+    "optionBaseTemplate": "Base Template",
+    "optionFullDiff": "Full diff"
   },
   "osuUpload": {
     "ariaLabel": "Upload .osu file",
@@ -424,7 +427,6 @@
     "previewingSuffix": ". UI gating only — the server still treats you as owner, and any post you write is still authored by you.",
     "previewingGhost": "Previewing this mapset as a ghost member (read-only). UI gating only — the server still treats you as owner.",
     "exitPreview": "Exit preview",
-    "downloadBase": "Download Base Template",
     "baseHistory": "Base History",
     "manageMembers": "Manage Members",
     "viewMembers": "View Members",

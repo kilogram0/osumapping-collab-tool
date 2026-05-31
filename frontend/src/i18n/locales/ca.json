@@ -361,9 +361,12 @@
   "mergedDownload": {
     "titleLocked": "Desbloqueja el mapset per descarregar",
     "titleEmpty": "No hi ha seccions per fusionar",
-    "button": "Descarrega la dificultat completa (.osu)",
+    "button": "Descarrega (.osu)",
     "buttonShort": "Descarrega",
-    "assembling": "S'està assemblant…"
+    "assembling": "S'està assemblant…",
+    "menuLabel": "Opcions de descàrrega",
+    "optionBaseTemplate": "Plantilla base",
+    "optionFullDiff": "Dificultat completa"
   },
   "osuUpload": {
     "ariaLabel": "Puja un fitxer .osu",
@@ -424,7 +427,6 @@
     "previewingSuffix": ". Només restriccions de la interfície — el servidor encara et tracta com a propietari, i qualsevol publicació que escriguis encara és teva.",
     "previewingGhost": "Previsualitzant aquest mapset com a membre fantasma (només lectura). Només restriccions de la interfície — el servidor encara et tracta com a propietari.",
     "exitPreview": "Surt de la previsualització",
-    "downloadBase": "Descarrega la plantilla base",
     "baseHistory": "Historial de la base",
     "manageMembers": "Gestiona els membres",
     "viewMembers": "Mostra els membres",

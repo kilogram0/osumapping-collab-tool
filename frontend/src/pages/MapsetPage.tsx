@@ -1067,40 +1067,6 @@ export default function MapsetPage() {
     }
   }
 
-  async function handleDownloadBase() {
-    if (!unlocked || !selectedDifficultyId) return;
-    try {
-      const key = await getKey(mapsetId);
-      if (!key) return;
-      const resp = await downloadBaseOsu(selectedDifficultyId);
-      const plaintext = await decrypt(key, resp.encrypted_content, difficultyBaseOsuVersionAad(resp.id, mapsetId));
-      // Rewrite [Metadata] Version to "Base_version_<N>" so the editor and
-      // filename match. resp.version may be undefined on older payloads.
-      const diffName = `Base_version_${resp.version ?? 0}`;
-      const { content: finalContent, metadata } = withMetadataVersion(
-        parseOsuFile(plaintext),
-        diffName,
-      );
-      const filename = composeOsuFilename({
-        artist: metadata.artist,
-        title: metadata.title,
-        mapsetTitle: mapset?.title ?? '',
-        diffName,
-      });
-      const blob = new Blob([finalContent], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      logger.warn('Failed to download base:', err);
-    }
-  }
-
   if (!id) return null;
   if (mapsetLoading) return <div className="min-h-screen bg-gray-900 text-white p-8">{t('mapsetPage.loading')}</div>;
   if (mapsetError || !mapset) {
@@ -1187,14 +1153,6 @@ export default function MapsetPage() {
             <p className="text-sm text-gray-400 mt-1">{formatDuration(songLengthMs)}</p>
           )}
           <div className="flex items-center gap-3 mt-3">
-            <button
-              type="button"
-              onClick={handleDownloadBase}
-              disabled={!selectedDifficultyId}
-              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white text-sm font-medium rounded transition-colors"
-            >
-              {t('mapsetPage.downloadBase')}
-            </button>
             <button
               type="button"
               onClick={() => setShowBaseHistory(true)}
