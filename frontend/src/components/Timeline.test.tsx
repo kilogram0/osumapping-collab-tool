@@ -74,6 +74,11 @@ describe('Timeline', () => {
     expect(screen.getByTestId('timeline-bar')).toBeInTheDocument();
   });
 
+  it('isolates the bar so marker z-indices stay contained (do not leak over the difficulty dropdown)', () => {
+    renderTimeline();
+    expect(screen.getByTestId('timeline-bar').className).toContain('isolate');
+  });
+
   it('renders section blocks', () => {
     renderTimeline();
     expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument();

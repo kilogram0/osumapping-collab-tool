@@ -134,9 +134,11 @@ export default function Timeline({
 
   return (
     <div className="w-full">
-      {/* Timeline bar */}
+      {/* Timeline bar. `isolate` confines the marker z-indices (up to 40) to
+          this bar's own stacking context, so they can't paint over sibling
+          overlays like the difficulty dropdown (z-30) that open above it. */}
       <div
-        className="relative w-full h-24 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden"
+        className="relative isolate w-full h-24 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden"
         data-testid="timeline-bar"
       >
         {/* Content area: sections and markers map over the full song into this
