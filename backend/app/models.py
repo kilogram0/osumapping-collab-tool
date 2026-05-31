@@ -464,6 +464,13 @@ class MapsetResource(SQLModel, table=True):
     )
     encrypted_name: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
     encrypted_url: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    # Optional encrypted icon key (a value from a fixed client-side pool, e.g.
+    # "download"/"music"/"image"). Nullable so pre-existing rows fall back to a
+    # default icon on the client. Encrypted like the other fields, bound to the
+    # same AAD (MapsetResource|{id}|{mapset_id}); the server only stores the blob.
+    encrypted_icon: str | None = Field(
+        default=None, sa_column=sa.Column(sa.Text, nullable=True)
+    )
     position: int = Field(
         default=0,
         sa_column=sa.Column(sa.Integer, nullable=False, server_default="0"),

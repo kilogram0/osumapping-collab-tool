@@ -314,12 +314,28 @@ async def test_e2ee_no_plaintext_in_api_responses(e2ee_client):
             "id": resource_id,
             "encrypted_name": _FAKE_ENC,
             "encrypted_url": _FAKE_ENC,
+            "encrypted_icon": _FAKE_ENC,
             "position": 0,
         },
         headers=CSRF_HEADERS,
     )
     assert resp.status_code == 201, resp.text
+    assert resp.json()["encrypted_icon"] == _FAKE_ENC
     _check(resp.json())
+
+    # An empty encrypted_icon is rejected (symmetric with name/url min_length=1).
+    resp = await client.post(
+        f"/api/mapsets/{mapset_id}/resources",
+        json={
+            "id": str(uuid4()),
+            "encrypted_name": _FAKE_ENC,
+            "encrypted_url": _FAKE_ENC,
+            "encrypted_icon": "",
+            "position": 0,
+        },
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 422, resp.text
 
     # GET /mapsets/{id}/resources
     resp = await client.get(f"/api/mapsets/{mapset_id}/resources")

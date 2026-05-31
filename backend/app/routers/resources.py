@@ -89,6 +89,7 @@ async def create_resource(
         mapset_id=mapset_id,
         encrypted_name=payload.encrypted_name,
         encrypted_url=payload.encrypted_url,
+        encrypted_icon=payload.encrypted_icon,
         position=payload.position,
     )
     db.add(resource)

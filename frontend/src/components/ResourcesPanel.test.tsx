@@ -57,6 +57,7 @@ const RESOURCE: MapsetResource = {
   mapset_id: 'ms-1',
   encrypted_name: 'enc-name',
   encrypted_url: 'enc-url',
+  encrypted_icon: null,
   position: 0,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
@@ -71,6 +72,9 @@ function renderPanel(props?: Partial<React.ComponentProps<typeof ResourcesPanel>
   );
 }
 
+const heading = () => screen.queryByRole('heading', { name: /resources/i });
+const editButton = () => screen.getByRole('button', { name: /^edit$/i });
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -81,51 +85,33 @@ describe('ResourcesPanel — visibility rules', () => {
     mockIsUnlocked.mockReturnValue(true);
   });
 
-  it('hides the panel entirely for non-owners when no resources are uploaded', () => {
+  it('hides the card entirely for non-owners when no resources exist', () => {
     resourcesData = [];
     renderPanel({ isOwner: false });
-    expect(screen.queryByRole('button', { name: /resources/i })).toBeNull();
+    expect(heading()).toBeNull();
   });
 
-  it('shows the panel for owners even when no resources are uploaded', () => {
+  it('shows the card for owners even when no resources exist', () => {
     resourcesData = [];
     renderPanel({ isOwner: true });
-    expect(screen.getByRole('button', { name: /resources/i })).toBeInTheDocument();
+    expect(heading()).toBeInTheDocument();
+    expect(screen.getByText(/no resources yet/i)).toBeInTheDocument();
   });
 
-  it('shows the panel for non-owners when resources exist', () => {
+  it('shows the card for non-owners when resources exist', () => {
     resourcesData = [RESOURCE];
     renderPanel({ isOwner: false });
-    expect(screen.getByRole('button', { name: /resources/i })).toBeInTheDocument();
-  });
-});
-
-describe('ResourcesPanel (collapsed)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockIsUnlocked.mockReturnValue(true);
-    resourcesData = [];
+    expect(heading()).toBeInTheDocument();
   });
 
-  it('renders the Resources toggle button (owner)', () => {
+  it('shows the resource count in the header', () => {
+    resourcesData = [RESOURCE];
     renderPanel({ isOwner: true });
-    expect(screen.getByRole('button', { name: /resources/i })).toBeInTheDocument();
-  });
-
-  it('is collapsed by default — content is not visible', () => {
-    resourcesData = [RESOURCE];
-    renderPanel();
-    expect(screen.queryByRole('link')).toBeNull();
-  });
-
-  it('shows resource count in toggle when resources exist', () => {
-    resourcesData = [RESOURCE];
-    renderPanel();
     expect(screen.getByText('(1)')).toBeInTheDocument();
   });
 });
 
-describe('ResourcesPanel (expanded, unlocked)', () => {
+describe('ResourcesPanel — static list (always visible, unlocked)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsUnlocked.mockReturnValue(true);
@@ -133,9 +119,8 @@ describe('ResourcesPanel (expanded, unlocked)', () => {
     resourcesData = [RESOURCE];
   });
 
-  it('expands on click and shows decrypted resource as link', async () => {
+  it('renders the decrypted resource as a link without any expand step', async () => {
     renderPanel();
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
     await waitFor(() => expect(screen.getByRole('link', { name: 'decrypted' })).toBeInTheDocument());
   });
 
@@ -144,7 +129,6 @@ describe('ResourcesPanel (expanded, unlocked)', () => {
       .mockResolvedValueOnce('My Resource')
       .mockResolvedValueOnce('https://example.com/file.osz');
     renderPanel();
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
     await waitFor(() => {
       const link = screen.getByRole('link', { name: 'My Resource' });
       expect(link).toHaveAttribute('href', 'https://example.com/file.osz');
@@ -152,29 +136,48 @@ describe('ResourcesPanel (expanded, unlocked)', () => {
     });
   });
 
-  it('non-owner does not see Remove button', async () => {
-    renderPanel({ isOwner: false });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
+  it('decrypts the icon with the same resource AAD when present', async () => {
+    resourcesData = [{ ...RESOURCE, encrypted_icon: 'enc-icon' }];
+    mockDecrypt.mockResolvedValue('music');
+    renderPanel();
     await waitFor(() => expect(screen.getByRole('link')).toBeInTheDocument());
+    // name, url, and icon all decrypted with the row's AAD.
+    expect(mockDecrypt).toHaveBeenCalledWith(expect.anything(), 'enc-icon', 'MapsetResource|res-1|ms-1');
+  });
+
+  it('still renders the row when the icon fails to decrypt', async () => {
+    resourcesData = [{ ...RESOURCE, encrypted_icon: 'enc-icon' }];
+    mockDecrypt.mockImplementation(async (_k, ct: string) => {
+      if (ct === 'enc-icon') throw new Error('bad icon');
+      return 'ok';
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getByRole('link', { name: 'ok' })).toBeInTheDocument());
+  });
+
+  it('non-owner sees no Edit or Remove controls', async () => {
+    renderPanel({ isOwner: false });
+    await waitFor(() => expect(screen.getByRole('link')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /^edit$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /remove/i })).toBeNull();
   });
 });
 
-describe('ResourcesPanel (expanded, locked)', () => {
+describe('ResourcesPanel — locked', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsUnlocked.mockReturnValue(false);
     resourcesData = [RESOURCE];
   });
 
-  it('shows unlock message when locked', async () => {
+  it('shows the unlock message and no links when locked', () => {
     renderPanel();
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
     expect(screen.getByText(/unlock this mapset/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link')).toBeNull();
   });
 });
 
-describe('ResourcesPanel — owner controls', () => {
+describe('ResourcesPanel — owner edit mode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsUnlocked.mockReturnValue(true);
@@ -182,41 +185,39 @@ describe('ResourcesPanel — owner controls', () => {
     resourcesData = [RESOURCE];
   });
 
-  it('owner sees Add resource button', async () => {
+  it('Add/Remove controls are hidden until Edit is clicked', async () => {
     renderPanel({ isOwner: true });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /add resource/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('link')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /add resource/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /remove resource/i })).toBeNull();
+
+    await userEvent.click(editButton());
+    expect(screen.getByRole('button', { name: /add resource/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /remove resource/i })).toBeInTheDocument();
   });
 
-  it('owner sees Remove button per resource', async () => {
+  it('Remove calls the delete mutation with the resource id', async () => {
     renderPanel({ isOwner: true });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /remove resource/i })).toBeInTheDocument());
-  });
-
-  it('clicking Remove calls delete mutation with resource id', async () => {
-    renderPanel({ isOwner: true });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /remove resource/i })).toBeInTheDocument());
+    await userEvent.click(editButton());
     await userEvent.click(screen.getByRole('button', { name: /remove resource/i }));
     expect(mockDeleteMutateAsync).toHaveBeenCalledWith(RESOURCE.id);
   });
 
-  it('shows add form when Add resource is clicked', async () => {
+  it('opens the add form with name, url, and an icon picker', async () => {
     renderPanel({ isOwner: true });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /add resource/i })).toBeInTheDocument());
+    await userEvent.click(editButton());
     await userEvent.click(screen.getByRole('button', { name: /add resource/i }));
     expect(screen.getByPlaceholderText(/name/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/url/i)).toBeInTheDocument();
+    // icon picker buttons (one per pool key)
+    expect(screen.getByRole('button', { name: 'Audio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Image' })).toBeInTheDocument();
   });
 
-  it('submitting the add form calls createMutation with encrypted fields', async () => {
+  it('submitting creates a resource with the default (link) icon', async () => {
     renderPanel({ isOwner: true });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /add resource/i })).toBeInTheDocument());
+    await userEvent.click(editButton());
     await userEvent.click(screen.getByRole('button', { name: /add resource/i }));
-
     await userEvent.type(screen.getByPlaceholderText(/name/i), '.osz download');
     await userEvent.type(screen.getByPlaceholderText(/url/i), 'https://example.com/map.osz');
     await userEvent.click(screen.getByRole('button', { name: /^add$/i }));
@@ -227,15 +228,32 @@ describe('ResourcesPanel — owner controls', () => {
           id: 'new-resource-id',
           encrypted_name: 'enc:.osz download',
           encrypted_url: 'enc:https://example.com/map.osz',
+          encrypted_icon: 'enc:link',
         }),
       ),
     );
   });
 
-  it('shows validation error for empty name', async () => {
+  it('encrypts the chosen icon when a different one is picked', async () => {
     renderPanel({ isOwner: true });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /add resource/i })).toBeInTheDocument());
+    await userEvent.click(editButton());
+    await userEvent.click(screen.getByRole('button', { name: /add resource/i }));
+    await userEvent.type(screen.getByPlaceholderText(/name/i), 'hitsounds');
+    await userEvent.type(screen.getByPlaceholderText(/url/i), 'https://example.com/hs.zip');
+    await userEvent.click(screen.getByRole('button', { name: 'Audio' }));
+    await userEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await waitFor(() =>
+      expect(mockCreateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ encrypted_icon: 'enc:music' }),
+      ),
+    );
+    expect(mockEncrypt).toHaveBeenCalledWith(expect.anything(), 'music', expect.any(String));
+  });
+
+  it('shows a validation error for an empty name', async () => {
+    renderPanel({ isOwner: true });
+    await userEvent.click(editButton());
     await userEvent.click(screen.getByRole('button', { name: /add resource/i }));
     await userEvent.type(screen.getByPlaceholderText(/url/i), 'https://example.com');
     await userEvent.click(screen.getByRole('button', { name: /^add$/i }));
@@ -243,10 +261,9 @@ describe('ResourcesPanel — owner controls', () => {
     expect(mockCreateMutateAsync).not.toHaveBeenCalled();
   });
 
-  it('shows validation error for invalid URL', async () => {
+  it('shows a validation error for an invalid URL', async () => {
     renderPanel({ isOwner: true });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /add resource/i })).toBeInTheDocument());
+    await userEvent.click(editButton());
     await userEvent.click(screen.getByRole('button', { name: /add resource/i }));
     await userEvent.type(screen.getByPlaceholderText(/name/i), 'OSZ');
     await userEvent.type(screen.getByPlaceholderText(/url/i), 'not-a-url');
@@ -255,11 +272,10 @@ describe('ResourcesPanel — owner controls', () => {
     expect(mockCreateMutateAsync).not.toHaveBeenCalled();
   });
 
-  it('shows error message when delete fails', async () => {
+  it('shows an error message when delete fails', async () => {
     mockDeleteMutateAsync.mockRejectedValueOnce(new Error('Server error'));
     renderPanel({ isOwner: true });
-    await userEvent.click(screen.getByRole('button', { name: /resources/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /remove resource/i })).toBeInTheDocument());
+    await userEvent.click(editButton());
     await userEvent.click(screen.getByRole('button', { name: /remove resource/i }));
     await waitFor(() => expect(screen.getByText(/server error/i)).toBeInTheDocument());
   });

@@ -471,6 +471,8 @@ export interface MapsetResource {
   mapset_id: string;
   encrypted_name: string;
   encrypted_url: string;
+  /** Encrypted icon key (from the client-side pool). Null on legacy rows. */
+  encrypted_icon: string | null;
   position: number;
   created_at: string;
   updated_at: string;
@@ -480,6 +482,7 @@ export interface CreateMapsetResourcePayload {
   id: string;
   encrypted_name: string;
   encrypted_url: string;
+  encrypted_icon?: string;
   position?: number;
 }
 

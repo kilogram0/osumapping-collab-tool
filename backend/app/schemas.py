@@ -336,6 +336,7 @@ class PostRead(BaseModel):
 
 _RESOURCE_NAME_CT_MAX = 2_048
 _RESOURCE_URL_CT_MAX = 4_096
+_RESOURCE_ICON_CT_MAX = 512
 
 
 class MapsetResourceCreate(BaseModel):
@@ -348,6 +349,7 @@ class MapsetResourceCreate(BaseModel):
     id: UUID
     encrypted_name: str = Field(min_length=1, max_length=_RESOURCE_NAME_CT_MAX)
     encrypted_url: str = Field(min_length=1, max_length=_RESOURCE_URL_CT_MAX)
+    encrypted_icon: str | None = Field(default=None, min_length=1, max_length=_RESOURCE_ICON_CT_MAX)
     position: int = Field(default=0, ge=0)
 
 
@@ -360,6 +362,7 @@ class MapsetResourceRead(BaseModel):
     mapset_id: UUID
     encrypted_name: str
     encrypted_url: str
+    encrypted_icon: str | None = None
     position: int
     created_at: datetime
     updated_at: datetime
