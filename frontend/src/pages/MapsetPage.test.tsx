@@ -440,6 +440,24 @@ describe('MapsetPage', () => {
     expect(btn).toBeDisabled();
   });
 
+  it('shows the full-difficulty Download button when a difficulty is selected', async () => {
+    renderPage();
+    expect(
+      await screen.findByRole('button', { name: /Download Full Difficulty/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the full-difficulty Download button when no difficulty is selected', async () => {
+    mockUseDifficulties.mockReturnValue({ data: [], isLoading: false });
+    renderPage();
+    // No difficulties → nothing selected → the merged-download button (and the
+    // rest of the per-difficulty toolbar) must not mount.
+    await screen.findByText(/No difficulties/i);
+    expect(
+      screen.queryByRole('button', { name: /Download Full Difficulty/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows Add Difficulty but hides owner-only buttons for mapper role', async () => {
     mockUseMyMembership.mockReturnValue({
       data: {

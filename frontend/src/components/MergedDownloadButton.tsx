@@ -27,6 +27,14 @@ interface MergedDownloadButtonProps {
   difficultyName?: string | null;
 }
 
+function DownloadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 2.5v8M5 7.5l3 3 3-3M3 12.5h10" />
+    </svg>
+  );
+}
+
 export default function MergedDownloadButton({
   difficultyId,
   mapsetId,
@@ -148,10 +156,14 @@ export default function MergedDownloadButton({
       type="button"
       onClick={handleDownload}
       disabled={!unlocked || loading || sections.length === 0}
-      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 text-white text-sm font-medium rounded transition-colors"
-      title={!unlocked ? t('mergedDownload.titleLocked') : sections.length === 0 ? t('mergedDownload.titleEmpty') : t('mergedDownload.titleDownload')}
+      className="inline-flex items-center gap-2 px-4 py-3.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+      // Visible text is the short "Download"; the hover/aria text carries the
+      // full "Download Full Difficulty" wording so the action stays explicit.
+      aria-label={t('mergedDownload.button')}
+      title={!unlocked ? t('mergedDownload.titleLocked') : sections.length === 0 ? t('mergedDownload.titleEmpty') : t('mergedDownload.button')}
     >
-      {loading ? t('mergedDownload.assembling') : t('mergedDownload.button')}
+      <DownloadIcon />
+      {loading ? t('mergedDownload.assembling') : t('mergedDownload.buttonShort')}
     </button>
   );
 }

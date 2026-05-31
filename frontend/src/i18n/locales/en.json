@@ -361,8 +361,8 @@
   "mergedDownload": {
     "titleLocked": "Unlock mapset to download",
     "titleEmpty": "No sections to merge",
-    "titleDownload": "Download merged .osu",
     "button": "Download Full Difficulty (.osu)",
+    "buttonShort": "Download",
     "assembling": "Assembling…"
   },
   "osuUpload": {

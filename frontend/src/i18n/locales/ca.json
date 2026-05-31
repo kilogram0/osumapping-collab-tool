@@ -361,8 +361,8 @@
   "mergedDownload": {
     "titleLocked": "Desbloqueja el mapset per descarregar",
     "titleEmpty": "No hi ha seccions per fusionar",
-    "titleDownload": "Descarrega el .osu fusionat",
     "button": "Descarrega la dificultat completa (.osu)",
+    "buttonShort": "Descarrega",
     "assembling": "S'està assemblant…"
   },
   "osuUpload": {

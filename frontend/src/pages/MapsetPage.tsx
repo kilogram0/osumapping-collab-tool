@@ -60,6 +60,15 @@ import type { DecryptedPost } from '../types';
 /** Stable empty array reference to avoid new-array churn in deps. */
 const EMPTY_SECTIONS: Section[] = [];
 
+function CopyIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+      <path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" />
+    </svg>
+  );
+}
+
 export default function MapsetPage() {
   const { t, i18n } = useTranslation();
   const { id } = useParams<{ id: string }>();
@@ -1186,13 +1195,6 @@ export default function MapsetPage() {
             >
               {t('mapsetPage.downloadBase')}
             </button>
-            <MergedDownloadButton
-              difficultyId={selectedDifficultyId ?? ''}
-              mapsetId={mapsetId}
-              mapsetTitle={mapset.title}
-              sections={sections}
-              difficultyName={selectedDifficultyId ? difficultyNames[selectedDifficultyId] ?? null : null}
-            />
             <button
               type="button"
               onClick={() => setShowBaseHistory(true)}
@@ -1241,41 +1243,52 @@ export default function MapsetPage() {
               }
               downloadingId={downloadingPendingId}
             />
-            {isOwner && selectedDifficultyId && (
-              <ImportBookmarksButton
-                iconOnly
-                difficultyId={selectedDifficultyId}
-                mapsetId={mapsetId}
-                existingSections={decryptedSections}
-                songLengthMs={songLengthMs}
-                onSuccess={(count, prepopulated) =>
-                  showToast(
-                    prepopulated
-                      ? t('mapsetPage.toastImported', { count })
-                      : t('mapsetPage.toastImportedNoPrefill', { count }),
-                    'success',
-                  )
-                }
-                onError={(msg) => showToast(msg, 'error')}
-              />
-            )}
-            {isOwner && selectedDifficultyId && (
-              <FullDifficultyUploadButton
-                iconOnly
-                difficultyId={selectedDifficultyId}
-                mapsetId={mapsetId}
-                sections={decryptedSections}
-              />
-            )}
             {selectedDifficultyId && (
-              <button
-                type="button"
-                onClick={handleCopyAssignments}
-                disabled={decryptedSections.length === 0}
-                className="px-4 py-3.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-800 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                {t('mapsetPage.copyAssignments')}
-              </button>
+              <>
+                {isOwner && (
+                  <ImportBookmarksButton
+                    iconOnly
+                    difficultyId={selectedDifficultyId}
+                    mapsetId={mapsetId}
+                    existingSections={decryptedSections}
+                    songLengthMs={songLengthMs}
+                    onSuccess={(count, prepopulated) =>
+                      showToast(
+                        prepopulated
+                          ? t('mapsetPage.toastImported', { count })
+                          : t('mapsetPage.toastImportedNoPrefill', { count }),
+                        'success',
+                      )
+                    }
+                    onError={(msg) => showToast(msg, 'error')}
+                  />
+                )}
+                {isOwner && (
+                  <FullDifficultyUploadButton
+                    iconOnly
+                    difficultyId={selectedDifficultyId}
+                    mapsetId={mapsetId}
+                    sections={decryptedSections}
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={handleCopyAssignments}
+                  disabled={decryptedSections.length === 0}
+                  aria-label={t('mapsetPage.copyAssignments')}
+                  title={t('mapsetPage.copyAssignments')}
+                  className="px-4 py-3.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-800 text-white rounded-lg transition-colors"
+                >
+                  <CopyIcon />
+                </button>
+                <MergedDownloadButton
+                  difficultyId={selectedDifficultyId}
+                  mapsetId={mapsetId}
+                  mapsetTitle={mapset.title}
+                  sections={sections}
+                  difficultyName={difficultyNames[selectedDifficultyId] ?? null}
+                />
+              </>
             )}
           </div>
 
