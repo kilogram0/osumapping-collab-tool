@@ -1,12 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Post, MemberWithUser } from '../api/endpoints';
+import type { MemberWithUser } from '../api/endpoints';
 import type { DecryptedSection } from './SectionList';
-import type { DecryptedPost } from '../types';
-import PostCard from './PostCard';
-import CollapsibleBranch from './CollapsibleBranch';
-import ResolveEvent from './ResolveEvent';
-import CreatePostForm from './CreatePostForm';
 import OsuUploadButton from './OsuUploadButton';
 import OsuVersionHistory from './OsuVersionHistory';
 import { useEncryption } from '../contexts/EncryptionContext';
@@ -14,17 +9,10 @@ import { assembleSectionOsu } from '../utils/sectionDownload';
 import { composeOsuFilename } from '../utils/osuFilename';
 import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { logger } from '../utils/logger';
-import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
-import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
 import { useSectionOsuVersions } from '../hooks/useDifficulty';
 
 interface SectionDetailPanelProps {
   section: DecryptedSection;
-  /** True when this is the last section in the difficulty; the upper-bound
-   *  check is inclusive so a post landing exactly on the song's final ms
-   *  isn't excluded from every section. */
-  isLastSection?: boolean;
-  posts: DecryptedPost[];
   mapsetId: string;
   mapsetTitle: string;
   difficultyId: string;
@@ -32,21 +20,8 @@ interface SectionDetailPanelProps {
   isOwner: boolean;
   role?: 'owner' | 'mapper' | 'modder' | null;
   canEditStructure: boolean;
-  /** Lookup from user_id → member profile for resolving post author display. */
+  /** Lookup from user_id → member profile for resolving display names. */
   membersById?: Map<string, MemberWithUser>;
-  onCreatePost: (payload: {
-    id: string;
-    tag: Post['tag'];
-    encrypted_body: string;
-    parent_id?: string | null;
-  }) => void | Promise<void>;
-  onUpdatePost: (payload: {
-    id: string;
-    tag: Post['tag'];
-    encrypted_body: string;
-    parent_id?: string | null;
-  }) => void | Promise<void>;
-  onDeletePost: (postId: string) => void | Promise<void>;
   onAssignSection?: (sectionId: string, userId: string | null) => void | Promise<void>;
   onEditSection?: (section: DecryptedSection) => void;
   onDeleteSection?: (section: DecryptedSection) => void | Promise<void>;
@@ -54,7 +29,6 @@ interface SectionDetailPanelProps {
   nextSection?: DecryptedSection | null;
   onMergeSection?: (section: DecryptedSection) => void | Promise<void>;
   onSplitSection?: (section: DecryptedSection) => void;
-  showOnlyUnresolved?: boolean;
 }
 
 function formatTime(ms: number): string {
@@ -74,8 +48,6 @@ function formatTime(ms: number): string {
 
 export default function SectionDetailPanel({
   section,
-  isLastSection = false,
-  posts,
   mapsetId,
   mapsetTitle,
   difficultyId,
@@ -84,16 +56,12 @@ export default function SectionDetailPanel({
   role,
   canEditStructure,
   membersById,
-  onCreatePost,
-  onUpdatePost,
-  onDeletePost,
   onAssignSection,
   onEditSection,
   onDeleteSection,
   nextSection,
   onMergeSection,
   onSplitSection,
-  showOnlyUnresolved = false,
 }: SectionDetailPanelProps) {
   const { t } = useTranslation();
   const { isUnlocked, getKey } = useEncryption();
@@ -106,78 +74,6 @@ export default function SectionDetailPanel({
     return sectionVersions.reduce((best, v) => (v.version > best.version ? v : best));
   }, [sectionVersions]);
   const [showAssignSelect, setShowAssignSelect] = useState(false);
-  const [replyingTo, setReplyingTo] = useState<DecryptedPost | null>(null);
-  const [editingPost, setEditingPost] = useState<DecryptedPost | null>(null);
-  const [editingPostBody, setEditingPostBody] = useState('');
-  const [showCreateForm, setShowCreateForm] = useState(false);
-
-  const sectionPosts = useMemo(() => {
-    const postById = new Map(posts.map((p) => [p.id, p]));
-
-    // Walk the parent chain to find the root (top-level) post id.
-    // Visited set guards against cycles in malformed data.
-    function findRootId(postId: string): string {
-      let current = postId;
-      const visited = new Set<string>();
-      while (true) {
-        if (visited.has(current)) return current;
-        visited.add(current);
-        const post = postById.get(current);
-        if (!post || post.parent_id === null) return current;
-        current = post.parent_id;
-      }
-    }
-
-    const inSectionByTimestamp = (p: DecryptedPost) => {
-      if (p.extractedMs === null) return false;
-      if (p.extractedMs < section.startTimeMs) return false;
-      // Half-open [start, end) — final section uses inclusive upper bound.
-      return isLastSection ? p.extractedMs <= section.endTimeMs : p.extractedMs < section.endTimeMs;
-    };
-
-    // Top-level posts whose timestamp falls in this section anchor the threads.
-    const sectionRootIds = new Set(
-      posts.filter((p) => p.parent_id === null && inSectionByTimestamp(p)).map((p) => p.id),
-    );
-
-    // A top-level post belongs if its timestamp is in range.
-    // A reply belongs if its root ancestor is a post in this section,
-    // regardless of the reply's own timestamp (replies reference context,
-    // not necessarily the same position in the map).
-    return posts.filter((p) =>
-      p.parent_id === null ? sectionRootIds.has(p.id) : sectionRootIds.has(findRootId(p.id)),
-    );
-  }, [posts, section, isLastSection]);
-
-  // Build reply trees for section posts
-  const postTree = useMemo(() => {
-    const topLevel: DecryptedPost[] = [];
-    const replyMap = new Map<string, DecryptedPost[]>();
-
-    for (const post of sectionPosts) {
-      if (post.parent_id === null) {
-        if (!isStatusReply(post.tag)) topLevel.push(post);
-      } else {
-        const siblings = replyMap.get(post.parent_id) ?? [];
-        siblings.push(post);
-        replyMap.set(post.parent_id, siblings);
-      }
-    }
-
-    topLevel.sort(compareRootPostOrder);
-    for (const replies of replyMap.values()) replies.sort(compareReplyOrder);
-
-    return { topLevel, replyMap };
-  }, [sectionPosts]);
-
-  const resolvedPostIds = useMemo(() => deriveResolvedRootIds(postTree), [postTree]);
-
-  const visibleTopLevel = useMemo(() => {
-    if (!showOnlyUnresolved) return postTree.topLevel;
-    return postTree.topLevel.filter(
-      (p) => canBeResolved(p.tag) && !resolvedPostIds.has(p.id),
-    );
-  }, [showOnlyUnresolved, postTree.topLevel, resolvedPostIds]);
 
   async function handleDownload() {
     if (!unlocked) return;
@@ -222,170 +118,10 @@ export default function SectionDetailPanel({
     }
   }
 
-  function handleCreatePost(payload: {
-    id: string;
-    tag: Post['tag'];
-    encrypted_body: string;
-    parent_id?: string | null;
-  }) {
-    onCreatePost(payload);
-    setReplyingTo(null);
-    setShowCreateForm(false);
-  }
-
-  function handleUpdatePost(payload: {
-    id: string;
-    tag: Post['tag'];
-    encrypted_body: string;
-    parent_id?: string | null;
-  }) {
-    onUpdatePost(payload);
-    setEditingPost(null);
-    setEditingPostBody('');
-  }
-
-  const MAX_REPLY_DEPTH = 10;
-
-  function renderReplyNode(post: DecryptedPost, depth: number): JSX.Element | null {
-    if (depth > MAX_REPLY_DEPTH) return null;
-    const replies = postTree.replyMap.get(post.id) ?? [];
-    const isEditingThis = editingPost?.id === post.id;
-    return (
-      <div key={post.id} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
-        <PostCard
-          post={post}
-          mapsetId={mapsetId}
-          currentUserId={currentUserId}
-          isOwner={isOwner}
-          decryptedBody={post.decryptedBody}
-          author={membersById?.get(post.author_id) ?? null}
-          showReplyButton={false}
-          onEdit={(p) => {
-            setReplyingTo(null);
-            setShowCreateForm(false);
-            setEditingPost(p as DecryptedPost);
-            setEditingPostBody((p as DecryptedPost).decryptedBody);
-          }}
-          onDelete={onDeletePost}
-        />
-
-        {isEditingThis && (
-          <div className="mt-2">
-            <CreatePostForm
-              mapsetId={mapsetId}
-              difficultyId={difficultyId}
-              onSubmit={handleUpdatePost}
-              onCancel={() => {
-                setEditingPost(null);
-                setEditingPostBody('');
-              }}
-              editingPost={post}
-              initialBody={editingPostBody}
-            />
-          </div>
-        )}
-
-        {replies.map((reply) => {
-          if (isStatusReply(reply.tag)) return null;
-          return renderReplyNode(reply, depth + 1);
-        })}
-      </div>
-    );
-  }
-
-  function renderRootPostNode(post: DecryptedPost): JSX.Element {
-    const replies = postTree.replyMap.get(post.id) ?? [];
-    const isReplyingToThis = replyingTo?.id === post.id;
-    const isEditingThis = editingPost?.id === post.id;
-    const isResolved = resolvedPostIds.has(post.id);
-    return (
-      <CollapsibleBranch key={post.id} userId={currentUserId} postId={post.id}>
-        {(collapsed, toggle) => (
-          <div>
-            <PostCard
-              post={post}
-              mapsetId={mapsetId}
-              currentUserId={currentUserId}
-              isOwner={isOwner}
-              decryptedBody={post.decryptedBody}
-              author={membersById?.get(post.author_id) ?? null}
-              showReplyButton
-              isResolved={isResolved}
-              isCollapsed={collapsed}
-              onToggleCollapse={toggle}
-              onReply={(p) => {
-                setEditingPost(null);
-                setShowCreateForm(false);
-                setReplyingTo(p as DecryptedPost);
-              }}
-              onEdit={(p) => {
-                setReplyingTo(null);
-                setShowCreateForm(false);
-                setEditingPost(p as DecryptedPost);
-                setEditingPostBody((p as DecryptedPost).decryptedBody);
-              }}
-              onDelete={onDeletePost}
-            />
-
-            {!collapsed && (
-              <>
-                {isReplyingToThis && (
-                  <div className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
-                    <CreatePostForm
-                      mapsetId={mapsetId}
-                      difficultyId={difficultyId}
-                      onSubmit={handleCreatePost}
-                      onCancel={() => setReplyingTo(null)}
-                      parentPost={post}
-                      resolveAction={canBeResolved(post.tag) ? (resolvedPostIds.has(post.id) ? 'reopen' : 'resolve') : undefined}
-                    />
-                  </div>
-                )}
-
-                {isEditingThis && (
-                  <div className="mt-2">
-                    <CreatePostForm
-                      mapsetId={mapsetId}
-                      difficultyId={difficultyId}
-                      onSubmit={handleUpdatePost}
-                      onCancel={() => {
-                        setEditingPost(null);
-                        setEditingPostBody('');
-                      }}
-                      editingPost={post}
-                      initialBody={editingPostBody}
-                    />
-                  </div>
-                )}
-
-                {replies.map((reply) => {
-                  if (isStatusReply(reply.tag)) {
-                    return (
-                      <div key={reply.id} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
-                        <ResolveEvent
-                          post={reply}
-                          author={membersById?.get(reply.author_id) ?? null}
-                          currentUserId={currentUserId}
-                          isOwner={isOwner}
-                          onDelete={onDeletePost}
-                        />
-                      </div>
-                    );
-                  }
-                  return renderReplyNode(reply, 1);
-                })}
-              </>
-            )}
-          </div>
-        )}
-      </CollapsibleBranch>
-    );
-  }
-
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-4" data-testid="section-detail-panel">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="text-lg font-semibold text-white">{section.name}</h3>
           <p className="text-sm text-gray-400">
@@ -537,48 +273,6 @@ export default function SectionDetailPanel({
             {t('sectionDetail.versionHistory')}
           </button>
         </div>
-      </div>
-
-      {/* Posts */}
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="text-sm font-medium text-gray-300">
-            {t('sectionDetail.posts', { count: sectionPosts.length })}
-          </h4>
-          <button
-            type="button"
-            onClick={() => {
-              setReplyingTo(null);
-              setEditingPost(null);
-              setShowCreateForm((prev) => !prev);
-            }}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded transition-colors"
-          >
-            {showCreateForm ? t('sectionDetail.hideForm') : t('sectionDetail.newPost')}
-          </button>
-        </div>
-
-        {showCreateForm && !replyingTo && !editingPost && (
-          <div className="mb-4">
-            <CreatePostForm
-              mapsetId={mapsetId}
-              difficultyId={difficultyId}
-              onSubmit={handleCreatePost}
-              onCancel={() => setShowCreateForm(false)}
-              defaultTimestampMs={section.startTimeMs}
-            />
-          </div>
-        )}
-
-        <div className="space-y-3">
-          {visibleTopLevel.map((post) => renderRootPostNode(post))}
-        </div>
-
-        {visibleTopLevel.length === 0 && (
-          <p className="text-sm text-gray-500 italic">
-            {sectionPosts.length === 0 ? t('sectionDetail.empty') : t('mapsetPage.noUnresolvedPosts')}
-          </p>
-        )}
       </div>
 
       {showHistory && (

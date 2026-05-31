@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -664,22 +664,14 @@ describe('MapsetPage', () => {
     expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
   });
 
-  it('creates a new post through the global all-posts form', async () => {
+  it('creates a new post through the always-open all-posts form', async () => {
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Show All Posts/i })).toBeInTheDocument();
-    });
+    // The create form is always open in the posts box — no "New Post" toggle.
+    const textarea = await screen.findByLabelText(/New post/i);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /Show All Posts/i }));
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /New Post/i })).toBeInTheDocument();
-    });
-    await user.click(screen.getByRole('button', { name: /New Post/i }));
-
-    const textarea = screen.getByLabelText(/New post/i);
     await user.type(textarea, '01:00:000 - great rhythm');
 
-    await user.click(screen.getByRole('button', { name: /^Post$/i }));
+    await user.click(screen.getByRole('button', { name: /^Note$/i }));
 
     await waitFor(() => {
       expect(mockCreatePost).toHaveBeenCalledTimes(1);
@@ -784,78 +776,6 @@ describe('MapsetPage', () => {
     expect(within(replyPost!).queryByRole('button', { name: /Reply/i })).not.toBeInTheDocument();
   });
 
-  describe('view toggle button group wrap layout', () => {
-    // measureNaturalRowWidth clones the group's children into a probe and reads
-    // probe.offsetWidth. Only the right (filter) group remains, so it alone drives
-    // wrapping.
-    // In jsdom all layout values are 0, so probe.offsetWidth=0 and outerEl.clientWidth=0
-    // → 0+16 > 0 is true → the group starts in column mode by default.
-    // Entry threshold (from row): rightNatural+16 > clientWidth → 66 > cw
-    // Exit threshold (from col):  rightNatural+48 > clientWidth → 98 > cw
-    // Hysteresis dead-zone: 66 ≤ clientWidth < 98
-
-    let resizeCallback: (() => void) | null = null;
-
-    beforeEach(() => {
-      resizeCallback = null;
-      // Override the outer beforeEach's no-op with a callback-capturing version
-      // so tests can manually trigger resize events. Top-level beforeEach resets
-      // back to the no-op before every test outside this block.
-      vi.stubGlobal('ResizeObserver', vi.fn((cb: ResizeObserverCallback) => ({
-        observe: vi.fn(() => {
-          resizeCallback = () => cb([], {} as ResizeObserver);
-        }),
-        disconnect: vi.fn(),
-      })));
-    });
-
-    it('stacks the group in a column when container is too narrow (jsdom default)', async () => {
-      // offsetWidth=0, clientWidth=0 → 0+16 > 0 → wrapped
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).toBeInTheDocument());
-      expect(screen.getByTestId('view-toggle-right')).toHaveClass('flex-col');
-    });
-
-    it('keeps the group in a row when the container is wide enough', async () => {
-      // probe.offsetWidth=50; clientWidth=1000 → 50+16=66 < 1000
-      const offsetSpy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(50);
-      const clientSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
-
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).toBeInTheDocument());
-      expect(screen.getByTestId('view-toggle-right')).not.toHaveClass('flex-col');
-
-      offsetSpy.mockRestore();
-      clientSpy.mockRestore();
-    });
-
-    it('switches to column on resize and honours hysteresis dead-zone before snapping back', async () => {
-      let cw = 1000;
-      const offsetSpy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(50);
-      const clientSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => cw);
-
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).not.toHaveClass('flex-col'));
-
-      // Narrow below entry threshold (66 > 50 → col)
-      cw = 50;
-      act(() => { resizeCallback?.(); });
-      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).toHaveClass('flex-col'));
-
-      // Widen into dead-zone (98 > 80 → stays col)
-      cw = 80;
-      act(() => { resizeCallback?.(); });
-      expect(screen.getByTestId('view-toggle-right')).toHaveClass('flex-col');
-
-      // Widen above exit threshold (98 > 120 is false → row)
-      cw = 120;
-      act(() => { resizeCallback?.(); });
-      await waitFor(() => expect(screen.getByTestId('view-toggle-right')).not.toHaveClass('flex-col'));
-
-      offsetSpy.mockRestore();
-      clientSpy.mockRestore();
-    });
-  });
 
   describe('Delete Difficulty', () => {
     it('shows the Delete Difficulty row icon for owner inside the dropdown', async () => {

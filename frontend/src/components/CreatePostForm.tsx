@@ -6,12 +6,14 @@ import { encrypt, postFieldAad } from '../utils/crypto';
 import { extractFirstTimestamp, formatTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
 
-const TAG_OPTIONS = [
-  { value: 'general', labelKey: 'createPostForm.tagGeneral' },
-  { value: 'suggestion', labelKey: 'createPostForm.tagSuggestion' },
-  { value: 'problem', labelKey: 'createPostForm.tagProblem' },
-  { value: 'praise', labelKey: 'createPostForm.tagPraise' },
-] as const satisfies ReadonlyArray<{ value: PostTag; labelKey: string }>;
+// New-post submit buttons — each posts directly with its tag. Colours mirror
+// the badge colours in PostCard's TAG_COLORS so the form reads like the result.
+const TAG_BUTTONS = [
+  { value: 'problem', labelKey: 'createPostForm.tagProblem', className: 'bg-red-600 hover:bg-red-500' },
+  { value: 'suggestion', labelKey: 'createPostForm.tagSuggestion', className: 'bg-yellow-600 hover:bg-yellow-500' },
+  { value: 'praise', labelKey: 'createPostForm.tagPraise', className: 'bg-blue-600 hover:bg-blue-500' },
+  { value: 'general', labelKey: 'createPostForm.tagGeneral', className: 'bg-purple-600 hover:bg-purple-500' },
+] as const satisfies ReadonlyArray<{ value: PostTag; labelKey: string; className: string }>;
 
 interface CreatePostFormProps {
   mapsetId: string;
@@ -107,33 +109,15 @@ export default function CreatePostForm({
     }
   }
 
+  // Edit/reply path only: new-post submits via the type="button" tag buttons
+  // (which call doSubmit directly), so the form's onSubmit `tag` state is unused there.
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     doSubmit(tag);
   }
 
   return (
-    <form onSubmit={handleSubmit} className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-      {!isEdit && !isReply && (
-        <div className="mb-3">
-          <label htmlFor="post-tag" className="block text-sm font-medium text-gray-300 mb-1">
-            {t('createPostForm.tagLabel')}
-          </label>
-          <select
-            id="post-tag"
-            value={tag}
-            onChange={(e) => setTag(e.target.value as PostTag)}
-            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {TAG_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {t(opt.labelKey)}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
+    <form onSubmit={handleSubmit} className="bg-gray-850 border border-gray-700 rounded-lg p-4">
       {isReply && parentPost && (
         <div className="mb-3 text-sm text-gray-400">
           <p>
@@ -164,20 +148,32 @@ export default function CreatePostForm({
         <p className="text-sm text-red-400 mb-3">{error}</p>
       )}
 
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
-        >
-          {isSubmitting
-            ? t('createPostForm.submitting')
-            : isEdit
-              ? t('createPostForm.submitEdit')
-              : isReply
-                ? t('createPostForm.submitReply')
-                : t('createPostForm.submitNew')}
-        </button>
+      <div className="flex items-center gap-3 flex-wrap">
+        {!isEdit && !isReply ? (
+          TAG_BUTTONS.map((btn) => (
+            <button
+              key={btn.value}
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => doSubmit(btn.value)}
+              className={`px-4 py-2 disabled:bg-gray-600 text-white text-sm font-medium rounded transition-colors ${btn.className}`}
+            >
+              {t(btn.labelKey)}
+            </button>
+          ))
+        ) : (
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
+          >
+            {isSubmitting
+              ? t('createPostForm.submitting')
+              : isEdit
+                ? t('createPostForm.submitEdit')
+                : t('createPostForm.submitReply')}
+          </button>
+        )}
         {isReply && resolveAction && (
           <button
             type="button"
@@ -194,7 +190,7 @@ export default function CreatePostForm({
               : t('createPostForm.submitReplyReopen')}
           </button>
         )}
-        {onCancel && (
+        {onCancel && (isEdit || isReply) && (
           <button
             type="button"
             onClick={onCancel}

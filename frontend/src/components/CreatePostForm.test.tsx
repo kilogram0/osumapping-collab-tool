@@ -49,13 +49,16 @@ describe('CreatePostForm', () => {
     mockGetKey.mockResolvedValue({ key: 'mock-key' } as unknown as CryptoKey);
   });
 
-  it('renders tag selector and textarea', () => {
+  it('renders the four tag buttons and textarea but no tag dropdown', () => {
     render(<CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={vi.fn()} />);
-    expect(screen.getByLabelText(/Tag/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/New post/i)).toBeInTheDocument();
+    for (const name of ['Problem', 'Suggestion', 'Praise', 'Note']) {
+      expect(screen.getByRole('button', { name: new RegExp(`^${name}$`, 'i') })).toBeInTheDocument();
+    }
+    expect(screen.queryByLabelText(/^Tag$/i)).not.toBeInTheDocument();
   });
 
-  it('submits encrypted post on form submission', async () => {
+  it('submits encrypted post when a tag button is clicked', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={onSubmit} />);
 
@@ -63,7 +66,7 @@ describe('CreatePostForm', () => {
     const textarea = screen.getByLabelText(/New post/i);
     await user.type(textarea, '00:46:140 - these are too close');
 
-    await user.click(screen.getByRole('button', { name: /Post/i }));
+    await user.click(screen.getByRole('button', { name: /^Note$/i }));
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -75,10 +78,25 @@ describe('CreatePostForm', () => {
     expect(payload.parent_id).toBeNull();
   });
 
+  it.each([
+    ['Problem', 'problem'],
+    ['Suggestion', 'suggestion'],
+    ['Praise', 'praise'],
+    ['Note', 'general'],
+  ])('clicking %s submits a new post with tag %s', async (label, tag) => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={onSubmit} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/New post/i), 'some text');
+    await user.click(screen.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].tag).toBe(tag);
+  });
+
   it('shows error when body is empty', async () => {
     render(<CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /Post/i }));
+    await user.click(screen.getByRole('button', { name: /^Note$/i }));
     expect(screen.getByText(/Post body cannot be empty/i)).toBeInTheDocument();
   });
 
@@ -88,13 +106,26 @@ describe('CreatePostForm', () => {
     const user = userEvent.setup();
     const textarea = screen.getByLabelText(/New post/i);
     await user.type(textarea, 'some text');
-    await user.click(screen.getByRole('button', { name: /Post/i }));
+    await user.click(screen.getByRole('button', { name: /^Note$/i }));
     expect(screen.getByText(/Mapset is locked/i)).toBeInTheDocument();
   });
 
-  it('calls onCancel when Cancel is clicked', async () => {
+  it('shows no Cancel button in new-post mode but does in reply mode', async () => {
     const onCancel = vi.fn();
-    render(<CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={vi.fn()} onCancel={onCancel} />);
+    const { rerender } = render(
+      <CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={vi.fn()} onCancel={onCancel} />,
+    );
+    expect(screen.queryByRole('button', { name: /Cancel/i })).not.toBeInTheDocument();
+
+    rerender(
+      <CreatePostForm
+        mapsetId="ms1"
+        difficultyId="d1"
+        onSubmit={vi.fn()}
+        onCancel={onCancel}
+        parentPost={PARENT_POST}
+      />,
+    );
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /Cancel/i }));
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -216,7 +247,7 @@ describe('CreatePostForm', () => {
     const textarea = screen.getByLabelText(/New post/i);
     await user.type(textarea, 'Great Part!');
 
-    await user.click(screen.getByRole('button', { name: /Post/i }));
+    await user.click(screen.getByRole('button', { name: /^Note$/i }));
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -241,7 +272,7 @@ describe('CreatePostForm', () => {
     const textarea = screen.getByLabelText(/New post/i);
     await user.type(textarea, '01:23:456 - different spot');
 
-    await user.click(screen.getByRole('button', { name: /Post/i }));
+    await user.click(screen.getByRole('button', { name: /^Note$/i }));
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -259,7 +290,7 @@ describe('CreatePostForm', () => {
     const textarea = screen.getByLabelText(/New post/i);
     await user.type(textarea, 'some text');
 
-    await user.click(screen.getByRole('button', { name: /Post/i }));
+    await user.click(screen.getByRole('button', { name: /^Note$/i }));
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledTimes(1);

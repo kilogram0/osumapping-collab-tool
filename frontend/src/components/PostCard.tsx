@@ -196,7 +196,7 @@ export default function PostCard({
   return (
     <div
       data-testid="post-card"
-      className={`bg-gray-800 border rounded-lg p-4 ${isRootPost && isResolved ? 'border-green-600' : 'border-gray-700'}`}
+      className={`bg-gray-850 border rounded-lg p-4 ${isRootPost && isResolved ? 'border-green-600' : 'border-gray-700'}`}
     >
       <div className="flex items-start gap-3">
         <div className="shrink-0">

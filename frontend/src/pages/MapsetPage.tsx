@@ -1,11 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import BaseVersionHistory from '../components/BaseVersionHistory';
 import ResourcesPanel from '../components/ResourcesPanel';
 import CreateDifficultyModal from '../components/CreateDifficultyModal';
-import CreatePostForm from '../components/CreatePostForm';
 import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyDropdown from '../components/DifficultyDropdown';
 import EditSectionModal from '../components/EditSectionModal';
@@ -16,9 +15,7 @@ import TopBar from '../components/TopBar';
 import ManageMembersModal from '../components/ManageMembersModal';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
-import PostCard from '../components/PostCard';
-import CollapsibleBranch from '../components/CollapsibleBranch';
-import ResolveEvent from '../components/ResolveEvent';
+import PostsPanel from '../components/PostsPanel';
 import RenameDifficultyModal from '../components/RenameDifficultyModal';
 import SectionDetailPanel from '../components/SectionDetailPanel';
 import Timeline from '../components/Timeline';
@@ -53,6 +50,7 @@ import { findNextSection, sortSections } from '../utils/sectionOrder';
 import { buildAssignmentText, toAssignmentInputs } from '../utils/sectionAssignments';
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
 import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
+import { filterPostsBySection } from '../utils/sectionPosts';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
@@ -70,7 +68,7 @@ function CopyIcon() {
 }
 
 export default function MapsetPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const mapsetId = id ?? '';
   const { data: mapset, isLoading: mapsetLoading, isError: mapsetError } = useMapset(mapsetId);
@@ -137,11 +135,6 @@ export default function MapsetPage() {
   const [decryptedDescription, setDecryptedDescription] = useState<string | null>(null);
   const [songLengthMs, setSongLengthMs] = useState<number | null>(null);
   const [decryptedPosts, setDecryptedPosts] = useState<DecryptedPost[]>([]);
-  const [replyingTo, setReplyingTo] = useState<Post | null>(null);
-  const [editingPost, setEditingPost] = useState<Post | null>(null);
-  const [editingPostBody, setEditingPostBody] = useState('');
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showAllPosts, setShowAllPosts] = useState(true);
   const [showOnlyUnresolved, setShowOnlyUnresolved] = useState(false);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
@@ -150,11 +143,6 @@ export default function MapsetPage() {
   // the page. Only the owner's UI is affected; nothing is sent to the server.
   const [emulatedRole, setEmulatedRole] = useState<MapsetRole | null>(null);
   const [emulateGhost, setEmulateGhost] = useState(false);
-  const viewToggleRowRef = useRef<HTMLDivElement>(null);
-  const rightGroupRef = useRef<HTMLDivElement>(null);
-  // Tracks the stable wrap state for hysteresis — updated inside checkAll, not in render.
-  const isWrappedRef = useRef(false);
-  const [rightGroupWrapped, setRightGroupWrapped] = useState(false);
 
   const realIsGhost = !!(myMembership?.kicked_at);
   const isGhost = realIsGhost || emulateGhost;
@@ -197,11 +185,6 @@ export default function MapsetPage() {
 
   // Clear transient forum states when switching difficulties
   useEffect(() => {
-    setReplyingTo(null);
-    setEditingPost(null);
-    setShowCreateForm(false);
-    setEditingPostBody('');
-    setShowAllPosts(true);
     setShowOnlyUnresolved(false);
     setSelectedSectionId(null);
   }, [selectedDifficultyId]);
@@ -424,7 +407,7 @@ export default function MapsetPage() {
   }, [unlocked, difficultyDetail, mapsetId, getKey]);
 
   useEffect(() => {
-    if (!jumpTarget || !showAllPosts) return;
+    if (!jumpTarget) return;
     const el = document.getElementById(`post-${jumpTarget}`);
     setJumpTarget(null);
     if (!el) return;
@@ -433,55 +416,9 @@ export default function MapsetPage() {
     void el.offsetWidth; // force reflow to restart animation
     el.classList.add('post-flash');
     setTimeout(() => el.classList.remove('post-flash'), 3000);
-  }, [jumpTarget, showAllPosts]);
+  }, [jumpTarget, decryptedPosts]);
 
-  // Detect when the view-toggle button group no longer fits on its row and
-  // should stack into a column. Clone the group's children into an off-screen
-  // probe (position:fixed, width:max-content) to read its unconstrained natural
-  // width — no mutations to the real layout, no feedback loop.
-  // useLayoutEffect avoids the first-paint flash: the correct layout is applied
-  // before the browser paints. Gap is hardcoded to the row-mode value (gap-2=8px)
-  // because getComputedStyle(el).gap would return the column-mode gap when already
-  // wrapped, underestimating the natural row width.
-  const selectedDifficultyName = selectedDifficultyId ? (difficultyNames[selectedDifficultyId] ?? null) : null;
-  useLayoutEffect(() => {
-    function measureNaturalRowWidth(el: HTMLDivElement, rowGapPx: number): number {
-      if (!el.children.length) return 0;
-      const probe = document.createElement('div');
-      probe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;display:flex;flex-direction:row;flex-wrap:nowrap;width:max-content;';
-      probe.style.gap = `${rowGapPx}px`;
-      Array.from(el.children).forEach(child => {
-        const clone = child.cloneNode(true) as HTMLElement;
-        clone.style.flexShrink = '0';
-        probe.appendChild(clone);
-      });
-      document.body.appendChild(probe);
-      const width = probe.offsetWidth;
-      document.body.removeChild(probe);
-      return width;
-    }
-    // NOTE: only the right group is measured. If a left-side control is ever
-    // re-added to this row, restore the dual measurement (sum both groups'
-    // natural widths) rather than just adding back the div.
-    const checkAll = () => {
-      const outerEl = viewToggleRowRef.current;
-      const rightEl = rightGroupRef.current;
-      if (!outerEl || !rightEl) return;
-      const rightNatural = measureNaturalRowWidth(rightEl, 8); // gap-2 in row mode
-      // Hysteresis: wider dead-zone to exit column mode than to enter it,
-      // preventing oscillation right at the threshold during resize.
-      const buffer = isWrappedRef.current ? 48 : 16;
-      const needsWrap = rightNatural + buffer > outerEl.clientWidth;
-      isWrappedRef.current = needsWrap;
-      setRightGroupWrapped(needsWrap);
-    };
-    checkAll();
-    const ro = new ResizeObserver(checkAll);
-    if (viewToggleRowRef.current) ro.observe(viewToggleRowRef.current);
-    return () => ro.disconnect();
-  }, [isOwner, selectedDifficultyId, selectedDifficultyName, i18n.language]);
-
-  // Build reply trees for global posts view
+  // Build reply trees for the timeline's resolved-state derivation
   const globalPostTree = useMemo(() => {
     const topLevel: DecryptedPost[] = [];
     const replyMap = new Map<string, DecryptedPost[]>();
@@ -511,155 +448,6 @@ export default function MapsetPage() {
     );
   }, [showOnlyUnresolved, decryptedPosts, resolvedPostIds]);
 
-  const visibleTopLevel = useMemo(() => {
-    if (!showOnlyUnresolved) return globalPostTree.topLevel;
-    return globalPostTree.topLevel.filter(
-      (p) => canBeResolved(p.tag) && !resolvedPostIds.has(p.id),
-    );
-  }, [showOnlyUnresolved, globalPostTree.topLevel, resolvedPostIds]);
-
-  const MAX_REPLY_DEPTH = 10;
-
-  function renderReplyNode(post: DecryptedPost, depth: number): JSX.Element | null {
-    if (depth > MAX_REPLY_DEPTH) return null;
-    const replies = globalPostTree.replyMap.get(post.id) ?? [];
-    const isEditingThis = editingPost?.id === post.id;
-    return (
-      <div key={post.id} id={`post-${post.id}`} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
-        <PostCard
-          post={post}
-          mapsetId={mapsetId}
-          currentUserId={user?.id ?? ''}
-          isOwner={isOwner}
-          decryptedBody={post.decryptedBody}
-          author={membersById.get(post.author_id) ?? null}
-          showReplyButton={false}
-          onEdit={(p) => {
-            setReplyingTo(null);
-            setShowCreateForm(false);
-            setEditingPost(p);
-            const dp = decryptedPosts.find((x) => x.id === p.id);
-            setEditingPostBody(dp?.decryptedBody ?? '');
-          }}
-          onDelete={handleDeletePost}
-        />
-
-        {isEditingThis && (
-          <div className="mt-2">
-            <CreatePostForm
-              mapsetId={mapsetId}
-              difficultyId={selectedDifficultyId ?? ''}
-              onSubmit={handleUpdatePost}
-              onCancel={() => {
-                setEditingPost(null);
-                setEditingPostBody('');
-              }}
-              editingPost={post}
-              initialBody={editingPostBody}
-            />
-          </div>
-        )}
-
-        {replies.map((reply) => {
-          // Status replies (resolve/reopen) only render under the root via
-          // ResolveEvent — silently skip them at deeper levels.
-          if (isStatusReply(reply.tag)) return null;
-          return renderReplyNode(reply, depth + 1);
-        })}
-      </div>
-    );
-  }
-
-  function renderRootPostNode(post: DecryptedPost): JSX.Element {
-    const replies = globalPostTree.replyMap.get(post.id) ?? [];
-    const isReplyingToThis = replyingTo?.id === post.id;
-    const isEditingThis = editingPost?.id === post.id;
-    const isResolved = resolvedPostIds.has(post.id);
-    return (
-      <CollapsibleBranch key={post.id} userId={user?.id ?? ''} postId={post.id}>
-        {(collapsed, toggle) => (
-          <div id={`post-${post.id}`}>
-            <PostCard
-              post={post}
-              mapsetId={mapsetId}
-              currentUserId={user?.id ?? ''}
-              isOwner={isOwner}
-              decryptedBody={post.decryptedBody}
-              author={membersById.get(post.author_id) ?? null}
-              showReplyButton
-              isResolved={isResolved}
-              isCollapsed={collapsed}
-              onToggleCollapse={toggle}
-              onReply={(p) => {
-                setEditingPost(null);
-                setShowCreateForm(false);
-                setReplyingTo(p);
-              }}
-              onEdit={(p) => {
-                setReplyingTo(null);
-                setShowCreateForm(false);
-                setEditingPost(p);
-                const dp = decryptedPosts.find((x) => x.id === p.id);
-                setEditingPostBody(dp?.decryptedBody ?? '');
-              }}
-              onDelete={handleDeletePost}
-            />
-
-            {!collapsed && (
-              <>
-                {isReplyingToThis && (
-                  <div className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
-                    <CreatePostForm
-                      mapsetId={mapsetId}
-                      difficultyId={selectedDifficultyId ?? ''}
-                      onSubmit={handleCreatePost}
-                      onCancel={() => setReplyingTo(null)}
-                      parentPost={post}
-                      resolveAction={canBeResolved(post.tag) ? (resolvedPostIds.has(post.id) ? 'reopen' : 'resolve') : undefined}
-                    />
-                  </div>
-                )}
-
-                {isEditingThis && (
-                  <div className="mt-2">
-                    <CreatePostForm
-                      mapsetId={mapsetId}
-                      difficultyId={selectedDifficultyId ?? ''}
-                      onSubmit={handleUpdatePost}
-                      onCancel={() => {
-                        setEditingPost(null);
-                        setEditingPostBody('');
-                      }}
-                      editingPost={post}
-                      initialBody={editingPostBody}
-                    />
-                  </div>
-                )}
-
-                {replies.map((reply) => {
-                  if (isStatusReply(reply.tag)) {
-                    return (
-                      <div key={reply.id} className="mt-2 ml-8 border-l-2 border-gray-700 pl-4">
-                        <ResolveEvent
-                          post={reply}
-                          author={membersById.get(reply.author_id) ?? null}
-                          currentUserId={user?.id ?? ''}
-                          isOwner={isOwner}
-                          onDelete={handleDeletePost}
-                        />
-                      </div>
-                    );
-                  }
-                  return renderReplyNode(reply, 1);
-                })}
-              </>
-            )}
-          </div>
-        )}
-      </CollapsibleBranch>
-    );
-  }
-
   function formatDuration(ms: number): string {
     const totalSeconds = Math.floor(ms / 1000);
     const minutes = Math.floor(totalSeconds / 60);
@@ -675,8 +463,6 @@ export default function MapsetPage() {
   }) {
     try {
       await createPostMutation.mutateAsync(payload);
-      setReplyingTo(null);
-      setShowCreateForm(false);
       showToast(t('mapsetPage.toastPostCreated'), 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedCreatePost'), 'error');
@@ -693,8 +479,6 @@ export default function MapsetPage() {
   }) {
     try {
       await updatePostMutation.mutateAsync({ postId: payload.id, payload: { encrypted_body: payload.encrypted_body } });
-      setEditingPost(null);
-      setEditingPostBody('');
       showToast(t('mapsetPage.toastPostUpdated'), 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedUpdatePost'), 'error');
@@ -1087,6 +871,19 @@ export default function MapsetPage() {
 
   const sections = difficultyDetail?.sections ?? EMPTY_SECTIONS;
   const selectedSection = decryptedSections.find((s) => s.id === selectedSectionId) ?? null;
+  // In section view the posts box shows only that section's threads; otherwise
+  // it shows every post in the difficulty.
+  const sortedSections = sortSections(decryptedSections);
+  const isLastSectionSelected = selectedSection
+    ? sortedSections[sortedSections.length - 1]?.id === selectedSection.id
+    : false;
+  const postsForPanel = selectedSection
+    ? filterPostsBySection(decryptedPosts, {
+        startTimeMs: selectedSection.startTimeMs,
+        endTimeMs: selectedSection.endTimeMs,
+        isLastSection: isLastSectionSelected,
+      })
+    : decryptedPosts;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20">
@@ -1270,72 +1067,23 @@ export default function MapsetPage() {
                 resolvedPostIds={resolvedPostIds}
                 onAddSection={isOwner ? () => setShowCreateSection(true) : undefined}
                 onJumpToPost={(postId) => {
-                  setShowAllPosts(true);
+                  // Jumping to a post always lands in the all-posts box.
                   setSelectedSectionId(null);
                   setJumpTarget(postId);
                 }}
                 onSelectSection={(sectionId) => {
-                  if (showAllPosts) {
-                    // Switch from All Posts to Section View
-                    setShowAllPosts(false);
-                    setSelectedSectionId(sectionId);
-                  } else if (selectedSectionId === sectionId) {
-                    // Clicking already-selected section toggles to All Posts
-                    setShowAllPosts(true);
-                    setSelectedSectionId(null);
-                  } else {
-                    // Select a different section
-                    setSelectedSectionId(sectionId);
-                  }
+                  // Toggle: re-clicking the selected section returns to all posts.
+                  setSelectedSectionId((current) => (current === sectionId ? null : sectionId));
                 }}
               />
             )}
 
-            {/* View toggle. Add Section and Copy Assignments now live elsewhere
-                (the inline "+" on the timeline, and the difficulties toolbar),
-                so only this filter group remains — right-aligned, stacking into
-                a column when it no longer fits on one row. */}
-            <div ref={viewToggleRowRef} className="flex items-start justify-end">
-              <div ref={rightGroupRef} data-testid="view-toggle-right" className={rightGroupWrapped ? 'flex flex-col items-end gap-2' : 'flex items-center gap-2'}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAllPosts(true);
-                    setSelectedSectionId(null);
-                  }}
-                  className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-                    showAllPosts
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  {t('mapsetPage.showAllPosts')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowOnlyUnresolved((v) => !v)}
-                  aria-pressed={showOnlyUnresolved}
-                  className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-                    showOnlyUnresolved
-                      ? 'bg-orange-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  {t('mapsetPage.showOnlyUnresolved')}
-                </button>
-              </div>
-            </div>
-
-            {/* Content */}
-            {!showAllPosts && selectedSection && (
+            {/* Section box — section data only. Its posts live in the
+                PostsPanel below so the layout stays consistent across views. */}
+            {selectedSection && (
               <SectionDetailPanel
                 section={selectedSection}
-                isLastSection={(() => {
-                  const sorted = sortSections(decryptedSections);
-                  return sorted[sorted.length - 1]?.id === selectedSection.id;
-                })()}
                 nextSection={findNextSection(decryptedSections, selectedSection.id)}
-                posts={decryptedPosts}
                 mapsetId={mapsetId}
                 mapsetTitle={mapset.title}
                 difficultyId={selectedDifficultyId}
@@ -1344,9 +1092,6 @@ export default function MapsetPage() {
                 role={effectiveRole}
                 canEditStructure={canEditStructure}
                 membersById={membersById}
-                onCreatePost={handleCreatePost}
-                onUpdatePost={handleUpdatePost}
-                onDeletePost={handleDeletePost}
                 onAssignSection={handleAssignSection}
                 onEditSection={(s) => {
                   setEditingSection(s);
@@ -1355,61 +1100,27 @@ export default function MapsetPage() {
                 onDeleteSection={handleDeleteSection}
                 onMergeSection={isOwner ? handleMergeSection : undefined}
                 onSplitSection={isOwner ? handleOpenSplitSection : undefined}
-                showOnlyUnresolved={showOnlyUnresolved}
               />
             )}
 
-            {!showAllPosts && !selectedSection && decryptedSections.length > 0 && (
-              <p className="text-gray-400 italic">{t('mapsetPage.selectSection')}</p>
-            )}
-
-            {!showAllPosts && decryptedSections.length === 0 && !detailLoading && (
-              <p className="text-gray-400 italic">{t('mapsetPage.noSectionsYet')}</p>
-            )}
-
-            {showAllPosts && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-200">{t('mapsetPage.allPostsHeading')}</h2>
-                  {!isGhost && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReplyingTo(null);
-                        setEditingPost(null);
-                        setShowCreateForm((prev) => !prev);
-                      }}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors"
-                    >
-                      {showCreateForm ? t('mapsetPage.hideForm') : t('mapsetPage.newPost')}
-                    </button>
-                  )}
-                </div>
-
-                {showCreateForm && !replyingTo && !editingPost && (
-                  <div className="mb-6">
-                    <CreatePostForm
-                      mapsetId={mapsetId}
-                      difficultyId={selectedDifficultyId}
-                      onSubmit={handleCreatePost}
-                      onCancel={() => setShowCreateForm(false)}
-                    />
-                  </div>
-                )}
-
-                {detailLoading && <p className="text-gray-400">{t('mapsetPage.loadingPosts')}</p>}
-
-                <div className="space-y-4">
-                  {visibleTopLevel.map((post) => renderRootPostNode(post))}
-                </div>
-
-                {visibleTopLevel.length === 0 && !detailLoading && (
-                  <p className="text-gray-400 italic">
-                    {decryptedPosts.length === 0 ? t('mapsetPage.noPostsYet') : t('mapsetPage.noUnresolvedPosts')}
-                  </p>
-                )}
-              </div>
-            )}
+            <PostsPanel
+              posts={postsForPanel}
+              mapsetId={mapsetId}
+              difficultyId={selectedDifficultyId}
+              currentUserId={user?.id ?? ''}
+              isOwner={isOwner}
+              membersById={membersById}
+              canPost={!isGhost}
+              defaultTimestampMs={selectedSection ? selectedSection.startTimeMs : null}
+              showAllPostsActive={!selectedSection}
+              showOnlyUnresolved={showOnlyUnresolved}
+              onSelectAllPosts={() => setSelectedSectionId(null)}
+              onToggleUnresolved={() => setShowOnlyUnresolved((v) => !v)}
+              onCreatePost={handleCreatePost}
+              onUpdatePost={handleUpdatePost}
+              onDeletePost={handleDeletePost}
+              loading={detailLoading}
+            />
           </div>
         )}
       </div>
