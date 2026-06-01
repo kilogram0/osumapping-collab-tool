@@ -24,7 +24,9 @@ interface EditSectionModalProps {
   nextSectionEndTimeMs?: number | null;
   /** Total song length in ms; the section's end time may not exceed this. */
   songLengthMs?: number | null;
-  onSuccess: () => void;
+  /** Called with the section's new end time (ms) on a successful save, so the
+   *  caller can keep the base template's bookmarks in sync with the divisions. */
+  onSuccess: (newEndMs: number) => void;
   onCancel: () => void;
 }
 
@@ -146,7 +148,7 @@ export default function EditSectionModal({
         queryClient.invalidateQueries({ queryKey: ['section-osu-versions', difficultyId, nextSectionId] });
       }
 
-      onSuccess();
+      onSuccess(endMs);
     } catch (err) {
       const message = err instanceof Error ? err.message : t('editSectionModal.errorGeneric');
       setError(message);

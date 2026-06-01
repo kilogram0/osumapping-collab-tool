@@ -48,6 +48,7 @@ import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { composeOsuFilename } from '../utils/osuFilename';
 import { mergeOsu } from '../utils/osuMerge';
 import { redistributeForDelete, redistributeForMerge, redistributeForShorten, hasSectionOsu } from '../utils/sectionRedistribute';
+import { syncBaseBookmarks } from '../utils/syncBaseBookmarks';
 import { findNextSection, sortSections } from '../utils/sectionOrder';
 import { buildAssignmentText, toAssignmentInputs } from '../utils/sectionAssignments';
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
@@ -503,6 +504,23 @@ export default function MapsetPage() {
     }
   }
 
+  // Keep the base template's bookmarks aligned with the section divisions
+  // after a structural edit. Owner-only (minting a base version is an owner
+  // action server-side) and best-effort: the edit itself already succeeded, so
+  // a sync failure surfaces as a non-fatal toast rather than rolling back.
+  async function syncBaseBookmarksAfterEdit(
+    sections: { id: string; sortOrder: number; endTimeMs: number }[],
+  ) {
+    if (!isOwner || !selectedDifficultyId) return;
+    try {
+      const key = await getKey(mapsetId);
+      if (!key) return;
+      await syncBaseBookmarks({ difficultyId: selectedDifficultyId, mapsetId, key, sections });
+    } catch {
+      showToast(t('mapsetPage.toastBaseBookmarksSyncFailed'), 'error');
+    }
+  }
+
   async function handleDeleteSection(section: DecryptedSection) {
     if (!selectedDifficultyId) return;
     const next = findNextSection(decryptedSections, section.id);
@@ -537,6 +555,9 @@ export default function MapsetPage() {
       }
       await deleteSectionMutation.mutateAsync(section.id);
       setSelectedSectionId((current) => (current === section.id ? null : current));
+      // Fire-and-forget: the delete already succeeded, so don't make the user
+      // wait on the base re-upload (best-effort, errors handled inside).
+      void syncBaseBookmarksAfterEdit(decryptedSections.filter((s) => s.id !== section.id));
       showToast(t('mapsetPage.toastSectionDeleted'), 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : t('mapsetPage.toastFailedDeleteSection'), 'error');
@@ -570,11 +591,18 @@ export default function MapsetPage() {
     // safely — TypeScript control-flow narrowing doesn't carry into closures.
     const diffId = selectedDifficultyId;
     const nextId = next.id;
+    const nextEndTimeMs = next.endTimeMs;
 
     function finishMergeSuccess() {
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', diffId] });
       queryClient.invalidateQueries({ queryKey: ['section-osu-versions', diffId, section.id] });
       setSelectedSectionId((current) => (current === nextId ? section.id : current));
+      // `next` is absorbed into `section`, which now ends where `next` did.
+      void syncBaseBookmarksAfterEdit(
+        decryptedSections
+          .filter((s) => s.id !== nextId)
+          .map((s) => (s.id === section.id ? { ...s, endTimeMs: nextEndTimeMs } : s)),
+      );
       showToast(t('mapsetPage.toastSectionMerged'), 'success');
     }
 
@@ -710,6 +738,16 @@ export default function MapsetPage() {
 
       setShowSplitSection(false);
       setSplittingSection(null);
+      // `section` now ends at the split point; a new section covers the
+      // remainder up to `section`'s old end. Fire-and-forget so a slow base
+      // re-upload doesn't delay the success toast (best-effort, errors handled
+      // inside the wrapper).
+      void syncBaseBookmarksAfterEdit([
+        ...decryptedSections.map((s) =>
+          s.id === section.id ? { ...s, endTimeMs: splitTimeMs } : s,
+        ),
+        { id: newId, sortOrder: newSortOrder, endTimeMs: section.endTimeMs },
+      ]);
       showToast(t('mapsetPage.toastSectionSplit'), 'success');
     } catch (err) {
       if (splitStep !== 'create') {
@@ -1016,6 +1054,9 @@ export default function MapsetPage() {
                         'success',
                       )
                     }
+                    onResection={(created) =>
+                      showToast(t('importBookmarks.resectionSuccess', { created }), 'success')
+                    }
                     onError={(msg) => showToast(msg, 'error')}
                   />
                 )}
@@ -1162,7 +1203,8 @@ export default function MapsetPage() {
       )}
 
       {showEditSection && editingSection && selectedDifficultyId && (() => {
-        const next = findNextSection(decryptedSections, editingSection.id);
+        const edited = editingSection;
+        const next = findNextSection(decryptedSections, edited.id);
         return (
         <EditSectionModal
           difficultyId={selectedDifficultyId}
@@ -1174,9 +1216,15 @@ export default function MapsetPage() {
           nextSectionId={next?.id ?? null}
           nextSectionEndTimeMs={next?.endTimeMs ?? null}
           songLengthMs={songLengthMs}
-          onSuccess={() => {
+          onSuccess={(newEndMs) => {
             setShowEditSection(false);
             setEditingSection(null);
+            // Owner-only inside the wrapper; a mapper's edit simply won't sync.
+            void syncBaseBookmarksAfterEdit(
+              decryptedSections.map((s) =>
+                s.id === edited.id ? { ...s, endTimeMs: newEndMs } : s,
+              ),
+            );
           }}
           onCancel={() => {
             setShowEditSection(false);

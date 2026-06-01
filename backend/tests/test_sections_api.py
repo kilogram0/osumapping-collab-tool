@@ -1974,6 +1974,115 @@ async def test_list_base_osu_versions_returns_empty_when_none_uploaded(
 
 
 # ---------------------------------------------------------------------------
+# POST /difficulties/{did}/base/versions  (standalone base version)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_base_version_owner_succeeds(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """Owner can mint a base version directly, with no source section."""
+    _, _, difficulty_id = authed_user_with_difficulty
+    base_id = str(uuid4())
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/base/versions",
+        json={"id": base_id, "encrypted_content": "encrypted:base"},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["id"] == base_id
+    assert body["version"] == 1
+    assert body["is_active"] is True
+    assert body["source_section_version_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_base_version_deactivates_previous(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    """A second standalone base version supersedes the first."""
+    _, _, difficulty_id = authed_user_with_difficulty
+    first_id = str(uuid4())
+    await client.post(
+        f"/api/difficulties/{difficulty_id}/base/versions",
+        json={"id": first_id, "encrypted_content": "encrypted:base-1"},
+        headers=CSRF_HEADERS,
+    )
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/base/versions",
+        json={"id": str(uuid4()), "encrypted_content": "encrypted:base-2"},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["version"] == 2
+
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        old = (
+            await session.execute(
+                select(DifficultyBaseOsuVersion).where(
+                    DifficultyBaseOsuVersion.id == UUID(first_id)
+                )
+            )
+        ).scalar_one()
+        assert old.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_create_base_version_rejects_mapper(client: AsyncClient):
+    """Only the owner may mint base versions (mirrors the bundled path)."""
+    owner = await _seed_user(80520)
+    mapper_user = await _seed_user(80521)
+
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff = _difficulty_payload()
+    await client.post(
+        f"/api/mapsets/{ms['id']}/difficulties", json=diff, headers=CSRF_HEADERS
+    )
+
+    async with async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )() as session:
+        session.add(
+            MapsetMember(
+                id=uuid4(),
+                mapset_id=UUID(ms["id"]),
+                user_id=mapper_user.id,
+                role=MapsetRole.mapper,
+            )
+        )
+        await session.commit()
+
+    client.cookies.set(settings.cookie_name, create_access_token(mapper_user.id))
+    resp = await client.post(
+        f"/api/difficulties/{diff['id']}/base/versions",
+        json={"id": str(uuid4()), "encrypted_content": "encrypted:base"},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 403
+
+    await _delete_user_and_mapsets(owner.id)
+    await _delete_user_and_mapsets(mapper_user.id)
+
+
+@pytest.mark.asyncio
+async def test_create_base_version_rejects_missing_csrf(
+    client: AsyncClient, authed_user_with_difficulty
+):
+    _, _, difficulty_id = authed_user_with_difficulty
+    resp = await client.post(
+        f"/api/difficulties/{difficulty_id}/base/versions",
+        json={"id": str(uuid4()), "encrypted_content": "encrypted:base"},
+    )
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
 # POST /difficulties/{did}/base/versions/{vid}/activate
 # ---------------------------------------------------------------------------
 

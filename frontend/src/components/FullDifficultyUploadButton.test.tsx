@@ -73,6 +73,11 @@ vi.mock('../utils/osuParser', () => ({
     return null;
   }),
   parseOsuFile: vi.fn((content: string) => ({ content })),
+  parseBookmarks: vi.fn(() => []),
+  // Passthrough: the candidate base content is unchanged by a bookmark rewrite
+  // in these tests (bookmark preservation is exercised in osuParser's own unit
+  // tests); this keeps the promoted base content equal to 'candidate-base'.
+  withBookmarks: vi.fn((parsed: { content: string }) => parsed.content),
   buildCandidateBase: vi.fn(() => 'candidate-base'),
   sliceForSection: vi.fn((_parsed: unknown, startMs: number, _endMs: number) => `slice-${startMs}`),
   MAX_OSU_BYTES: 1 * 1024 * 1024,
@@ -225,6 +230,44 @@ describe('FullDifficultyUploadButton', () => {
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(/All sections uploaded/i);
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Bookmark preservation — a full-diff upload must not adopt the uploaded
+  // file's bookmarks (only Import Bookmarks / re-section set them).
+  // -------------------------------------------------------------------------
+
+  it('first upload (seed): writes the current section divisions into the base', async () => {
+    const { withBookmarks } = await import('../utils/osuParser');
+    renderButton();
+    await uploadFile();
+    await waitFor(() => expect(mockUploadSectionOsu).toHaveBeenCalledTimes(2));
+    // No base yet → seed bookmarks from the section divisions: the single
+    // interior boundary at 5000 (sections end at 5000 and 10000).
+    expect(vi.mocked(withBookmarks)).toHaveBeenCalledWith(expect.anything(), [5000]);
+  });
+
+  it('promote: keeps the existing base bookmarks, not the uploaded file bookmarks', async () => {
+    const { diffBase } = await import('../utils/osuBase');
+    const { parseBookmarks, withBookmarks } = await import('../utils/osuParser');
+    // The active base currently carries these (its section divisions).
+    vi.mocked(parseBookmarks).mockReturnValueOnce([3333]);
+    vi.mocked(diffBase).mockReturnValue({
+      critical: ['Difficulty:HPDrainRate'],
+      notice: [],
+      values: { 'Difficulty:HPDrainRate': { candidate: '9', active: '4' } },
+      hasDiff: true,
+    });
+    mockDownloadBaseOsu.mockResolvedValue({ id: 'b1', encrypted_content: 'enc:base' });
+
+    renderButton();
+    const user = await uploadFile();
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Promote to base/i }));
+    await waitFor(() => expect(mockUploadSectionOsu).toHaveBeenCalledTimes(2));
+
+    // The promoted base preserves the base's existing bookmarks (3333).
+    expect(vi.mocked(withBookmarks)).toHaveBeenCalledWith(expect.anything(), [3333]);
   });
 
   // -------------------------------------------------------------------------

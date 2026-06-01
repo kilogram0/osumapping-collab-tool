@@ -24,9 +24,13 @@ import {
 } from './crypto';
 import {
   parseBookmarks,
+  filterBookmarksByMinGap,
+  MIN_SECTION_LENGTH_MS,
   bookmarksToSectionBoundaries,
   buildCandidateBase,
+  withBookmarks,
   sliceForSection,
+  parseOsuFile,
   type ParsedOsuFile,
 } from './osuParser';
 import { sectionNameForIndex } from './sectionNaming';
@@ -72,7 +76,13 @@ export async function importSectionsFromBookmarks(
     return { created: 0, total: 0, error: 'No bookmarks found in the [Editor] section of this .osu file.' };
   }
 
-  const boundaries = bookmarksToSectionBoundaries(bookmarks, songLengthMs);
+  // Drop bookmarks that would produce sub-second sections (greedy, anchored at
+  // the song start). Shared across every creation path — the standalone Import
+  // Bookmarks button, Create Difficulty, and Create Mapset (.osz) — since they
+  // all funnel through here.
+  const spacedBookmarks = filterBookmarksByMinGap(bookmarks, MIN_SECTION_LENGTH_MS, songLengthMs);
+
+  const boundaries = bookmarksToSectionBoundaries(spacedBookmarks, songLengthMs);
   if (boundaries.length === 0) {
     return { created: 0, total: 0, error: 'Could not derive any sections from the bookmarks.' };
   }
@@ -83,9 +93,13 @@ export async function importSectionsFromBookmarks(
   if (prepopulate) {
     try {
       const baseVersionId = crypto.randomUUID();
+      // Write the *filtered* bookmarks into the base, not the raw ones: min-gap
+      // filtering may have dropped some, and the base's bookmarks must match the
+      // sections actually created (see withBookmarks).
+      const baseContent = withBookmarks(parseOsuFile(buildCandidateBase(parsed)), spacedBookmarks);
       const encBase = await encrypt(
         key,
-        buildCandidateBase(parsed),
+        baseContent,
         difficultyBaseOsuVersionAad(baseVersionId, mapsetId),
       );
       bundledBase = { id: baseVersionId, encrypted_content: encBase };

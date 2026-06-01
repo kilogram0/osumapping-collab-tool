@@ -24,6 +24,7 @@ from app.models import (
 )
 from app.queries import MembershipKind, classify_membership, get_mapset_membership
 from app.schemas import (
+    BaseOsuCreate,
     BaseOsuRead,
     BaseOsuVersionListItem,
     SectionAssign,
@@ -640,6 +641,78 @@ async def activate_section_osu_version(
 # ---------------------------------------------------------------------------
 # Base version history
 # ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/difficulties/{difficulty_id}/base/versions",
+    response_model=BaseOsuRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_csrf_protection)],
+)
+async def create_base_osu_version(
+    difficulty_id: UUID,
+    payload: BaseOsuCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> DifficultyBaseOsuVersion:
+    """Create a new active base .osu version directly (not bundled with a
+    section upload).
+
+    Owner-only: only the owner may mint base versions, mirroring the bundled
+    path in ``upload_section_osu`` (a mapper must not bypass that gate by
+    crafting a request here).  Used to keep the base's ``[Editor]`` bookmarks
+    in lock-step with the section divisions after a structural edit.
+    ``source_section_version_id`` is null since no section produced it.
+
+    Deactivates the previous active base and activates the new one in a single
+    transaction.  Returns ``409`` if a concurrent write wins the race for the
+    partial unique index on ``(difficulty_id, version)``.
+    """
+    difficulty = await _get_difficulty(db, difficulty_id)
+
+    membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
+    if (
+        classify_membership(membership) != MembershipKind.ACTIVE
+        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
+    ):
+        raise _forbidden()
+
+    max_base_result = await db.execute(
+        select(func.coalesce(func.max(DifficultyBaseOsuVersion.version), 0)).where(
+            DifficultyBaseOsuVersion.difficulty_id == difficulty_id
+        )
+    )
+    next_base_version = max_base_result.scalar_one() + 1
+
+    try:
+        await db.execute(
+            sa_update(DifficultyBaseOsuVersion)
+            .where(
+                DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
+                DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
+            )
+            .values(is_active=False)
+        )
+
+        new_base = DifficultyBaseOsuVersion(
+            id=payload.id,
+            difficulty_id=difficulty_id,
+            encrypted_content=payload.encrypted_content,
+            version=next_base_version,
+            is_active=True,
+            source_section_version_id=None,
+        )
+        db.add(new_base)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Concurrent base upload conflict — please retry",
+        ) from exc
+
+    await db.refresh(new_base)
+    return new_base
 
 
 @router.get(

@@ -408,6 +408,25 @@ export async function downloadBaseOsu(difficultyId: string): Promise<BaseOsuVers
   return data;
 }
 
+export interface CreateBaseOsuVersionPayload {
+  id: string;
+  encrypted_content: string;
+}
+
+/** Mint a new active base version directly (not bundled with a section upload).
+ *  Owner-only server-side. Used to keep the base's bookmarks in sync with the
+ *  section divisions after a structural edit. */
+export async function createBaseOsuVersion(
+  difficultyId: string,
+  payload: CreateBaseOsuVersionPayload,
+): Promise<BaseOsuVersion> {
+  const { data } = await client.post<BaseOsuVersion>(
+    `/difficulties/${difficultyId}/base/versions`,
+    payload,
+  );
+  return data;
+}
+
 export interface SectionOsuVersionListItem {
   id: string;
   version: number;

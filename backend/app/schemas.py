@@ -209,6 +209,18 @@ class BaseVersionUpload(BaseModel):
     encrypted_content: str = Field(min_length=1, max_length=_OSU_CONTENT_CT_MAX)
 
 
+class BaseOsuCreate(BaseModel):
+    """Request body for ``POST /difficulties/{did}/base/versions``.
+
+    Creates a new active base version directly, without bundling it onto a
+    section upload — used to keep the base's bookmarks in sync with the
+    section divisions.
+    """
+
+    id: UUID
+    encrypted_content: str = Field(min_length=1, max_length=_OSU_CONTENT_CT_MAX)
+
+
 class SectionOsuUpload(BaseModel):
     """Request body for ``POST /difficulties/{did}/sections/{sid}/osu``.
 

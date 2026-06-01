@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { parseOsuFile, MAX_OSU_BYTES } from '../utils/osuParser';
 import { importSectionsFromBookmarks } from '../utils/importSectionsFromBookmarks';
+import { resectionFromBookmarks } from '../utils/resectionFromBookmarks';
 import { fetchBaseOsuVersions } from '../api/endpoints';
 import type { DecryptedSection } from './SectionList';
 
@@ -13,6 +14,9 @@ interface ImportBookmarksButtonProps {
   existingSections: DecryptedSection[];
   songLengthMs: number | null;
   onSuccess: (count: number, prepopulated: boolean) => void;
+  /** Called after a successful re-section (the difficulty already had sections,
+   *  so the layout was rebuilt rather than appended). */
+  onResection?: (created: number) => void;
   onError: (message: string) => void;
   /** Render as a compact icon button instead of a labelled button. */
   iconOnly?: boolean;
@@ -33,6 +37,7 @@ export default function ImportBookmarksButton({
   existingSections,
   songLengthMs,
   onSuccess,
+  onResection,
   onError,
   iconOnly = false,
 }: ImportBookmarksButtonProps) {
@@ -63,15 +68,50 @@ export default function ImportBookmarksButton({
         return;
       }
 
+      // A difficulty that already has sections must be *re-sectioned*, not
+      // appended to — appending would stack a second overlapping layer of
+      // sections and double-count objects on merge. Re-sectioning is
+      // destructive (it removes the current sections), so confirm first.
+      if (existingSections.length > 0) {
+        const ok = window.confirm(
+          t('importBookmarks.resectionConfirm', { count: existingSections.length }),
+        );
+        if (!ok) return;
+
+        const result = await resectionFromBookmarks({
+          parsed,
+          key,
+          mapsetId,
+          difficultyId,
+          songLengthMs,
+          existingSections: existingSections.map((s) => ({
+            id: s.id,
+            sortOrder: s.sortOrder,
+            endTimeMs: s.endTimeMs,
+          })),
+        });
+
+        queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
+        queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+
+        if (result.error) {
+          onError(
+            result.created > 0
+              ? t('importBookmarks.resectionPartial', { created: result.created, total: result.total, message: result.error })
+              : result.error,
+          );
+          return;
+        }
+
+        onResection?.(result.created);
+        return;
+      }
+
       // Pre-populate only when **no** base history exists. Checking just the
       // active base would let a user re-activate an older base after import
       // and find sections that disagree with it. We list the full history.
       const baseHistory = await fetchBaseOsuVersions(difficultyId);
       const canPrepopulate = baseHistory.length === 0;
-
-      const startingSortOrder = existingSections.length === 0
-        ? 0
-        : Math.max(...existingSections.map((s) => s.sortOrder)) + 1;
 
       const result = await importSectionsFromBookmarks({
         parsed,
@@ -80,7 +120,7 @@ export default function ImportBookmarksButton({
         difficultyId,
         songLengthMs,
         prepopulate: canPrepopulate,
-        startingSortOrder,
+        startingSortOrder: 0,
       });
 
       // Refresh the cached section list / difficulty detail so the new

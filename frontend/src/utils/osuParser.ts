@@ -292,6 +292,41 @@ export function withMetadataVersion(
 }
 
 /**
+ * Return a new .osu string with the [Editor] `Bookmarks:` line set to
+ * `bookmarks` (comma-separated ms, ascending). Replaces an existing line,
+ * appends one if [Editor] has none, or creates an [Editor] section if none
+ * exists — bookmarks always live there. An empty list writes a bare
+ * `Bookmarks:` so {@link parseBookmarks} reads it back as no bookmarks.
+ *
+ * Used to keep the base template's bookmarks in lock-step with the section
+ * divisions, so a downloaded base / full diff is self-describing and nobody
+ * has to check whether its bookmarks still match the sections.
+ */
+export function withBookmarks(parsed: ParsedOsuFile, bookmarks: number[]): string {
+  const sorted = [...bookmarks].sort((a, b) => a - b);
+  const line = `Bookmarks: ${sorted.join(',')}`;
+
+  let editorSeen = false;
+  const next: OsuSection[] = parsed.sections.map((section) => {
+    if (section.name !== 'Editor') return section;
+    editorSeen = true;
+    let replaced = false;
+    const lines = section.lines.map((l) => {
+      if (l.trim().startsWith('Bookmarks:')) {
+        replaced = true;
+        return line;
+      }
+      return l;
+    });
+    if (!replaced) lines.push(line);
+    return { name: 'Editor', lines };
+  });
+
+  if (!editorSeen) next.push({ name: 'Editor', lines: [line] });
+  return stringifySections(next);
+}
+
+/**
  * Read the difficulty name from the [Metadata] Version: line of a .osu file.
  * Returns null when missing or empty. This mirrors osu! editor semantics where
  * "Version" is the difficulty label (e.g. "Hard", "Insane").
@@ -328,6 +363,59 @@ export function parseBookmarks(parsed: ParsedOsuFile): number[] {
       .sort((a, b) => a - b);
   }
   return [];
+}
+
+/**
+ * Minimum length (ms) of a section produced from bookmarks. Bookmarks closer
+ * together than this would create sub-second sections that are useless to map
+ * and noisy to manage, so {@link filterBookmarksByMinGap} drops them.
+ */
+export const MIN_SECTION_LENGTH_MS = 1000;
+
+/**
+ * Thin out a sorted bookmark list so that no two retained bookmarks (and no
+ * retained bookmark and the song start at 0) are closer than `minGapMs`.
+ *
+ * Greedy, anchored at the song start: walk ascending, keep a bookmark only
+ * when it is at least `minGapMs` past the last retained boundary (initialised
+ * to 0), then advance the boundary to it. Anchoring at 0 means the intro
+ * section (0 → first kept bookmark) also satisfies the minimum.
+ *
+ *   [1100, 1150, 1400, 2050, 2200] → [1100, 2200]   (1150/1400/2050 within 1s)
+ *   [900, 1000, 1900, 2000]        → [1000, 2000]   (900 leaves a <1s intro)
+ *
+ * When `songLengthMs` is supplied, bookmarks at or past the song end are
+ * discarded first (they cannot open a real section), and then a trailing
+ * bookmark that would leave a sub-`minGapMs` outro (last kept → song end) is
+ * dropped too, so the final section also clears the minimum. Exactly one
+ * trailing drop suffices: after clamping, every retained bookmark is ≤ song
+ * end and ≥ minGapMs past its predecessor, so removing the last one leaves its
+ * predecessor at least minGapMs from the song end.
+ */
+export function filterBookmarksByMinGap(
+  bookmarks: number[],
+  minGapMs: number = MIN_SECTION_LENGTH_MS,
+  songLengthMs?: number | null,
+): number[] {
+  const sorted = [...bookmarks]
+    .filter((b) => songLengthMs == null || b < songLengthMs)
+    .sort((a, b) => a - b);
+  const kept: number[] = [];
+  let lastBoundary = 0;
+  for (const b of sorted) {
+    if (b - lastBoundary >= minGapMs) {
+      kept.push(b);
+      lastBoundary = b;
+    }
+  }
+  if (
+    songLengthMs != null &&
+    kept.length > 0 &&
+    songLengthMs - kept[kept.length - 1] < minGapMs
+  ) {
+    kept.pop();
+  }
+  return kept;
 }
 
 export interface SectionBoundary {

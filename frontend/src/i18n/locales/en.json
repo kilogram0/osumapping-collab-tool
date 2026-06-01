@@ -354,7 +354,10 @@
     "fileTooLarge": "File too large ({{size}} bytes; max {{max}}).",
     "errorKeyMissing": "Encryption key not found. Please unlock the mapset first.",
     "errorGeneric": "Failed to import bookmarks.",
-    "partial": "Imported {{created}} of {{total}} sections before failing: {{message}}"
+    "partial": "Imported {{created}} of {{total}} sections before failing: {{message}}",
+    "resectionConfirm": "This difficulty already has {{count}} section(s). Re-importing will rebuild the section layout from the new bookmarks: existing mapping is reassembled and re-sliced into the new sections, and the current sections are removed. The uploaded file is used only for its bookmarks. Continue?",
+    "resectionSuccess": "Rebuilt into {{created}} section(s) from bookmarks.",
+    "resectionPartial": "Rebuilt {{created}} of {{total}} sections, but couldn't remove all the old ones: {{message}}. Your mapping is safe in the new sections, but the leftover old sections now overlap them — delete the leftover old sections manually to finish."
   },
   "mergedDownload": {
     "titleLocked": "Unlock mapset to download",
@@ -478,6 +481,7 @@
     "toastMergeNeedsUnlock": "Unlock the mapset first — the encryption key is required to merge sections.",
     "toastSectionSplit": "Section split.",
     "toastFailedSplitSection": "Failed to split section.",
+    "toastBaseBookmarksSyncFailed": "Section saved, but the base template's bookmarks couldn't be updated to match.",
     "toastSplitPartialFailure": "Split partially failed — section state may be inconsistent. Please refresh and verify.",
     "toastMergePartialFailure": "Merge partially failed — section state may be inconsistent. Please refresh and verify.",
     "toastFailedDownloadPending": "Failed to download difficulty.",

@@ -11,12 +11,15 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, decrypt, sectionOsuVersionAad, difficultyBaseOsuVersionAad } from '../utils/crypto';
 import {
   parseOsuFile,
+  parseBookmarks,
+  withBookmarks,
   buildCandidateBase,
   validateOsuFile,
   sliceForSection,
   MAX_OSU_BYTES,
 } from '../utils/osuParser';
 import { diffBase, type DiffReport, normalizeFromBase } from '../utils/osuBase';
+import { bookmarksFromSections } from '../utils/syncBaseBookmarks';
 import { logger } from '../utils/logger';
 import type { DecryptedSection } from './SectionList';
 
@@ -186,7 +189,7 @@ export default function FullDifficultyUploadButton({ difficultyId, mapsetId, sec
         }
 
         const parsed = parseOsuFile(text);
-        const candidateBase = buildCandidateBase(parsed);
+        const candidateBaseRaw = buildCandidateBase(parsed);
 
         // Slice the full file into per-section content sorted by time order.
         // Unlike single-section upload there is no "sanitize" confirmation —
@@ -219,6 +222,16 @@ export default function FullDifficultyUploadButton({ difficultyId, mapsetId, sec
             throw err;
           }
         }
+
+        // A full-diff upload must NOT replace the base's bookmarks with the
+        // uploaded file's — only the explicit Import Bookmarks / re-section
+        // flows set bookmarks. Keep the existing base's bookmarks when one
+        // exists; otherwise seed from the current section divisions. (diffBase
+        // ignores [Editor], so this doesn't affect the promote decision.)
+        const preservedBookmarks = activeBase !== null
+          ? parseBookmarks(parseOsuFile(activeBase))
+          : bookmarksFromSections(sections);
+        const candidateBase = withBookmarks(parseOsuFile(candidateBaseRaw), preservedBookmarks);
 
         if (activeBase === null) {
           // No base yet — seed it along with all sections.

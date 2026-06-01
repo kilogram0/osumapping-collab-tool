@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   downloadBaseOsu,
-  downloadSectionOsu,
   type Section,
 } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
@@ -10,11 +9,9 @@ import {
   decrypt,
   decodeJsonEnvelope,
   sectionFieldAad,
-  sectionOsuVersionAad,
   difficultyBaseOsuVersionAad,
 } from '../utils/crypto';
-import { mergeOsu } from '../utils/osuMerge';
-import { sortSections } from '../utils/sectionOrder';
+import { assembleFullOsu } from '../utils/sectionDownload';
 import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
 import { composeOsuFilename } from '../utils/osuFilename';
 import { logger } from '../utils/logger';
@@ -154,72 +151,40 @@ export default function MergedDownloadButton({
       const key = await getKey(mapsetId);
       if (!key) return;
 
-      // Fetch and decrypt base
-      const baseResp = await downloadBaseOsu(difficultyId);
-      const basePlaintext = await decrypt(
-        key,
-        baseResp.encrypted_content,
-        difficultyBaseOsuVersionAad(baseResp.id, mapsetId),
-      );
-
-      // Fetch and decrypt all active section versions. Also pull endTimeMs +
-      // sortOrder so mergeOsu can clip each section's hit objects to its
-      // declared range (sections may still carry stray objects from a
-      // pre-shortening version — see osuMerge §3).
-      type SectionInputDraft = {
-        content: string;
-        sortOrder: number;
-        sectionId: string;
-        endTimeMs: number;
-      };
-      const drafts: SectionInputDraft[] = [];
+      // Decrypt each section's sortOrder + endTimeMs so the assembler can
+      // order sections and clip each one's hit objects to its declared range
+      // (sections may still carry stray objects from a pre-shortening version
+      // — see osuMerge §3). Per-section decrypt failures are skipped so a
+      // single corrupt row doesn't sink the whole download.
+      const sectionMeta: { id: string; sortOrder: number; endTimeMs: number }[] = [];
       for (const section of sections) {
         try {
-          const resp = await downloadSectionOsu(difficultyId, section.id);
           const aad = sectionFieldAad(section.id, mapsetId);
-          const [plaintext, sortOrderRaw, endRaw] = await Promise.all([
-            decrypt(key, resp.encrypted_content, sectionOsuVersionAad(resp.id, mapsetId)),
+          const [sortOrderRaw, endRaw] = await Promise.all([
             decrypt(key, section.encrypted_sort_order, aad),
             decrypt(key, section.encrypted_end_time_ms, aad),
           ]);
-          drafts.push({
-            content: plaintext,
+          sectionMeta.push({
+            id: section.id,
             sortOrder: decodeJsonEnvelope(sortOrderRaw),
-            sectionId: section.id,
             endTimeMs: decodeJsonEnvelope(endRaw),
           });
         } catch (err) {
-          logger.warn(`Failed to fetch section ${section.id} for merge:`, err);
+          logger.warn(`Failed to decrypt section ${section.id} metadata for merge:`, err);
         }
       }
 
-      // Derive contiguous start times from sortOrder, matching the timeline
-      // view in MapsetPage: each section starts where the previous one ended.
-      // This relies on the invariant that sections are gapless — every
-      // section's startTimeMs equals the previous section's endTimeMs. If
-      // that invariant ever weakens (gaps or overlaps introduced server-side),
-      // the running-total calculation below would silently misclip objects.
-      const sortedDrafts = sortSections(drafts.map((d) => ({ ...d, id: d.sectionId })));
-      let runningStart = 0;
-      const sectionInputs = sortedDrafts.map((d, idx) => {
-        const startTimeMs = runningStart;
-        runningStart = d.endTimeMs;
-        return {
-          content: d.content,
-          sortOrder: d.sortOrder,
-          sectionId: d.id,
-          startTimeMs,
-          endTimeMs: d.endTimeMs,
-          endInclusive: idx === drafts.length - 1,
-        };
+      const { content: merged, baseVersion } = await assembleFullOsu({
+        difficultyId,
+        mapsetId,
+        key,
+        sections: sectionMeta,
       });
-
-      const merged = mergeOsu(basePlaintext, sectionInputs);
 
       // Rewrite [Metadata] Version to "<diffName>_version_<baseVersion>" so
       // the editor and the filename share the same label. The base version
       // is the closest "trunk version" for an assembled difficulty.
-      const baseVersionLabel = baseResp.version ?? 0;
+      const baseVersionLabel = baseVersion ?? 0;
       const diffName = `${difficultyName ?? 'Difficulty'}_version_${baseVersionLabel}`;
       const { content: finalContent, metadata } = withMetadataVersion(
         parseOsuFile(merged),

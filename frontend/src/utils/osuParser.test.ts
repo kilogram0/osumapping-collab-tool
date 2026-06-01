@@ -10,6 +10,8 @@ import {
   stringifySections,
   buildCandidateBase,
   parseBookmarks,
+  withBookmarks,
+  filterBookmarksByMinGap,
   bookmarksToSectionBoundaries,
   parseDifficultyName,
   parseMetadata,
@@ -476,6 +478,93 @@ describe('parseBookmarks', () => {
     const osu = VALID_OSU.replace(/^Bookmarks:.*$/m, 'Bookmarks: -100,500,1000');
     const parsed = parseOsuFile(osu);
     expect(parseBookmarks(parsed)).toEqual([500, 1000]);
+  });
+});
+
+// ------------------------------------------------------------------
+// withBookmarks
+// ------------------------------------------------------------------
+
+describe('withBookmarks', () => {
+  it('replaces an existing Bookmarks line in [Editor]', () => {
+    const parsed = parseOsuFile(VALID_OSU);
+    const out = withBookmarks(parsed, [1500, 2500]);
+    expect(parseBookmarks(parseOsuFile(out))).toEqual([1500, 2500]);
+    // Only one Bookmarks line should remain.
+    expect(out.match(/Bookmarks:/g)).toHaveLength(1);
+  });
+
+  it('sorts bookmarks ascending when writing', () => {
+    const out = withBookmarks(parseOsuFile(VALID_OSU), [3000, 1000, 2000]);
+    expect(parseBookmarks(parseOsuFile(out))).toEqual([1000, 2000, 3000]);
+  });
+
+  it('writes a bare Bookmarks line for an empty list', () => {
+    const out = withBookmarks(parseOsuFile(VALID_OSU), []);
+    expect(parseBookmarks(parseOsuFile(out))).toEqual([]);
+    expect(out).toMatch(/Bookmarks:\s*$/m);
+  });
+
+  it('appends a Bookmarks line when [Editor] has none', () => {
+    const noBookmarks = VALID_OSU.replace(/^Bookmarks:.*$/m, 'DistanceSpacing: 1');
+    const out = withBookmarks(parseOsuFile(noBookmarks), [1000]);
+    expect(parseBookmarks(parseOsuFile(out))).toEqual([1000]);
+  });
+
+  it('creates an [Editor] section when none exists', () => {
+    const noEditor = VALID_OSU.replace(/\[Editor\][\s\S]*?\n\n/m, '');
+    const out = withBookmarks(parseOsuFile(noEditor), [1000, 2000]);
+    expect(parseBookmarks(parseOsuFile(out))).toEqual([1000, 2000]);
+  });
+});
+
+// ------------------------------------------------------------------
+// filterBookmarksByMinGap
+// ------------------------------------------------------------------
+
+describe('filterBookmarksByMinGap', () => {
+  it('keeps the first valid bookmark and skips everything within 1s of it (greedy)', () => {
+    // User example 1: 1.1s kept, 1.15/1.4/2.05 within 1s of 1.1, 2.2 kept.
+    expect(filterBookmarksByMinGap([1100, 1150, 1400, 2050, 2200])).toEqual([1100, 2200]);
+  });
+
+  it('drops a leading bookmark that would leave a sub-1s intro from song start', () => {
+    // User example 2: 0.9 leaves a <1s intro, 1.0 kept, 1.9 within 1s of 1.0, 2.0 kept.
+    expect(filterBookmarksByMinGap([900, 1000, 1900, 2000])).toEqual([1000, 2000]);
+  });
+
+  it('treats an exactly-1s gap as valid', () => {
+    expect(filterBookmarksByMinGap([1000, 2000, 3000])).toEqual([1000, 2000, 3000]);
+  });
+
+  it('sorts before filtering', () => {
+    expect(filterBookmarksByMinGap([2200, 1100, 1400])).toEqual([1100, 2200]);
+  });
+
+  it('returns empty for empty input', () => {
+    expect(filterBookmarksByMinGap([])).toEqual([]);
+  });
+
+  it('respects a custom min gap', () => {
+    expect(filterBookmarksByMinGap([0, 100, 500, 900], 500)).toEqual([500]);
+  });
+
+  it('drops a trailing bookmark that would leave a sub-1s outro when songLengthMs is given', () => {
+    // 5000 kept; 5500 would leave a 500ms outro (→ 6000), so it is dropped.
+    expect(filterBookmarksByMinGap([5000, 5500], 1000, 6000)).toEqual([5000]);
+  });
+
+  it('keeps a trailing bookmark when the outro clears the minimum', () => {
+    expect(filterBookmarksByMinGap([5000, 6000], 1000, 8000)).toEqual([5000, 6000]);
+  });
+
+  it('ignores songLengthMs when null', () => {
+    expect(filterBookmarksByMinGap([5000, 6000], 1000, null)).toEqual([5000, 6000]);
+  });
+
+  it('discards every bookmark at or past the song end, not just the last', () => {
+    // 7000 and 9000 are both past the 6000ms song end — neither may survive.
+    expect(filterBookmarksByMinGap([5000, 7000, 9000], 1000, 6000)).toEqual([5000]);
   });
 });
 

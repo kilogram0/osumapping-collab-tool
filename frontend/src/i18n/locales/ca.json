@@ -353,7 +353,10 @@
     "fileTooLarge": "Fitxer massa gran ({{size}} bytes; màx. {{max}}).",
     "errorKeyMissing": "No s'ha trobat la clau de xifratge. Desbloqueja primer el mapset.",
     "errorGeneric": "No s'han pogut importar els marcadors.",
-    "partial": "S'han importat {{created}} de {{total}} seccions abans de fallar: {{message}}"
+    "partial": "S'han importat {{created}} de {{total}} seccions abans de fallar: {{message}}",
+    "resectionConfirm": "Aquesta dificultat ja té {{count}} secció/ons. En reimportar es reconstruirà la disposició de seccions a partir dels nous marcadors: el mapatge existent es reassembla i es torna a dividir en les noves seccions, i les seccions actuals s'eliminen. El fitxer pujat només s'utilitza pels seus marcadors. Continuar?",
+    "resectionSuccess": "Reconstruït en {{created}} secció/ons a partir dels marcadors.",
+    "resectionPartial": "S'han reconstruït {{created}} de {{total}} seccions, però no s'han pogut eliminar totes les antigues: {{message}}. El teu mapatge és segur a les seccions noves, però les seccions antigues restants ara s'hi solapen — elimina manualment les seccions antigues restants per acabar."
   },
   "mergedDownload": {
     "titleLocked": "Desbloqueja el mapset per descarregar",
@@ -477,6 +480,7 @@
     "toastMergeNeedsUnlock": "Desbloqueja el mapset primer — cal la clau de xifrat per fusionar seccions.",
     "toastSectionSplit": "Secció dividida.",
     "toastFailedSplitSection": "No s'ha pogut dividir la secció.",
+    "toastBaseBookmarksSyncFailed": "S'ha desat la secció, però no s'han pogut actualitzar els marcadors de la plantilla base perquè coincideixin.",
     "toastSplitPartialFailure": "La divisió ha fallat parcialment — l'estat de les seccions pot ser inconsistent. Si us plau, refresca i verifica.",
     "toastMergePartialFailure": "La fusió ha fallat parcialment — l'estat de les seccions pot ser inconsistent. Si us plau, refresca i verifica.",
     "toastFailedDownloadPending": "No s'ha pogut descarregar la dificultat.",
