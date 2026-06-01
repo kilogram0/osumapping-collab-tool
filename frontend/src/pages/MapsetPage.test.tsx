@@ -566,27 +566,49 @@ describe('MapsetPage', () => {
     expect(screen.getByText(/these are too close/i)).toBeInTheDocument();
   });
 
-  it('clicking a timeline marker switches to all-posts view and flashes the target post', async () => {
+  it('clicking a timeline marker in section mode switches to the section containing the post', async () => {
     vi.stubGlobal('scrollIntoView', vi.fn());
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
     renderPage();
     const user = userEvent.setup();
 
-    // Enter section view first so we can confirm the switch
+    // Enter s1 section view
     await waitFor(() => expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument());
     await user.click(screen.getByTestId('timeline-section-s1'));
     await waitFor(() => expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument());
 
-    // p1 has timestamp 00:46:140 → 46140ms, within song length 245000ms
+    // p1 has timestamp 00:46:140 → 46140ms, which falls in s2 (30000–60000ms)
     const marker = await screen.findByTestId('timeline-marker-p1');
     await user.click(marker);
 
-    // Must switch back to all-posts view
+    // Must switch to s2, not exit to all-posts view
+    await waitFor(() => expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument());
+    expect(within(screen.getByTestId('section-detail-panel')).getByRole('heading', { name: /Kiai 1/i })).toBeInTheDocument();
+
+    // Target post wrapper must carry the flash class
+    const postWrapper = document.getElementById('post-p1');
+    expect(postWrapper).not.toBeNull();
+    expect(postWrapper!.classList.contains('post-flash')).toBe(true);
+  });
+
+  it('clicking a timeline marker in show-all mode keeps all-posts view and flashes the target post', async () => {
+    vi.stubGlobal('scrollIntoView', vi.fn());
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    renderPage();
+    const user = userEvent.setup();
+
+    // Stay in show-all mode (no section selected)
+    await waitFor(() => expect(screen.getByTestId('timeline-marker-p1')).toBeInTheDocument());
+    expect(screen.queryByTestId('section-detail-panel')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('timeline-marker-p1'));
+
+    // Must stay in all-posts view
     await waitFor(() => expect(screen.queryByTestId('section-detail-panel')).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByText(/these are too close/i)).toBeInTheDocument());
 
-    // Target post wrapper must carry the flash class
     const postWrapper = document.getElementById('post-p1');
     expect(postWrapper).not.toBeNull();
     expect(postWrapper!.classList.contains('post-flash')).toBe(true);

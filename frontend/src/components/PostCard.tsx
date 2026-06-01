@@ -5,6 +5,7 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import { decrypt, postFieldAad } from '../utils/crypto';
 import { extractFirstTimestamp, findAllTimestamps, generateOsuLink, formatTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
+import { TagIcon } from './postTagIcons';
 
 const IMAGE_RE = /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g;
 
@@ -216,7 +217,8 @@ export default function PostCard({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-gray-200">{authorLabel}</span>
             {!post.parent_id && (
-              <span className={`text-xs px-2 py-0.5 rounded-full text-white ${TAG_COLORS[post.tag]}`}>
+              <span className={`text-xs px-2 py-0.5 rounded-full text-white inline-flex items-center gap-1 ${TAG_COLORS[post.tag]}`}>
+                <TagIcon tag={post.tag} />
                 {t(TAG_LABEL_KEYS[post.tag])}
               </span>
             )}

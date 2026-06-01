@@ -51,3 +51,19 @@ export function filterPostsBySection(
     p.parent_id === null ? sectionRootIds.has(p.id) : sectionRootIds.has(findRootId(p.id)),
   );
 }
+
+/**
+ * Return the section in a pre-sorted list that contains `ms`, using the same
+ * [start, end) / [start, end] boundary convention as filterPostsBySection.
+ * Returns undefined when ms falls in a gap, before the first section, or after
+ * the last — callers should treat that as "no owning section".
+ */
+export function findSectionForMs<T extends { startTimeMs: number; endTimeMs: number }>(
+  sortedSections: T[],
+  ms: number,
+): T | undefined {
+  return sortedSections.find((s, i) => {
+    const isLast = i === sortedSections.length - 1;
+    return ms >= s.startTimeMs && (isLast ? ms <= s.endTimeMs : ms < s.endTimeMs);
+  });
+}

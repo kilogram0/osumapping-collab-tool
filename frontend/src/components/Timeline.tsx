@@ -4,6 +4,7 @@ import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
 import type { PostTag } from '../api/endpoints';
 import { formatTimestamp } from '../utils/extractTimestamp';
+import { TagIcon } from './postTagIcons';
 
 function PlusIcon() {
   return (
@@ -14,15 +15,16 @@ function PlusIcon() {
 }
 
 // Higher-priority tags get higher z-index so they dominate visually when markers overlap.
+// All values must stay above 10 (the selected-section ring uses z-10; markers must paint over it).
 // resolve/reopen are excluded: replies never appear in the timeline.
 const TAG_MARKER: Partial<Record<PostTag, { color: string; z: number }>> = {
-  problem:    { color: '#ef4444', z: 40 },
-  suggestion: { color: '#eab308', z: 30 },
-  praise:     { color: '#3b82f6', z: 20 },
-  general:    { color: '#a855f7', z: 10 },
+  problem:    { color: '#ef4444', z: 50 },
+  suggestion: { color: '#eab308', z: 40 },
+  praise:     { color: '#3b82f6', z: 30 },
+  general:    { color: '#a855f7', z: 20 },
 };
 
-const RESOLVED_MARKER = { color: '#22c55e', z: 5 };
+const RESOLVED_MARKER = { color: '#22c55e', z: 15 };
 
 interface TimelineProps {
   sections: DecryptedSection[];
@@ -163,7 +165,7 @@ export default function Timeline({
               data-testid={`timeline-section-${section.id}`}
               className={`absolute top-0 bottom-0 transition-all hover:brightness-110
                 ${isLast ? '' : 'border-r-2 border-black/30'}
-                ${isSelected ? 'ring ring-inset ring-white z-10' : ''}
+                ${isSelected ? 'ring ring-inset ring-white/40 z-10' : ''}
                 flex items-center justify-center text-white text-xs font-medium px-1
                 overflow-hidden whitespace-nowrap text-ellipsis`}
               style={{
@@ -206,17 +208,18 @@ export default function Timeline({
         {markerPosts.map((post) => {
           const leftPercent = ((post.extractedMs ?? 0) / songLengthMs) * 100;
           const resolved = resolvedPostIds?.has(post.id) ?? false;
-          const marker = resolved ? RESOLVED_MARKER : (TAG_MARKER[post.tag] ?? { color: '#6b7280', z: 10 });
+          const marker = resolved ? RESOLVED_MARKER : (TAG_MARKER[post.tag] ?? { color: '#6b7280', z: 12 });
           return (
             <button
               key={post.id}
               type="button"
               data-testid={`timeline-marker-${post.id}`}
-              className="absolute top-1 w-4 h-4 rounded-full border-2 border-gray-900 shadow hover:scale-125 transition-transform"
+              className="absolute top-1.5 w-6 h-6 flex items-center justify-center hover:scale-125 transition-transform"
               style={{
-                left: `calc(${leftPercent}% - 8px)`,
-                backgroundColor: marker.color,
+                left: `calc(${leftPercent}% - 12px)`,
+                color: marker.color,
                 zIndex: marker.z,
+                filter: 'drop-shadow(0 1px 1px rgba(0,0,0,1)) drop-shadow(0 1px 3px rgba(0,0,0,0.3))',
               }}
               title={t('timeline.postAt', { time: formatTimestamp(post.extractedMs ?? 0) })}
               onClick={(e) => {
@@ -243,7 +246,9 @@ export default function Timeline({
                 );
               }}
               onMouseLeave={() => setTooltip(null)}
-            />
+            >
+              <TagIcon tag={post.tag} resolved={resolved} size={20} />
+            </button>
           );
         })}
         </div>

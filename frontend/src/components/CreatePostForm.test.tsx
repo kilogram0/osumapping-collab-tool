@@ -58,6 +58,14 @@ describe('CreatePostForm', () => {
     expect(screen.queryByLabelText(/^Tag$/i)).not.toBeInTheDocument();
   });
 
+  it('renders an icon inside each tag submit button', () => {
+    render(<CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={vi.fn()} />);
+    for (const name of ['Problem', 'Suggestion', 'Praise', 'Note']) {
+      const btn = screen.getByRole('button', { name: new RegExp(`^${name}$`, 'i') });
+      expect(btn.querySelector('svg')).toBeTruthy();
+    }
+  });
+
   it('submits encrypted post when a tag button is clicked', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<CreatePostForm mapsetId="ms1" difficultyId="d1" onSubmit={onSubmit} />);

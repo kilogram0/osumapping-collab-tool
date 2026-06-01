@@ -84,6 +84,13 @@ describe('PostCard', () => {
     expect(screen.getByText(/User author-/i)).toBeInTheDocument();
   });
 
+  it('renders an icon inside the tag badge', async () => {
+    renderCard();
+    await act(async () => {});
+    const badge = screen.getByText('Suggestion').closest('span');
+    expect(badge?.querySelector('svg')).toBeTruthy();
+  });
+
   it('marks the current user as "(you)"', async () => {
     renderCard({ post: { ...BASE_POST, author_id: 'current-user-uuid' } });
     await act(async () => {});

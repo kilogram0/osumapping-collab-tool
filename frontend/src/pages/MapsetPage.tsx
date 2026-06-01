@@ -50,7 +50,7 @@ import { findNextSection, sortSections } from '../utils/sectionOrder';
 import { buildAssignmentText, toAssignmentInputs } from '../utils/sectionAssignments';
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
 import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
-import { filterPostsBySection } from '../utils/sectionPosts';
+import { filterPostsBySection, findSectionForMs } from '../utils/sectionPosts';
 import type { MapsetRole, Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
@@ -1067,7 +1067,19 @@ export default function MapsetPage() {
                 resolvedPostIds={resolvedPostIds}
                 onAddSection={isOwner ? () => setShowCreateSection(true) : undefined}
                 onJumpToPost={(postId) => {
-                  // Jumping to a post always lands in the all-posts box.
+                  if (selectedSectionId !== null) {
+                    // In section mode: switch to whichever section contains the post.
+                    const post = decryptedPosts.find((p) => p.id === postId);
+                    if (post?.extractedMs !== null && post?.extractedMs !== undefined) {
+                      const target = findSectionForMs(sortedSections, post.extractedMs);
+                      if (target) {
+                        setSelectedSectionId(target.id);
+                        setJumpTarget(postId);
+                        return;
+                      }
+                    }
+                  }
+                  // Show-all mode, no timestamp, or ms falls in a gap: clear section and jump.
                   setSelectedSectionId(null);
                   setJumpTarget(postId);
                 }}

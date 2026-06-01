@@ -74,6 +74,12 @@ describe('Timeline', () => {
     expect(screen.getByTestId('timeline-bar')).toBeInTheDocument();
   });
 
+  it('renders an icon inside post markers', () => {
+    renderTimeline();
+    const marker = screen.getByTestId('timeline-marker-p1');
+    expect(marker.querySelector('svg')).toBeTruthy();
+  });
+
   it('isolates the bar so marker z-indices stay contained (do not leak over the difficulty dropdown)', () => {
     renderTimeline();
     expect(screen.getByTestId('timeline-bar').className).toContain('isolate');
@@ -113,7 +119,7 @@ describe('Timeline', () => {
     expect(onSelectSection).toHaveBeenCalledWith('s2');
   });
 
-  it('gives markers the correct background color for each tag', () => {
+  it('gives markers the correct color for each tag', () => {
     const posts: DecryptedPost[] = [
       { id: 'prob', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'problem',    encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 10000 },
       { id: 'sugg', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'suggestion', encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 20000 },
@@ -121,10 +127,10 @@ describe('Timeline', () => {
       { id: 'genl', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'general',    encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 40000 },
     ];
     renderTimeline({ posts });
-    expect(screen.getByTestId('timeline-marker-prob').style.backgroundColor).toBe('rgb(239, 68, 68)');
-    expect(screen.getByTestId('timeline-marker-sugg').style.backgroundColor).toBe('rgb(234, 179, 8)');
-    expect(screen.getByTestId('timeline-marker-prse').style.backgroundColor).toBe('rgb(59, 130, 246)');
-    expect(screen.getByTestId('timeline-marker-genl').style.backgroundColor).toBe('rgb(168, 85, 247)');
+    expect(screen.getByTestId('timeline-marker-prob').style.color).toBe('rgb(239, 68, 68)');
+    expect(screen.getByTestId('timeline-marker-sugg').style.color).toBe('rgb(234, 179, 8)');
+    expect(screen.getByTestId('timeline-marker-prse').style.color).toBe('rgb(59, 130, 246)');
+    expect(screen.getByTestId('timeline-marker-genl').style.color).toBe('rgb(168, 85, 247)');
   });
 
   it('calls onJumpToPost when a marker is clicked', async () => {
@@ -241,15 +247,25 @@ describe('Timeline', () => {
     expect(screen.queryByTestId('timeline-marker-repl')).not.toBeInTheDocument();
   });
 
-  it('shows resolved posts in green with lowest z-index', () => {
+  it('shows resolved posts in green at lowest marker z-index', () => {
     const posts: DecryptedPost[] = [
       { id: 'root', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'problem', encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 15000 },
     ];
     const resolvedPostIds = new Set(['root']);
     renderTimeline({ posts, resolvedPostIds });
     const marker = screen.getByTestId('timeline-marker-root');
-    expect(marker.style.backgroundColor).toBe('rgb(34, 197, 94)');
-    expect(marker.style.zIndex).toBe('5');
+    expect(marker.style.color).toBe('rgb(34, 197, 94)');
+    expect(marker.style.zIndex).toBe('15');
+  });
+
+  it('keeps resolved markers above a selected section', () => {
+    const posts: DecryptedPost[] = [
+      { id: 'root', difficulty_id: 'd1', author_id: 'u1', parent_id: null, tag: 'problem', encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 15000 },
+    ];
+    // s1 spans 0–30000 ms and contains the marker at 15000 ms; select it to trigger z-10 on the section.
+    renderTimeline({ posts, resolvedPostIds: new Set(['root']), selectedSectionId: 's1' });
+    const marker = screen.getByTestId('timeline-marker-root');
+    expect(Number(marker.style.zIndex)).toBeGreaterThan(10);
   });
 
   it('shows unresolved posts in their tag color', () => {
@@ -258,7 +274,7 @@ describe('Timeline', () => {
     ];
     renderTimeline({ posts });
     const marker = screen.getByTestId('timeline-marker-root');
-    expect(marker.style.backgroundColor).toBe('rgb(239, 68, 68)');
+    expect(marker.style.color).toBe('rgb(239, 68, 68)');
   });
 
   describe('inline add-section affordance', () => {

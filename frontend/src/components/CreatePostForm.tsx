@@ -5,6 +5,7 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, postFieldAad } from '../utils/crypto';
 import { extractFirstTimestamp, formatTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
+import { TagIcon } from './postTagIcons';
 
 // New-post submit buttons — each posts directly with its tag. Colours mirror
 // the badge colours in PostCard's TAG_COLORS so the form reads like the result.
@@ -156,8 +157,9 @@ export default function CreatePostForm({
               type="button"
               disabled={isSubmitting}
               onClick={() => doSubmit(btn.value)}
-              className={`px-4 py-2 disabled:bg-gray-600 text-white text-sm font-medium rounded transition-colors ${btn.className}`}
+              className={`px-4 py-2 disabled:bg-gray-600 text-white text-sm font-medium rounded transition-colors inline-flex items-center gap-1.5 ${btn.className}`}
             >
+              <TagIcon tag={btn.value} size={14} />
               {t(btn.labelKey)}
             </button>
           ))
