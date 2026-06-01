@@ -195,6 +195,8 @@
     "edit": "Edita"
   },
   "sectionDetail": {
+    "manageSection": "Gestiona la Secció",
+    "manageMenuLabel": "Accions de secció",
     "edit": "Edita",
     "editSection": "Edita la secció",
     "delete": "Suprimeix",

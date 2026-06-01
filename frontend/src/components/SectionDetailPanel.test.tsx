@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -35,6 +35,14 @@ vi.mock('../utils/crypto', async (importOriginal) => {
 
 vi.mock('../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn() },
+}));
+
+vi.mock('./OsuVersionHistory', () => ({
+  default: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="version-history-panel">
+      <button onClick={onClose}>Close history</button>
+    </div>
+  ),
 }));
 
 const mockSectionVersions = vi.fn(() => ({ data: undefined, isLoading: false, error: null }));
@@ -87,6 +95,10 @@ function renderPanel(props?: Partial<React.ComponentProps<typeof SectionDetailPa
       />
     </QueryClientProvider>,
   );
+}
+
+async function openManageMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /Manage Section/i }));
 }
 
 describe('SectionDetailPanel', () => {
@@ -160,26 +172,32 @@ describe('SectionDetailPanel', () => {
     expect(screen.getByText(/No uploads yet/i)).toBeInTheDocument();
   });
 
-  it('shows upload and edit buttons when canEditStructure is true', () => {
+  it('shows upload button and edit action in manage menu when canEditStructure is true', async () => {
+    const user = userEvent.setup();
     renderPanel({ canEditStructure: true, role: 'owner', onEditSection: vi.fn() });
-    // Buttons are icon-only; their accessible name comes from aria-label.
     expect(screen.getByRole('button', { name: /Upload \.osu/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Edit/i })).toBeInTheDocument();
+    await openManageMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Edit section/i })).toBeInTheDocument();
   });
 
-  it('hides upload and edit buttons when canEditStructure is false', () => {
+  it('hides upload button and edit action when canEditStructure is false', async () => {
+    const user = userEvent.setup();
     renderPanel({ canEditStructure: false });
     expect(screen.queryByRole('button', { name: /Upload \.osu/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Edit/i })).not.toBeInTheDocument();
+    await openManageMenu(user);
+    expect(screen.queryByRole('menuitem', { name: /Edit/i })).not.toBeInTheDocument();
   });
 
-  it('shows download and version history buttons', () => {
+  it('shows download button and version history in manage menu', async () => {
+    const user = userEvent.setup();
     renderPanel();
     expect(screen.getByRole('button', { name: /Download \.osu/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Version history/i })).toBeInTheDocument();
+    await openManageMenu(user);
+    expect(screen.getByRole('menuitem', { name: /Version history/i })).toBeInTheDocument();
   });
 
-  it('renders the action buttons in the standardized order across two rows', () => {
+  it('renders action buttons in order: download, upload, manage; menu items: history, edit, split, merge, delete', async () => {
+    const user = userEvent.setup();
     renderPanel({
       isOwner: true,
       canEditStructure: true,
@@ -190,49 +208,50 @@ describe('SectionDetailPanel', () => {
       onDeleteSection: vi.fn(),
       nextSection: { ...SECTION, id: 's2', name: 'Verse' },
     });
-    // Row 1: Download, Upload, Version history. Row 2: Edit, Split, Merge, Delete.
-    const order = ['Download .osu', 'Upload .osu', 'Version history', 'Edit', 'Split', 'Merge with next', 'Delete'];
-    const labels = screen
+
+    const directOrder = ['Upload .osu', 'Download .osu', 'Manage Section'];
+    const directLabels = screen
       .getAllByRole('button')
       .map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '')
-      .filter((label) => order.includes(label));
-    expect(labels).toEqual(order);
+      .filter((label) => directOrder.includes(label));
+    expect(directLabels).toEqual(directOrder);
+
+    await openManageMenu(user);
+
+    const menuOrder = ['Version history', 'Edit section', 'Split', 'Merge with next', 'Delete'];
+    const menuLabels = screen
+      .getAllByRole('menuitem')
+      .map((item) => item.textContent?.trim() ?? '');
+    expect(menuLabels).toEqual(menuOrder);
   });
 
-  it('spells out "Edit section" when Edit is the only second-row action', () => {
-    // A mapper has Edit but none of the owner-only split/merge/delete actions.
+  it('always labels Edit as "Edit section" in the manage menu', async () => {
+    const user = userEvent.setup();
     renderPanel({ canEditStructure: true, role: 'mapper', onEditSection: vi.fn() });
-    expect(screen.getByRole('button', { name: 'Edit section' })).toBeInTheDocument();
+    await openManageMenu(user);
+    expect(screen.getByRole('menuitem', { name: 'Edit section' })).toBeInTheDocument();
   });
 
-  it('collapses Edit to an icon when it shares the second row with owner actions', () => {
-    renderPanel({
-      isOwner: true,
-      canEditStructure: true,
-      role: 'owner',
-      onEditSection: vi.fn(),
-      onDeleteSection: vi.fn(),
-    });
-    expect(screen.queryByRole('button', { name: 'Edit section' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
-  });
-
-  it('calls onEditSection when Edit is clicked', async () => {
+  it('calls onEditSection when Edit section is clicked in the manage menu', async () => {
     const onEditSection = vi.fn();
     renderPanel({ canEditStructure: true, onEditSection });
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /Edit/i }));
+    await openManageMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Edit section/i }));
     expect(onEditSection).toHaveBeenCalledTimes(1);
     expect(onEditSection).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
   });
 
-  describe('Delete section button', () => {
-    it('is visible to the mapset owner', () => {
+  describe('Delete section', () => {
+    it('is visible to the mapset owner in the manage menu', async () => {
+      const user = userEvent.setup();
       renderPanel({ isOwner: true, onDeleteSection: vi.fn() });
-      expect(screen.getByRole('button', { name: /Delete/i })).toBeInTheDocument();
+      await openManageMenu(user);
+      expect(screen.getByRole('menuitem', { name: /Delete/i })).toBeInTheDocument();
     });
 
-    it('is hidden for mappers (canEditStructure without isOwner)', () => {
+    it('is hidden for mappers (canEditStructure without isOwner)', async () => {
+      const user = userEvent.setup();
       renderPanel({
         isOwner: false,
         canEditStructure: true,
@@ -240,9 +259,10 @@ describe('SectionDetailPanel', () => {
         onEditSection: vi.fn(),
         onDeleteSection: vi.fn(),
       });
+      await openManageMenu(user);
       // Edit is visible to mappers; Delete is not.
-      expect(screen.getByRole('button', { name: /Edit/i })).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /Delete/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Edit/i })).toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: /Delete/i })).not.toBeInTheDocument();
     });
 
     it('does nothing when the user cancels the confirm dialog', async () => {
@@ -250,7 +270,8 @@ describe('SectionDetailPanel', () => {
       window.confirm = vi.fn(() => false);
       renderPanel({ isOwner: true, onDeleteSection });
       const user = userEvent.setup();
-      await user.click(screen.getByRole('button', { name: /Delete/i }));
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Delete/i }));
       expect(window.confirm).toHaveBeenCalledTimes(1);
       expect(onDeleteSection).not.toHaveBeenCalled();
     });
@@ -260,7 +281,8 @@ describe('SectionDetailPanel', () => {
       window.confirm = vi.fn(() => true);
       renderPanel({ isOwner: true, onDeleteSection });
       const user = userEvent.setup();
-      await user.click(screen.getByRole('button', { name: /Delete/i }));
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Delete/i }));
       await waitFor(() => {
         expect(onDeleteSection).toHaveBeenCalledTimes(1);
       });
@@ -268,16 +290,17 @@ describe('SectionDetailPanel', () => {
     });
   });
 
-  it('calls onSplitSection with the section when Split is clicked', async () => {
+  it('calls onSplitSection with the section when Split is clicked in the manage menu', async () => {
     const onSplitSection = vi.fn();
     renderPanel({ isOwner: true, onSplitSection });
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /Split/i }));
+    await openManageMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: /Split/i }));
     expect(onSplitSection).toHaveBeenCalledTimes(1);
     expect(onSplitSection).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
   });
 
-  describe('Merge section button', () => {
+  describe('Merge section', () => {
     const NEXT_SECTION: DecryptedSection = {
       id: 's2',
       name: 'Verse',
@@ -287,14 +310,18 @@ describe('SectionDetailPanel', () => {
       assignedTo: null,
     };
 
-    it('is hidden when there is no next section to merge with', () => {
+    it('is hidden when there is no next section to merge with', async () => {
+      const user = userEvent.setup();
       renderPanel({ isOwner: true, onMergeSection: vi.fn(), nextSection: null });
-      expect(screen.queryByRole('button', { name: /Merge/i })).not.toBeInTheDocument();
+      await openManageMenu(user);
+      expect(screen.queryByRole('menuitem', { name: /Merge/i })).not.toBeInTheDocument();
     });
 
-    it('is visible when a next section exists', () => {
+    it('is visible when a next section exists', async () => {
+      const user = userEvent.setup();
       renderPanel({ isOwner: true, onMergeSection: vi.fn(), nextSection: NEXT_SECTION });
-      expect(screen.getByRole('button', { name: /Merge/i })).toBeInTheDocument();
+      await openManageMenu(user);
+      expect(screen.getByRole('menuitem', { name: /Merge/i })).toBeInTheDocument();
     });
 
     it('does nothing when the user cancels the confirm dialog', async () => {
@@ -302,7 +329,8 @@ describe('SectionDetailPanel', () => {
       window.confirm = vi.fn(() => false);
       renderPanel({ isOwner: true, onMergeSection, nextSection: NEXT_SECTION });
       const user = userEvent.setup();
-      await user.click(screen.getByRole('button', { name: /Merge/i }));
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Merge/i }));
       expect(window.confirm).toHaveBeenCalledTimes(1);
       expect(onMergeSection).not.toHaveBeenCalled();
     });
@@ -312,11 +340,180 @@ describe('SectionDetailPanel', () => {
       window.confirm = vi.fn(() => true);
       renderPanel({ isOwner: true, onMergeSection, nextSection: NEXT_SECTION });
       const user = userEvent.setup();
-      await user.click(screen.getByRole('button', { name: /Merge/i }));
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Merge/i }));
       await waitFor(() => {
         expect(onMergeSection).toHaveBeenCalledTimes(1);
       });
       expect(onMergeSection).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
+    });
+  });
+
+  describe('Manage menu open/close behavior', () => {
+    it('menu is hidden until the trigger is clicked', async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      await openManageMenu(user);
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+
+    it('toggles the menu closed when the trigger is clicked again', async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openManageMenu(user);
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Manage Section/i }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('closes on Escape and returns focus to the trigger', async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      const trigger = screen.getByRole('button', { name: /Manage Section/i });
+      await openManageMenu(user);
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    it('closes on Tab without returning focus to the trigger', async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      const trigger = screen.getByRole('button', { name: /Manage Section/i });
+      await openManageMenu(user);
+      await user.keyboard('{Tab}');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      // Tab should NOT send focus back to the trigger (unlike Escape).
+      expect(trigger).not.toHaveFocus();
+    });
+
+    it('menu items have tabIndex=-1 so they are excluded from the natural tab order', async () => {
+      const user = userEvent.setup();
+      renderPanel({
+        isOwner: true,
+        canEditStructure: true,
+        role: 'owner',
+        onEditSection: vi.fn(),
+        onSplitSection: vi.fn(),
+        onMergeSection: vi.fn(),
+        onDeleteSection: vi.fn(),
+        nextSection: { ...SECTION, id: 's2', name: 'Verse' },
+      });
+      await openManageMenu(user);
+      for (const item of screen.getAllByRole('menuitem')) {
+        expect(item).toHaveAttribute('tabindex', '-1');
+      }
+    });
+
+    it('closes when clicking outside the menu container', async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openManageMenu(user);
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('moves focus to the first item when the menu opens', async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openManageMenu(user);
+      expect(screen.getByRole('menuitem', { name: /Version history/i })).toHaveFocus();
+    });
+
+    it('cycles focus through items with ArrowDown/ArrowUp and wraps at the ends', async () => {
+      const user = userEvent.setup();
+      renderPanel({
+        isOwner: true,
+        canEditStructure: true,
+        role: 'owner',
+        onEditSection: vi.fn(),
+        onSplitSection: vi.fn(),
+        onMergeSection: vi.fn(),
+        onDeleteSection: vi.fn(),
+        nextSection: { ...SECTION, id: 's2', name: 'Verse' },
+      });
+      await openManageMenu(user);
+
+      expect(screen.getByRole('menuitem', { name: /Version history/i })).toHaveFocus();
+
+      await user.keyboard('{ArrowDown}');
+      expect(screen.getByRole('menuitem', { name: 'Edit section' })).toHaveFocus();
+
+      await user.keyboard('{ArrowDown}');
+      expect(screen.getByRole('menuitem', { name: 'Split' })).toHaveFocus();
+
+      // Jump to last with End, then wrap past it with ArrowDown
+      await user.keyboard('{End}');
+      expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus();
+
+      await user.keyboard('{ArrowDown}');
+      expect(screen.getByRole('menuitem', { name: /Version history/i })).toHaveFocus();
+
+      // ArrowUp wraps from first to last
+      await user.keyboard('{ArrowUp}');
+      expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus();
+
+      // Home jumps to first
+      await user.keyboard('{Home}');
+      expect(screen.getByRole('menuitem', { name: /Version history/i })).toHaveFocus();
+    });
+
+    it('Version history closes the menu and opens the history panel', async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Version history/i }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(screen.getByTestId('version-history-panel')).toBeInTheDocument();
+    });
+
+    it('Edit section closes the menu', async () => {
+      const user = userEvent.setup();
+      renderPanel({ canEditStructure: true, onEditSection: vi.fn() });
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Edit section/i }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('Split closes the menu', async () => {
+      const user = userEvent.setup();
+      renderPanel({ isOwner: true, onSplitSection: vi.fn() });
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Split/i }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('Delete confirmed closes the menu; Delete cancelled keeps it open', async () => {
+      const user = userEvent.setup();
+      renderPanel({ isOwner: true, onDeleteSection: vi.fn() });
+
+      window.confirm = vi.fn(() => false);
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Delete/i }));
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+
+      window.confirm = vi.fn(() => true);
+      await user.click(screen.getByRole('menuitem', { name: /Delete/i }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('Merge confirmed closes the menu; Merge cancelled keeps it open', async () => {
+      const NEXT_SECTION: DecryptedSection = {
+        id: 's2', name: 'Verse', startTimeMs: 30000, endTimeMs: 60000, sortOrder: 1, assignedTo: null,
+      };
+      const user = userEvent.setup();
+      renderPanel({ isOwner: true, onMergeSection: vi.fn(), nextSection: NEXT_SECTION });
+
+      window.confirm = vi.fn(() => false);
+      await openManageMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /Merge/i }));
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+
+      window.confirm = vi.fn(() => true);
+      await user.click(screen.getByRole('menuitem', { name: /Merge/i }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     });
   });
 });

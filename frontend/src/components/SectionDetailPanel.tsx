@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MemberWithUser } from '../api/endpoints';
 import type { DecryptedSection } from './SectionList';
@@ -33,8 +33,6 @@ interface SectionDetailPanelProps {
 
 // Hand-rolled 16×16 glyphs matching the project's inline-SVG icon style
 // (stroke=currentColor, strokeWidth 1.5). No icon library is shipped.
-const ICON_BTN =
-  'inline-flex items-center justify-center p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors';
 
 function DownloadIcon() {
   return (
@@ -44,50 +42,30 @@ function DownloadIcon() {
   );
 }
 
-function EditIcon() {
+function GearIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M11.5 2.5l2 2L6 12l-2.5.5.5-2.5 7.5-7.5z" />
-      <path d="M10 4l2 2" />
+      <circle cx="8" cy="8" r="2" />
+      <path d="M8 1.5v1.7M8 12.8v1.7M3.4 3.4l1.2 1.2M11.4 11.4l1.2 1.2M1.5 8h1.7M12.8 8h1.7M3.4 12.6l1.2-1.2M11.4 4.6l1.2-1.2" />
     </svg>
   );
 }
 
-// Center divider with arrows pushing apart → split one section into two.
-function SplitIcon() {
+function ChevronIcon({ open }: { open: boolean }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M8 2.5v11" />
-      <path d="M6 5L3.5 8 6 11" />
-      <path d="M10 5l2.5 3-2.5 3" />
-    </svg>
-  );
-}
-
-// Center divider with arrows pulling inward → merge this section with the next.
-function MergeIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M8 2.5v11" />
-      <path d="M3.5 5L6 8l-2.5 3" />
-      <path d="M12.5 5L10 8l2.5 3" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 4.5h10M6 4.5V3h4v1.5M5 4.5l.5 8h5l.5-8" />
-    </svg>
-  );
-}
-
-function HistoryIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="8" cy="8" r="5.5" />
-      <path d="M8 4.5V8l2.5 1.5" />
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+      aria-hidden="true"
+    >
+      <path d="M4 6l4 4 4-4" />
     </svg>
   );
 }
@@ -136,16 +114,73 @@ export default function SectionDetailPanel({
   }, [sectionVersions]);
   const [showAssignSelect, setShowAssignSelect] = useState(false);
 
-  // Edit + structural/destructive actions share the second row. Split/Merge/
-  // Delete are owner-only; Edit follows canEditStructure (mappers get it too).
+  // Edit + structural/destructive actions live in the Manage dropdown.
+  // Split/Merge/Delete are owner-only; Edit follows canEditStructure (mappers get it too).
   const showEdit = canEditStructure && !!onEditSection;
   const showSplit = isOwner && !!onSplitSection;
   const showMerge = isOwner && !!nextSection && !!onMergeSection;
   const showDelete = isOwner && !!onDeleteSection;
-  const hasStructureRow = showEdit || showSplit || showMerge || showDelete;
-  // When Edit is the lone second-row action (e.g. a mapper with no
-  // split/merge/delete), spell it out rather than leaving a single bare icon.
-  const editAlone = showEdit && !showSplit && !showMerge && !showDelete;
+
+  // Manage dropdown state
+  const [manageOpen, setManageOpen] = useState(false);
+  const manageContainerRef = useRef<HTMLDivElement>(null);
+  const manageTriggerRef = useRef<HTMLButtonElement>(null);
+  const manageMenuRef = useRef<HTMLDivElement>(null);
+  const manageMenuId = `section-manage-menu-${section.id}`;
+
+  const closeManageMenu = useCallback((returnFocus: boolean) => {
+    setManageOpen(false);
+    if (returnFocus) manageTriggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!manageOpen) return;
+    function handlePointerDown(e: MouseEvent) {
+      if (manageContainerRef.current && !manageContainerRef.current.contains(e.target as Node)) {
+        setManageOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') closeManageMenu(true);
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [manageOpen, closeManageMenu]);
+
+  useEffect(() => {
+    if (!manageOpen) return;
+    const first = manageMenuRef.current?.querySelector<HTMLElement>('[role="menuitem"]');
+    first?.focus();
+  }, [manageOpen]);
+
+  function handleManageMenuKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const items = Array.from(
+      manageMenuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    if (items.length === 0) return;
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      items[(current + 1 + items.length) % items.length].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(current - 1 + items.length) % items.length].focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0].focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    } else if (e.key === 'Tab') {
+      // Per WAI-ARIA menu-button: Tab closes the menu but does NOT return focus
+      // to the trigger — it moves naturally to the next focusable control.
+      closeManageMenu(false);
+    }
+  }
 
   async function handleDownload() {
     if (!unlocked) return;
@@ -271,109 +306,136 @@ export default function SectionDetailPanel({
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2 shrink-0">
-          {/* Row 1 — Download, Upload, Version history. All icon-only except
-              Version history (icon + text); tooltips/aria-labels carry the
-              action name. */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleDownload}
-              aria-label={t('sectionDetail.downloadOsu')}
-              title={t('sectionDetail.downloadOsu')}
-              className={ICON_BTN}
-            >
-              <DownloadIcon />
-            </button>
-            {canEditStructure && (
-              <OsuUploadButton
-                difficultyId={difficultyId}
-                sectionId={section.id}
-                mapsetId={mapsetId}
-                role={role}
-                sectionRange={{ start: section.startTimeMs, end: section.endTimeMs }}
-                assignedToUserId={section.assignedTo}
-                currentUserId={currentUserId}
-                assignedToUsername={
-                  section.assignedTo
-                    ? (membersById?.get(section.assignedTo)?.username ?? null)
-                    : null
-                }
-                iconOnly
-              />
-            )}
-            <button
-              type="button"
-              onClick={() => setShowHistory(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
-            >
-              <HistoryIcon />
-              {t('sectionDetail.versionHistory')}
-            </button>
-          </div>
-
-          {/* Row 2 — Edit + structural/destructive actions: Edit, Split, Merge,
-              Delete. Edit spells out its label when alone; Delete always does. */}
-          {hasStructureRow && (
-            <div className="flex items-center gap-2">
-              {showEdit && (
-                <button
-                  type="button"
-                  onClick={() => onEditSection!(section)}
-                  aria-label={editAlone ? undefined : t('sectionDetail.edit')}
-                  title={editAlone ? undefined : t('sectionDetail.edit')}
-                  className={
-                    editAlone
-                      ? 'inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors'
-                      : ICON_BTN
-                  }
-                >
-                  <EditIcon />
-                  {editAlone && t('sectionDetail.editSection')}
-                </button>
-              )}
-              {showSplit && (
-                <button
-                  type="button"
-                  onClick={() => onSplitSection!(section)}
-                  aria-label={t('sectionDetail.split')}
-                  title={t('sectionDetail.split')}
-                  className={ICON_BTN}
-                >
-                  <SplitIcon />
-                </button>
-              )}
-              {showMerge && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const ok = window.confirm(
-                      t('sectionDetail.mergeConfirm', { name: section.name, nextName: nextSection!.name }),
-                    );
-                    if (ok) void onMergeSection!(section);
-                  }}
-                  aria-label={t('sectionDetail.merge')}
-                  title={t('sectionDetail.merge')}
-                  className={ICON_BTN}
-                >
-                  <MergeIcon />
-                </button>
-              )}
-              {showDelete && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const ok = window.confirm(t('sectionDetail.deleteConfirm', { name: section.name }));
-                    if (ok) void onDeleteSection!(section);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded transition-colors"
-                >
-                  <TrashIcon />
-                  {t('sectionDetail.delete')}
-                </button>
-              )}
-            </div>
+        <div className="flex items-end gap-2 shrink-0">
+          {canEditStructure && (
+            <OsuUploadButton
+              difficultyId={difficultyId}
+              sectionId={section.id}
+              mapsetId={mapsetId}
+              role={role}
+              sectionRange={{ start: section.startTimeMs, end: section.endTimeMs }}
+              assignedToUserId={section.assignedTo}
+              currentUserId={currentUserId}
+              assignedToUsername={
+                section.assignedTo
+                  ? (membersById?.get(section.assignedTo)?.username ?? null)
+                  : null
+              }
+              iconOnly
+            />
           )}
+          <button
+            type="button"
+            onClick={handleDownload}
+            aria-label={t('sectionDetail.downloadOsu')}
+            title={t('sectionDetail.downloadOsu')}
+            className="inline-flex items-center justify-center p-1.5 bg-purple-700 hover:bg-purple-600 text-white rounded transition-colors"
+          >
+            <DownloadIcon />
+          </button>
+          <div ref={manageContainerRef} className="relative">
+            <button
+              ref={manageTriggerRef}
+              type="button"
+              onClick={() => setManageOpen((o) => !o)}
+              aria-haspopup="menu"
+              aria-expanded={manageOpen}
+              aria-controls={manageOpen ? manageMenuId : undefined}
+              className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+            >
+              <GearIcon />
+              {t('sectionDetail.manageSection')}
+              <ChevronIcon open={manageOpen} />
+            </button>
+
+            {manageOpen && (
+              <div
+                ref={manageMenuRef}
+                id={manageMenuId}
+                role="menu"
+                aria-label={t('sectionDetail.manageMenuLabel')}
+                onKeyDown={handleManageMenuKeyDown}
+                className="absolute right-0 z-30 mt-1 min-w-full whitespace-nowrap rounded-lg border border-gray-700 bg-gray-800 shadow-xl py-1"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  onClick={() => {
+                    closeManageMenu(true);
+                    setShowHistory(true);
+                  }}
+                  className="block w-full px-4 py-2 text-left text-xs text-white hover:bg-gray-700 transition-colors"
+                >
+                  {t('sectionDetail.versionHistory')}
+                </button>
+                {showEdit && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabIndex={-1}
+                    onClick={() => {
+                      closeManageMenu(true);
+                      onEditSection!(section);
+                    }}
+                    className="block w-full px-4 py-2 text-left text-xs text-white hover:bg-gray-700 transition-colors"
+                  >
+                    {t('sectionDetail.editSection')}
+                  </button>
+                )}
+                {showSplit && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabIndex={-1}
+                    onClick={() => {
+                      closeManageMenu(true);
+                      onSplitSection!(section);
+                    }}
+                    className="block w-full px-4 py-2 text-left text-xs text-white hover:bg-gray-700 transition-colors"
+                  >
+                    {t('sectionDetail.split')}
+                  </button>
+                )}
+                {showMerge && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabIndex={-1}
+                    onClick={() => {
+                      const ok = window.confirm(
+                        t('sectionDetail.mergeConfirm', { name: section.name, nextName: nextSection!.name }),
+                      );
+                      if (ok) {
+                        closeManageMenu(true);
+                        void onMergeSection!(section);
+                      }
+                    }}
+                    className="block w-full px-4 py-2 text-left text-xs text-white hover:bg-gray-700 transition-colors"
+                  >
+                    {t('sectionDetail.merge')}
+                  </button>
+                )}
+                {showDelete && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabIndex={-1}
+                    onClick={() => {
+                      const ok = window.confirm(t('sectionDetail.deleteConfirm', { name: section.name }));
+                      if (ok) {
+                        closeManageMenu(true);
+                        void onDeleteSection!(section);
+                      }
+                    }}
+                    className="block w-full px-4 py-2 text-left text-xs text-red-400 hover:bg-gray-700 transition-colors"
+                  >
+                    {t('sectionDetail.delete')}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

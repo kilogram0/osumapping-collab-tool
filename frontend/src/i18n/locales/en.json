@@ -195,6 +195,8 @@
     "edit": "Edit"
   },
   "sectionDetail": {
+    "manageSection": "Manage Section",
+    "manageMenuLabel": "Section actions",
     "edit": "Edit",
     "editSection": "Edit section",
     "delete": "Delete",
