@@ -196,9 +196,10 @@
   },
   "sectionDetail": {
     "edit": "Edit",
+    "editSection": "Edit section",
     "delete": "Delete",
     "downloadOsu": "Download .osu",
-    "versionHistory": "Version History",
+    "versionHistory": "Version history",
     "deleteConfirm": "Delete section \"{{name}}\"? This permanently removes the section and all of its posts and uploaded .osu versions. This cannot be undone.",
     "assignedTo": "Assigned to @{{username}}",
     "unassigned": "Unassigned",

@@ -34,6 +34,17 @@ interface OsuUploadButtonProps {
   assignedToUserId?: string | null;
   currentUserId?: string;
   assignedToUsername?: string | null;
+  /** Render the trigger as an icon-only button (no text) to match the
+   *  standardized section action row. Status messages still render below. */
+  iconOnly?: boolean;
+}
+
+function UploadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 10.5v-8M5 5.5l3-3 3 3M3 12.5h10" />
+    </svg>
+  );
 }
 
 interface UploadState {
@@ -54,6 +65,7 @@ export default function OsuUploadButton({
   assignedToUserId,
   currentUserId,
   assignedToUsername,
+  iconOnly,
 }: OsuUploadButtonProps) {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -670,9 +682,15 @@ export default function OsuUploadButton({
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploadState.loading}
-        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-medium rounded transition-colors"
+        aria-label={iconOnly ? t('osuUpload.upload') : undefined}
+        title={iconOnly ? t('osuUpload.upload') : undefined}
+        className={
+          iconOnly
+            ? 'inline-flex items-center justify-center p-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white rounded transition-colors'
+            : 'px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-medium rounded transition-colors'
+        }
       >
-        {uploadState.loading ? t('osuUpload.uploading') : t('osuUpload.upload')}
+        {iconOnly ? <UploadIcon /> : uploadState.loading ? t('osuUpload.uploading') : t('osuUpload.upload')}
       </button>
 
       {uploadState.error && (

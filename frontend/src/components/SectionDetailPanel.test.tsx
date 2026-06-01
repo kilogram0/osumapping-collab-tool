@@ -162,22 +162,59 @@ describe('SectionDetailPanel', () => {
 
   it('shows upload and edit buttons when canEditStructure is true', () => {
     renderPanel({ canEditStructure: true, role: 'owner', onEditSection: vi.fn() });
-    expect(screen.getByText('Upload .osu')).toBeInTheDocument();
+    // Buttons are icon-only; their accessible name comes from aria-label.
+    expect(screen.getByRole('button', { name: /Upload \.osu/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Edit/i })).toBeInTheDocument();
   });
 
   it('hides upload and edit buttons when canEditStructure is false', () => {
     renderPanel({ canEditStructure: false });
-    expect(screen.queryByText('Upload .osu')).not.toBeInTheDocument();
-    const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start');
-    expect(header).toBeTruthy();
-    expect(header!.textContent).not.toMatch(/Edit/);
+    expect(screen.queryByRole('button', { name: /Upload \.osu/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit/i })).not.toBeInTheDocument();
   });
 
   it('shows download and version history buttons', () => {
     renderPanel();
     expect(screen.getByRole('button', { name: /Download \.osu/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Version History/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Version history/i })).toBeInTheDocument();
+  });
+
+  it('renders the action buttons in the standardized order across two rows', () => {
+    renderPanel({
+      isOwner: true,
+      canEditStructure: true,
+      role: 'owner',
+      onEditSection: vi.fn(),
+      onSplitSection: vi.fn(),
+      onMergeSection: vi.fn(),
+      onDeleteSection: vi.fn(),
+      nextSection: { ...SECTION, id: 's2', name: 'Verse' },
+    });
+    // Row 1: Download, Upload, Version history. Row 2: Edit, Split, Merge, Delete.
+    const order = ['Download .osu', 'Upload .osu', 'Version history', 'Edit', 'Split', 'Merge with next', 'Delete'];
+    const labels = screen
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '')
+      .filter((label) => order.includes(label));
+    expect(labels).toEqual(order);
+  });
+
+  it('spells out "Edit section" when Edit is the only second-row action', () => {
+    // A mapper has Edit but none of the owner-only split/merge/delete actions.
+    renderPanel({ canEditStructure: true, role: 'mapper', onEditSection: vi.fn() });
+    expect(screen.getByRole('button', { name: 'Edit section' })).toBeInTheDocument();
+  });
+
+  it('collapses Edit to an icon when it shares the second row with owner actions', () => {
+    renderPanel({
+      isOwner: true,
+      canEditStructure: true,
+      role: 'owner',
+      onEditSection: vi.fn(),
+      onDeleteSection: vi.fn(),
+    });
+    expect(screen.queryByRole('button', { name: 'Edit section' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
   });
 
   it('calls onEditSection when Edit is clicked', async () => {
@@ -192,8 +229,7 @@ describe('SectionDetailPanel', () => {
   describe('Delete section button', () => {
     it('is visible to the mapset owner', () => {
       renderPanel({ isOwner: true, onDeleteSection: vi.fn() });
-      const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start');
-      expect(header!.textContent).toMatch(/Delete/);
+      expect(screen.getByRole('button', { name: /Delete/i })).toBeInTheDocument();
     });
 
     it('is hidden for mappers (canEditStructure without isOwner)', () => {
@@ -204,10 +240,9 @@ describe('SectionDetailPanel', () => {
         onEditSection: vi.fn(),
         onDeleteSection: vi.fn(),
       });
-      const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start');
       // Edit is visible to mappers; Delete is not.
-      expect(header!.textContent).toMatch(/Edit/);
-      expect(header!.textContent).not.toMatch(/Delete/);
+      expect(screen.getByRole('button', { name: /Edit/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Delete/i })).not.toBeInTheDocument();
     });
 
     it('does nothing when the user cancels the confirm dialog', async () => {
@@ -215,11 +250,7 @@ describe('SectionDetailPanel', () => {
       window.confirm = vi.fn(() => false);
       renderPanel({ isOwner: true, onDeleteSection });
       const user = userEvent.setup();
-      const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start')!;
-      const deleteButton = Array.from(header.querySelectorAll('button')).find(
-        (b) => b.textContent === 'Delete',
-      )!;
-      await user.click(deleteButton);
+      await user.click(screen.getByRole('button', { name: /Delete/i }));
       expect(window.confirm).toHaveBeenCalledTimes(1);
       expect(onDeleteSection).not.toHaveBeenCalled();
     });
@@ -229,15 +260,63 @@ describe('SectionDetailPanel', () => {
       window.confirm = vi.fn(() => true);
       renderPanel({ isOwner: true, onDeleteSection });
       const user = userEvent.setup();
-      const header = screen.getByTestId('section-detail-panel').querySelector('.flex.items-start')!;
-      const deleteButton = Array.from(header.querySelectorAll('button')).find(
-        (b) => b.textContent === 'Delete',
-      )!;
-      await user.click(deleteButton);
+      await user.click(screen.getByRole('button', { name: /Delete/i }));
       await waitFor(() => {
         expect(onDeleteSection).toHaveBeenCalledTimes(1);
       });
       expect(onDeleteSection).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
+    });
+  });
+
+  it('calls onSplitSection with the section when Split is clicked', async () => {
+    const onSplitSection = vi.fn();
+    renderPanel({ isOwner: true, onSplitSection });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Split/i }));
+    expect(onSplitSection).toHaveBeenCalledTimes(1);
+    expect(onSplitSection).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
+  });
+
+  describe('Merge section button', () => {
+    const NEXT_SECTION: DecryptedSection = {
+      id: 's2',
+      name: 'Verse',
+      startTimeMs: 30000,
+      endTimeMs: 60000,
+      sortOrder: 1,
+      assignedTo: null,
+    };
+
+    it('is hidden when there is no next section to merge with', () => {
+      renderPanel({ isOwner: true, onMergeSection: vi.fn(), nextSection: null });
+      expect(screen.queryByRole('button', { name: /Merge/i })).not.toBeInTheDocument();
+    });
+
+    it('is visible when a next section exists', () => {
+      renderPanel({ isOwner: true, onMergeSection: vi.fn(), nextSection: NEXT_SECTION });
+      expect(screen.getByRole('button', { name: /Merge/i })).toBeInTheDocument();
+    });
+
+    it('does nothing when the user cancels the confirm dialog', async () => {
+      const onMergeSection = vi.fn();
+      window.confirm = vi.fn(() => false);
+      renderPanel({ isOwner: true, onMergeSection, nextSection: NEXT_SECTION });
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: /Merge/i }));
+      expect(window.confirm).toHaveBeenCalledTimes(1);
+      expect(onMergeSection).not.toHaveBeenCalled();
+    });
+
+    it('calls onMergeSection with the section when confirmed', async () => {
+      const onMergeSection = vi.fn();
+      window.confirm = vi.fn(() => true);
+      renderPanel({ isOwner: true, onMergeSection, nextSection: NEXT_SECTION });
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: /Merge/i }));
+      await waitFor(() => {
+        expect(onMergeSection).toHaveBeenCalledTimes(1);
+      });
+      expect(onMergeSection).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
     });
   });
 });

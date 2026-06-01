@@ -31,6 +31,67 @@ interface SectionDetailPanelProps {
   onSplitSection?: (section: DecryptedSection) => void;
 }
 
+// Hand-rolled 16×16 glyphs matching the project's inline-SVG icon style
+// (stroke=currentColor, strokeWidth 1.5). No icon library is shipped.
+const ICON_BTN =
+  'inline-flex items-center justify-center p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors';
+
+function DownloadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 2.5v7M5 7l3 3 3-3M3 12.5h10" />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M11.5 2.5l2 2L6 12l-2.5.5.5-2.5 7.5-7.5z" />
+      <path d="M10 4l2 2" />
+    </svg>
+  );
+}
+
+// Center divider with arrows pushing apart → split one section into two.
+function SplitIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 2.5v11" />
+      <path d="M6 5L3.5 8 6 11" />
+      <path d="M10 5l2.5 3-2.5 3" />
+    </svg>
+  );
+}
+
+// Center divider with arrows pulling inward → merge this section with the next.
+function MergeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 2.5v11" />
+      <path d="M3.5 5L6 8l-2.5 3" />
+      <path d="M12.5 5L10 8l2.5 3" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 4.5h10M6 4.5V3h4v1.5M5 4.5l.5 8h5l.5-8" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M8 4.5V8l2.5 1.5" />
+    </svg>
+  );
+}
+
 function formatTime(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
@@ -74,6 +135,17 @@ export default function SectionDetailPanel({
     return sectionVersions.reduce((best, v) => (v.version > best.version ? v : best));
   }, [sectionVersions]);
   const [showAssignSelect, setShowAssignSelect] = useState(false);
+
+  // Edit + structural/destructive actions share the second row. Split/Merge/
+  // Delete are owner-only; Edit follows canEditStructure (mappers get it too).
+  const showEdit = canEditStructure && !!onEditSection;
+  const showSplit = isOwner && !!onSplitSection;
+  const showMerge = isOwner && !!nextSection && !!onMergeSection;
+  const showDelete = isOwner && !!onDeleteSection;
+  const hasStructureRow = showEdit || showSplit || showMerge || showDelete;
+  // When Edit is the lone second-row action (e.g. a mapper with no
+  // split/merge/delete), spell it out rather than leaving a single bare icon.
+  const editAlone = showEdit && !showSplit && !showMerge && !showDelete;
 
   async function handleDownload() {
     if (!unlocked) return;
@@ -199,9 +271,21 @@ export default function SectionDetailPanel({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {canEditStructure && (
-            <>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          {/* Row 1 — Download, Upload, Version history. All icon-only except
+              Version history (icon + text); tooltips/aria-labels carry the
+              action name. */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDownload}
+              aria-label={t('sectionDetail.downloadOsu')}
+              title={t('sectionDetail.downloadOsu')}
+              className={ICON_BTN}
+            >
+              <DownloadIcon />
+            </button>
+            {canEditStructure && (
               <OsuUploadButton
                 difficultyId={difficultyId}
                 sectionId={section.id}
@@ -215,67 +299,81 @@ export default function SectionDetailPanel({
                     ? (membersById?.get(section.assignedTo)?.username ?? null)
                     : null
                 }
+                iconOnly
               />
-              {onEditSection && (
+            )}
+            <button
+              type="button"
+              onClick={() => setShowHistory(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+            >
+              <HistoryIcon />
+              {t('sectionDetail.versionHistory')}
+            </button>
+          </div>
+
+          {/* Row 2 — Edit + structural/destructive actions: Edit, Split, Merge,
+              Delete. Edit spells out its label when alone; Delete always does. */}
+          {hasStructureRow && (
+            <div className="flex items-center gap-2">
+              {showEdit && (
                 <button
                   type="button"
-                  onClick={() => onEditSection(section)}
-                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                  onClick={() => onEditSection!(section)}
+                  aria-label={editAlone ? undefined : t('sectionDetail.edit')}
+                  title={editAlone ? undefined : t('sectionDetail.edit')}
+                  className={
+                    editAlone
+                      ? 'inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors'
+                      : ICON_BTN
+                  }
                 >
-                  {t('sectionDetail.edit')}
+                  <EditIcon />
+                  {editAlone && t('sectionDetail.editSection')}
                 </button>
               )}
-            </>
+              {showSplit && (
+                <button
+                  type="button"
+                  onClick={() => onSplitSection!(section)}
+                  aria-label={t('sectionDetail.split')}
+                  title={t('sectionDetail.split')}
+                  className={ICON_BTN}
+                >
+                  <SplitIcon />
+                </button>
+              )}
+              {showMerge && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ok = window.confirm(
+                      t('sectionDetail.mergeConfirm', { name: section.name, nextName: nextSection!.name }),
+                    );
+                    if (ok) void onMergeSection!(section);
+                  }}
+                  aria-label={t('sectionDetail.merge')}
+                  title={t('sectionDetail.merge')}
+                  className={ICON_BTN}
+                >
+                  <MergeIcon />
+                </button>
+              )}
+              {showDelete && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ok = window.confirm(t('sectionDetail.deleteConfirm', { name: section.name }));
+                    if (ok) void onDeleteSection!(section);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded transition-colors"
+                >
+                  <TrashIcon />
+                  {t('sectionDetail.delete')}
+                </button>
+              )}
+            </div>
           )}
-          {isOwner && onSplitSection && (
-            <button
-              type="button"
-              onClick={() => onSplitSection(section)}
-              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
-            >
-              {t('sectionDetail.split')}
-            </button>
-          )}
-          {isOwner && nextSection && onMergeSection && (
-            <button
-              type="button"
-              onClick={() => {
-                const ok = window.confirm(
-                  t('sectionDetail.mergeConfirm', { name: section.name, nextName: nextSection.name }),
-                );
-                if (ok) void onMergeSection(section);
-              }}
-              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
-            >
-              {t('sectionDetail.merge')}
-            </button>
-          )}
-          {isOwner && onDeleteSection && (
-            <button
-              type="button"
-              onClick={() => {
-                const ok = window.confirm(t('sectionDetail.deleteConfirm', { name: section.name }));
-                if (ok) void onDeleteSection(section);
-              }}
-              className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded transition-colors"
-            >
-              {t('sectionDetail.delete')}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
-          >
-            {t('sectionDetail.downloadOsu')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowHistory(true)}
-            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
-          >
-            {t('sectionDetail.versionHistory')}
-          </button>
         </div>
       </div>
 

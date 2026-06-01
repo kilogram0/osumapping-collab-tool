@@ -196,6 +196,7 @@
   },
   "sectionDetail": {
     "edit": "Edita",
+    "editSection": "Edita la secció",
     "delete": "Suprimeix",
     "downloadOsu": "Descarrega .osu",
     "versionHistory": "Historial de versions",
