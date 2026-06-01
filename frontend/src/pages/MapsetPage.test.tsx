@@ -538,8 +538,10 @@ describe('MapsetPage', () => {
       expect.objectContaining({ isOwner: true }),
     );
 
-    // Open Manage Members modal and select mapper in the emulate-role combobox.
-    await userEvent.click(screen.getByRole('button', { name: /manage members/i }));
+    // Open the Manage menu, then the Manage Members modal, and select mapper in
+    // the emulate-role combobox.
+    await userEvent.click(screen.getByRole('button', { name: /^Manage$/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /manage members/i }));
     const emulateSelect = await screen.findByRole('combobox', { name: /preview/i });
     await userEvent.selectOptions(emulateSelect, 'mapper');
 

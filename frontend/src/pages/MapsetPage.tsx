@@ -13,6 +13,7 @@ import FullDifficultyUploadButton from '../components/FullDifficultyUploadButton
 import ImportBookmarksButton from '../components/ImportBookmarksButton';
 import TopBar from '../components/TopBar';
 import ManageMembersModal from '../components/ManageMembersModal';
+import ManageMenuButton from '../components/ManageMenuButton';
 import MergedDownloadButton from '../components/MergedDownloadButton';
 import PassphraseModal from '../components/PassphraseModal';
 import PostsPanel from '../components/PostsPanel';
@@ -942,31 +943,22 @@ export default function MapsetPage() {
         )}
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-blue-400">{mapset.title}</h1>
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="text-3xl font-bold text-blue-400">{mapset.title}</h1>
+            <ManageMenuButton
+              onOpenBaseHistory={() => setShowBaseHistory(true)}
+              baseHistoryDisabled={!selectedDifficultyId}
+              showMembers={Boolean(myMembership) && !isGhost}
+              membersLabel={actualIsOwner ? t('mapsetPage.manageMembers') : t('mapsetPage.viewMembers')}
+              onOpenMembers={() => setShowManageMembers(true)}
+            />
+          </div>
           {decryptedDescription && (
             <p className="text-gray-300 mt-2">{decryptedDescription}</p>
           )}
           {songLengthMs !== null && (
             <p className="text-sm text-gray-400 mt-1">{formatDuration(songLengthMs)}</p>
           )}
-          <div className="flex items-center gap-3 mt-3">
-            <button
-              type="button"
-              onClick={() => setShowBaseHistory(true)}
-              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
-            >
-              {t('mapsetPage.baseHistory')}
-            </button>
-            {myMembership && !isGhost && (
-              <button
-                type="button"
-                onClick={() => setShowManageMembers(true)}
-                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded transition-colors"
-              >
-                {actualIsOwner ? t('mapsetPage.manageMembers') : t('mapsetPage.viewMembers')}
-              </button>
-            )}
-          </div>
           <ResourcesPanel mapsetId={mapsetId} isOwner={isOwner} />
         </div>
 
