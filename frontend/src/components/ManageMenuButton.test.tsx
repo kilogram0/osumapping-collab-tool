@@ -9,6 +9,8 @@ function setup(overrides: Partial<Props> = {}) {
   const props: Props = {
     onOpenBaseHistory: vi.fn(),
     baseHistoryDisabled: false,
+    showEditMapset: true,
+    onOpenEditMapset: vi.fn(),
     showMembers: true,
     membersLabel: 'Manage Members',
     onOpenMembers: vi.fn(),
@@ -28,7 +30,30 @@ describe('ManageMenuButton', () => {
 
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Base History' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Edit Mapset' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Manage Members' })).toBeInTheDocument();
+  });
+
+  it('opens the edit-mapset modal and closes the menu', async () => {
+    const user = userEvent.setup();
+    const { onOpenEditMapset } = setup();
+
+    await user.click(screen.getByRole('button', { name: /^Manage$/i }));
+    // Edit Mapset sits directly below Base History.
+    await user.click(screen.getByRole('menuitem', { name: 'Edit Mapset' }));
+
+    expect(onOpenEditMapset).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('hides the edit-mapset option when showEditMapset is false', async () => {
+    const user = userEvent.setup();
+    setup({ showEditMapset: false });
+
+    await user.click(screen.getByRole('button', { name: /^Manage$/i }));
+
+    expect(screen.getByRole('menuitem', { name: 'Base History' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Edit Mapset' })).not.toBeInTheDocument();
   });
 
   it('opens base history and closes the menu', async () => {
@@ -71,6 +96,9 @@ describe('ManageMenuButton', () => {
     expect(screen.getByRole('menuitem', { name: 'Base History' })).toHaveFocus();
 
     await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitem', { name: 'Edit Mapset' })).toHaveFocus();
+
+    await user.keyboard('{ArrowDown}');
     expect(screen.getByRole('menuitem', { name: 'Manage Members' })).toHaveFocus();
 
     // Wraps back to the top.
@@ -103,7 +131,7 @@ describe('ManageMenuButton', () => {
     expect(screen.getByRole('menuitem', { name: 'Base History' })).toHaveFocus();
 
     await user.keyboard('{ArrowDown}');
-    expect(screen.getByRole('menuitem', { name: 'Manage Members' })).toHaveFocus();
+    expect(screen.getByRole('menuitem', { name: 'Edit Mapset' })).toHaveFocus();
   });
 
   it('disables base history when no difficulty is selected', async () => {

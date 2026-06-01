@@ -6,6 +6,10 @@ interface ManageMenuButtonProps {
   onOpenBaseHistory: () => void;
   /** Base history is difficulty-scoped; disable it when nothing is selected. */
   baseHistoryDisabled?: boolean;
+  /** Whether the edit-mapset option is shown (owner/mapper only). */
+  showEditMapset: boolean;
+  /** Open the edit-mapset modal (title, description, song length). */
+  onOpenEditMapset: () => void;
   /** Whether the members option is shown (member-only, hidden for ghosts). */
   showMembers: boolean;
   /** Label for the members option ("Manage Members" vs "View Members"). */
@@ -55,6 +59,8 @@ function ChevronIcon({ open }: { open: boolean }) {
 export default function ManageMenuButton({
   onOpenBaseHistory,
   baseHistoryDisabled = false,
+  showEditMapset,
+  onOpenEditMapset,
   showMembers,
   membersLabel,
   onOpenMembers,
@@ -166,6 +172,19 @@ export default function ManageMenuButton({
           >
             {t('mapsetPage.baseHistory')}
           </button>
+          {showEditMapset && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeMenu(true);
+                onOpenEditMapset();
+              }}
+              className="block w-full px-4 py-2 text-left text-sm text-white hover:bg-gray-700 transition-colors"
+            >
+              {t('mapsetPage.editMapset')}
+            </button>
+          )}
           {showMembers && (
             <button
               type="button"

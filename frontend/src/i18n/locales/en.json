@@ -429,6 +429,7 @@
     "manageMenuLabel": "Manage options",
     "baseHistory": "Base History",
     "baseHistoryDisabled": "Select a difficulty first",
+    "editMapset": "Edit Mapset",
     "manageMembers": "Manage Members",
     "viewMembers": "View Members",
     "difficultiesHeading": "Difficulties",
@@ -492,5 +493,21 @@
     "unknownUser": "Unknown user",
     "toastAssignmentsCopied": "Assignments copied to clipboard",
     "toastFailedCopyAssignments": "Failed to copy assignments"
+  },
+  "editMapsetModal": {
+    "title": "Edit Mapset",
+    "titleLabel": "Title",
+    "titlePlaceholder": "Mapset title",
+    "titleWarning": "The title is stored unencrypted and visible to the server.",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Optional description",
+    "songLengthLabel": "Song length",
+    "minutes": "Minutes",
+    "seconds": "Seconds",
+    "submit": "Save",
+    "submitting": "Saving…",
+    "toastUpdated": "Mapset updated.",
+    "errorKeyMissing": "Encryption key not found. Please unlock the mapset first.",
+    "errorGeneric": "Failed to update mapset."
   }
 }

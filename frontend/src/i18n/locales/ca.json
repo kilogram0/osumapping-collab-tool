@@ -428,6 +428,7 @@
     "manageMenuLabel": "Opcions de gestió",
     "baseHistory": "Historial de la base",
     "baseHistoryDisabled": "Selecciona primer una dificultat",
+    "editMapset": "Edita el mapset",
     "manageMembers": "Gestiona els membres",
     "viewMembers": "Mostra els membres",
     "difficultiesHeading": "Dificultats",
@@ -491,5 +492,21 @@
     "unknownUser": "Usuari desconegut",
     "toastAssignmentsCopied": "Assignacions copiades al porta-retalls",
     "toastFailedCopyAssignments": "No s'han pogut copiar les assignacions"
+  },
+  "editMapsetModal": {
+    "title": "Edita el mapset",
+    "titleLabel": "Títol",
+    "titlePlaceholder": "Títol del mapset",
+    "titleWarning": "El títol es desa sense xifrar i és visible per al servidor.",
+    "descriptionLabel": "Descripció",
+    "descriptionPlaceholder": "Descripció opcional",
+    "songLengthLabel": "Durada de la cançó",
+    "minutes": "Minuts",
+    "seconds": "Segons",
+    "submit": "Desa",
+    "submitting": "S'està desant…",
+    "toastUpdated": "Mapset actualitzat.",
+    "errorKeyMissing": "No s'ha trobat la clau de xifratge. Desbloqueja primer el mapset.",
+    "errorGeneric": "No s'ha pogut actualitzar el mapset."
   }
 }

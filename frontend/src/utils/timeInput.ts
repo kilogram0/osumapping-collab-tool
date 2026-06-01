@@ -1,20 +1,5 @@
-/** Clamp numeric input to [0, max]. max === undefined means no upper bound. */
-export function makeClampedOnChange(
-  setter: (v: string) => void,
-  max?: number,
-): (e: React.ChangeEvent<HTMLInputElement>) => void {
-  return (e) => {
-    const raw = e.target.value;
-    if (raw === '') {
-      setter('');
-      return;
-    }
-    let val = parseInt(raw, 10);
-    if (Number.isNaN(val) || val < 0) val = 0;
-    if (max !== undefined && val > max) val = max;
-    setter(String(val));
-  };
-}
+// Single source of truth for the clamped numeric onChange helper.
+export { makeClampedOnChange } from './numericInput';
 
 export interface TimeParts {
   minutes: string;

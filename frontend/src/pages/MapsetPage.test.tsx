@@ -198,6 +198,11 @@ const mockUseMyMembership = vi.fn(() => ({
   isLoading: false,
 }));
 
+// Mutable so an Edit Mapset save can mutate it and the next render reflects the
+// change — `useMapset` below reads this live (mock-prefixed for vi.mock hoisting).
+let mockCurrentMapset: typeof MOCK_MAPSET = MOCK_MAPSET;
+const mockUpdateMapset = vi.fn();
+
 const mockCreatePost = vi.fn().mockResolvedValue({});
 const mockUpdatePost = vi.fn().mockResolvedValue({});
 const mockDeletePost = vi.fn().mockResolvedValue({});
@@ -221,15 +226,16 @@ vi.mock('../utils/sectionRedistribute', () => ({
 
 vi.mock('../hooks/useMapset', () => ({
   useMapset: () => ({
-    data: MOCK_MAPSET,
+    data: mockCurrentMapset,
     isLoading: false,
     isError: false,
   }),
   useMapsets: () => ({
-    data: [MOCK_MAPSET],
+    data: [mockCurrentMapset],
     isLoading: false,
     isError: false,
   }),
+  useUpdateMapset: () => ({ mutateAsync: mockUpdateMapset, isPending: false }),
   useMyMembership: (_mapsetId: string) => mockUseMyMembership(),
   useMembers: (_mapsetId: string, _enabled?: boolean) => ({
     data: [],
@@ -338,6 +344,14 @@ describe('MapsetPage', () => {
     mockRedistributeForShorten.mockResolvedValue({ movedCount: 0 });
     mockUseDifficulties.mockReturnValue({ data: MOCK_DIFFICULTIES, isLoading: false });
     mockUseDifficultyDetail.mockReturnValue({ data: MOCK_DIFFICULTY_DETAIL, isLoading: false });
+    mockCurrentMapset = MOCK_MAPSET;
+    mockUpdateMapset.mockReset();
+    // Merge the PATCH payload into the live mapset so the page re-renders with
+    // the new values once the modal closes (mirrors a refetch after invalidate).
+    mockUpdateMapset.mockImplementation(async (payload) => {
+      mockCurrentMapset = { ...mockCurrentMapset, ...payload };
+      return mockCurrentMapset;
+    });
     mockUseMyMembership.mockReturnValue({
       data: {
         id: 'member-1',
@@ -373,7 +387,8 @@ describe('MapsetPage', () => {
       expect(screen.getByText('Test Mapset')).toBeInTheDocument();
     });
     expect(screen.getByText('A test description')).toBeInTheDocument();
-    expect(screen.getByText('04:05')).toBeInTheDocument();
+    // Song length renders on the title line as "-  04:05" (nbsp-padded).
+    expect(screen.getByText(/04:05/)).toBeInTheDocument();
   });
 
   it('shows Add Difficulty option for owner', async () => {
@@ -1009,7 +1024,8 @@ describe('MapsetPage', () => {
       renderPage();
       const user = await openSectionPanel();
 
-      await user.click(screen.getByRole('button', { name: /Merge with next/i }));
+      await user.click(screen.getByRole('button', { name: /Manage Section/i }));
+      await user.click(screen.getByRole('menuitem', { name: /Merge with next/i }));
 
       await waitFor(() => {
         expect(screen.getByText(/Sections merged/i)).toBeInTheDocument();
@@ -1023,7 +1039,8 @@ describe('MapsetPage', () => {
       renderPage();
       const user = await openSectionPanel();
 
-      await user.click(screen.getByRole('button', { name: /Merge with next/i }));
+      await user.click(screen.getByRole('button', { name: /Manage Section/i }));
+      await user.click(screen.getByRole('menuitem', { name: /Merge with next/i }));
 
       await waitFor(() => {
         expect(screen.getByText(/may be inconsistent/i)).toBeInTheDocument();
@@ -1040,7 +1057,8 @@ describe('MapsetPage', () => {
       renderPage();
       const user = await openSectionPanel();
 
-      await user.click(screen.getByRole('button', { name: /Merge with next/i }));
+      await user.click(screen.getByRole('button', { name: /Manage Section/i }));
+      await user.click(screen.getByRole('menuitem', { name: /Merge with next/i }));
 
       await waitFor(() => {
         expect(screen.getByText(/Redistribute failed/i)).toBeInTheDocument();
@@ -1100,7 +1118,8 @@ describe('MapsetPage', () => {
       await waitFor(() => expect(screen.getByTestId('timeline-section-s1')).toBeInTheDocument());
       await user.click(screen.getByTestId('timeline-section-s1'));
       await waitFor(() => expect(screen.getByTestId('section-detail-panel')).toBeInTheDocument());
-      await user.click(screen.getByRole('button', { name: /^Split$/i }));
+      await user.click(screen.getByRole('button', { name: /Manage Section/i }));
+      await user.click(screen.getByRole('menuitem', { name: /^Split$/i }));
       await waitFor(() => expect(screen.getByRole('dialog', { name: /Split Section/i })).toBeInTheDocument());
       return user;
     }
@@ -1139,6 +1158,64 @@ describe('MapsetPage', () => {
       expect(screen.getByText(/Create failed/i)).toBeInTheDocument();
       // redistribute must not run when create fails — step-order contract
       expect(mockRedistributeForShorten).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Edit Mapset', () => {
+    it('opens from the Manage menu, updates the title, and clears the description on save', async () => {
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByText('Test Mapset')).toBeInTheDocument());
+      expect(screen.getByText('A test description')).toBeInTheDocument();
+
+      // Open the top-level Manage dropdown, then the Edit Mapset item.
+      await user.click(screen.getByRole('button', { name: /^Manage$/i }));
+      await user.click(screen.getByRole('menuitem', { name: /Edit Mapset/i }));
+
+      const dialog = await screen.findByRole('dialog', { name: /Edit Mapset/i });
+      // Prefilled with the current decrypted values.
+      expect(within(dialog).getByLabelText(/title/i)).toHaveValue('Test Mapset');
+      expect(within(dialog).getByLabelText(/description/i)).toHaveValue('A test description');
+
+      const titleInput = within(dialog).getByLabelText(/title/i);
+      await user.clear(titleInput);
+      await user.type(titleInput, 'Renamed Mapset');
+      await user.clear(within(dialog).getByLabelText(/description/i));
+      await user.click(within(dialog).getByRole('button', { name: /save/i }));
+
+      await waitFor(() => expect(mockUpdateMapset).toHaveBeenCalledTimes(1));
+      const payload = mockUpdateMapset.mock.calls[0][0];
+      expect(payload.title).toBe('Renamed Mapset');
+      // Cleared description must be sent as null (PATCH "clear it" semantics).
+      expect(payload.encrypted_description).toBeNull();
+
+      // Modal closes and the page reflects the new title with the description
+      // gone — regression guard for the fulfilled-null display path.
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: /Edit Mapset/i })).not.toBeInTheDocument(),
+      );
+      await waitFor(() => expect(screen.getByText('Renamed Mapset')).toBeInTheDocument());
+      expect(screen.queryByText('A test description')).not.toBeInTheDocument();
+    });
+
+    it('hides the Edit Mapset menu item for a modder', async () => {
+      mockUseMyMembership.mockReturnValue({
+        data: {
+          id: 'member-3',
+          mapset_id: 'ms1',
+          user_id: 'current-user-uuid',
+          role: 'modder',
+          created_at: '',
+          updated_at: '',
+        },
+        isLoading: false,
+      });
+      renderPage();
+      const user = userEvent.setup();
+      await waitFor(() => expect(screen.getByText('Test Mapset')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /^Manage$/i }));
+      expect(screen.queryByRole('menuitem', { name: /Edit Mapset/i })).not.toBeInTheDocument();
     });
   });
 });

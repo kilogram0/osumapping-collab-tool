@@ -7,6 +7,7 @@ import ResourcesPanel from '../components/ResourcesPanel';
 import CreateDifficultyModal from '../components/CreateDifficultyModal';
 import CreateSectionModal from '../components/CreateSectionModal';
 import DifficultyDropdown from '../components/DifficultyDropdown';
+import EditMapsetModal from '../components/EditMapsetModal';
 import EditSectionModal from '../components/EditSectionModal';
 import SplitSectionModal from '../components/SplitSectionModal';
 import FullDifficultyUploadButton from '../components/FullDifficultyUploadButton';
@@ -124,6 +125,7 @@ export default function MapsetPage() {
   const [splitSubmitting, setSplitSubmitting] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
   const [showBaseHistory, setShowBaseHistory] = useState(false);
+  const [showEditMapset, setShowEditMapset] = useState(false);
   const [showManageMembers, setShowManageMembers] = useState(false);
   const [ghostBannerDismissed, setGhostBannerDismissed] = useState(false);
   const [difficultyNames, setDifficultyNames] = useState<Record<string, string>>({});
@@ -215,7 +217,10 @@ export default function MapsetPage() {
         if (cancelled) return;
 
         const descResult = results[0];
-        if (descResult.status === 'fulfilled' && descResult.value !== null) {
+        // Set unconditionally on success: value is string | null, and a
+        // fulfilled null means the description was cleared (e.g. via the Edit
+        // Mapset modal). Skipping null would leave the stale text on screen.
+        if (descResult.status === 'fulfilled') {
           setDecryptedDescription(descResult.value);
         }
 
@@ -944,10 +949,17 @@ export default function MapsetPage() {
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-start justify-between gap-3">
-            <h1 className="text-3xl font-bold text-blue-400">{mapset.title}</h1>
+            <div className="flex items-baseline gap-2 flex-wrap min-w-0">
+              <h1 className="text-3xl font-bold text-blue-400">{mapset.title}</h1>
+              {songLengthMs !== null && songLengthMs > 0 && (
+                <span className="text-sm text-gray-400">{`-  ${formatDuration(songLengthMs)}`}</span>
+              )}
+            </div>
             <ManageMenuButton
               onOpenBaseHistory={() => setShowBaseHistory(true)}
               baseHistoryDisabled={!selectedDifficultyId}
+              showEditMapset={canEditStructure}
+              onOpenEditMapset={() => setShowEditMapset(true)}
               showMembers={Boolean(myMembership) && !isGhost}
               membersLabel={actualIsOwner ? t('mapsetPage.manageMembers') : t('mapsetPage.viewMembers')}
               onOpenMembers={() => setShowManageMembers(true)}
@@ -955,9 +967,6 @@ export default function MapsetPage() {
           </div>
           {decryptedDescription && (
             <p className="text-gray-300 mt-2">{decryptedDescription}</p>
-          )}
-          {songLengthMs !== null && (
-            <p className="text-sm text-gray-400 mt-1">{formatDuration(songLengthMs)}</p>
           )}
           <ResourcesPanel mapsetId={mapsetId} isOwner={isOwner} />
         </div>
@@ -1195,6 +1204,17 @@ export default function MapsetPage() {
         <BaseVersionHistory
           difficultyId={selectedDifficultyId}
           onClose={() => setShowBaseHistory(false)}
+        />
+      )}
+
+      {showEditMapset && (
+        <EditMapsetModal
+          mapsetId={mapsetId}
+          currentTitle={mapset.title}
+          currentDescription={decryptedDescription}
+          currentSongLengthMs={songLengthMs}
+          onSuccess={() => setShowEditMapset(false)}
+          onCancel={() => setShowEditMapset(false)}
         />
       )}
 
