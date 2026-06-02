@@ -11,7 +11,12 @@ import { ToastProvider } from '../contexts/ToastContext';
 vi.mock('../api/endpoints', () => ({
   fetchMapsets: vi.fn(),
   fetchKickedMapsets: vi.fn().mockResolvedValue([]),
-  fetchQuota: vi.fn().mockResolvedValue({ used: 0, limit: 50 }),
+  fetchStorage: vi.fn().mockResolvedValue({
+    used_bytes: 0,
+    limit_bytes: 5242880,
+    pending_bytes: 0,
+    pending_limit_bytes: 5242880,
+  }),
   fetchCurrentUser: vi.fn().mockResolvedValue(null),
   logout: vi.fn().mockResolvedValue(undefined),
 }));
@@ -26,7 +31,9 @@ vi.mock('../hooks/useMapset', async (importOriginal) => {
     ...actual,
     useScheduleMapsetDeletion: () => ({ mutate: vi.fn() }),
     useCancelMapsetDeletion: () => ({ mutate: vi.fn() }),
-    useQuota: () => ({ data: { used: 0, limit: 50 } }),
+    useStorage: () => ({
+      data: { used_bytes: 0, limit_bytes: 5242880, pending_bytes: 0, pending_limit_bytes: 5242880 },
+    }),
   };
 });
 

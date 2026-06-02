@@ -40,13 +40,15 @@ export interface Mapset {
   difficulty_count: number;
 }
 
-export interface QuotaInfo {
-  used: number;
-  limit: number;
+export interface StorageInfo {
+  used_bytes: number;
+  limit_bytes: number;
+  pending_bytes: number;
+  pending_limit_bytes: number;
 }
 
-export async function fetchQuota(): Promise<QuotaInfo> {
-  const { data } = await client.get<QuotaInfo>('/auth/me/quota');
+export async function fetchStorage(): Promise<StorageInfo> {
+  const { data } = await client.get<StorageInfo>('/auth/me/storage');
   return data;
 }
 
@@ -479,6 +481,60 @@ export async function activateBaseOsuVersion(
     {},
   );
   return data;
+}
+
+// ---------------------------------------------------------------------------
+// Difficulty pins (named snapshots of the fully-assembled .osu)
+// ---------------------------------------------------------------------------
+
+/** Pin metadata — matches DifficultyPinRead. No content blob. */
+export interface DifficultyPin {
+  id: string;
+  difficulty_id: string;
+  encrypted_label: string;
+  created_by: string;
+  created_at: string;
+}
+
+/** A pin including its assembled .osu ciphertext — matches DifficultyPinContentRead. */
+export interface DifficultyPinContent extends DifficultyPin {
+  encrypted_content: string;
+}
+
+export interface CreateDifficultyPinPayload {
+  id: string;
+  encrypted_label: string;
+  encrypted_content: string;
+}
+
+export async function createPin(
+  difficultyId: string,
+  payload: CreateDifficultyPinPayload,
+): Promise<DifficultyPin> {
+  const { data } = await client.post<DifficultyPin>(
+    `/difficulties/${difficultyId}/pins`,
+    payload,
+  );
+  return data;
+}
+
+export async function fetchPins(difficultyId: string): Promise<DifficultyPin[]> {
+  const { data } = await client.get<DifficultyPin[]>(`/difficulties/${difficultyId}/pins`);
+  return data;
+}
+
+export async function fetchPin(
+  difficultyId: string,
+  pinId: string,
+): Promise<DifficultyPinContent> {
+  const { data } = await client.get<DifficultyPinContent>(
+    `/difficulties/${difficultyId}/pins/${pinId}`,
+  );
+  return data;
+}
+
+export async function deletePin(difficultyId: string, pinId: string): Promise<void> {
+  await client.delete(`/difficulties/${difficultyId}/pins/${pinId}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ from app.config import settings
 from app.database import engine
 from app.models import Difficulty, Mapset, MapsetMember
 from app.queries import GHOST_GRACE_DAYS
-from app.routers import auth, difficulties, mapsets, members, posts, resources, sections
+from app.routers import auth, difficulties, mapsets, members, pins, posts, resources, sections
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +160,7 @@ def create_app() -> FastAPI:
     app.include_router(members.router, prefix="/api")
     app.include_router(difficulties.router, prefix="/api")
     app.include_router(sections.router, prefix="/api")
+    app.include_router(pins.router, prefix="/api")
     app.include_router(posts.router, prefix="/api")
     app.include_router(resources.router, prefix="/api")
 

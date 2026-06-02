@@ -210,11 +210,12 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
           showToast(t('createMapsetModal.importFailure', { message: msg }), 'warning');
         }
         // Invalidate after all difficulties are created so the dashboard shows
-        // the correct difficulty_count and quota immediately. Runs outside the
-        // catch above so stale counts never persist even on a partial import.
+        // the correct difficulty_count and storage usage immediately. Runs
+        // outside the catch above so stale counts never persist even on a
+        // partial import.
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['mapsets'] }),
-          queryClient.invalidateQueries({ queryKey: ['quota'] }),
+          queryClient.invalidateQueries({ queryKey: ['storage'] }),
         ]);
       }
 

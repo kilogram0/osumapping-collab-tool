@@ -12,7 +12,12 @@ vi.mock('./api/endpoints', () => ({
   logout: vi.fn().mockResolvedValue(undefined),
   fetchMapsets: vi.fn().mockResolvedValue([]),
   fetchKickedMapsets: vi.fn().mockResolvedValue([]),
-  fetchQuota: vi.fn().mockResolvedValue({ used: 0, limit: 50 }),
+  fetchStorage: vi.fn().mockResolvedValue({
+    used_bytes: 0,
+    limit_bytes: 5242880,
+    pending_bytes: 0,
+    pending_limit_bytes: 5242880,
+  }),
 }))
 
 const mockedFetchCurrentUser = vi.mocked(fetchCurrentUser)

@@ -98,6 +98,7 @@ export default function FullDifficultyUploadButton({ difficultyId, mapsetId, sec
     queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
     queryClient.invalidateQueries({ queryKey: ['difficulties', difficultyId] });
     queryClient.invalidateQueries({ queryKey: ['base-osu-versions', difficultyId] });
+    queryClient.invalidateQueries({ queryKey: ['storage'] });
     for (const s of sections) {
       queryClient.invalidateQueries({ queryKey: ['section-osu-versions', difficultyId, s.id] });
     }

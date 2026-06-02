@@ -10,7 +10,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, update as sa_update
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,13 +20,13 @@ from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Difficulty, Mapset, MapsetRole, User
 from app.queries import (
     DIFFICULTY_DELETION_GRACE_DAYS,
-    MAX_DIFFICULTY_SLOTS_PER_OWNER,
-    MAX_PENDING_DELETION_SLOTS_PER_OWNER,
+    ROW_OVERHEAD_BYTES,
     MembershipKind,
+    assert_active_capacity,
+    assert_pending_capacity,
     classify_membership,
-    count_pending_deletion_slots,
+    get_difficulty_storage_cost,
     get_mapset_membership,
-    get_owner_quota_used,
 )
 from app.schemas import (
     DifficultyCreate,
@@ -72,27 +72,12 @@ async def create_difficulty(
     ):
         raise _forbidden()
 
-    # Quota check: adding the first active diff to a mapset costs 0 extra slots
-    # (the mapset already counted as 1 when empty); any subsequent active diff
-    # costs 1. Only active (delete_at IS NULL) diffs count — pending-deletion
-    # rows have already vacated their active slot.
-    # Known TOCTOU: two concurrent POSTs at quota = limit - 1 can both pass.
-    # Acceptable for the current single-UI use case; add SELECT FOR UPDATE if
-    # scripted abuse becomes a concern.
-    existing_in_mapset_result = await db.execute(
-        select(func.count(Difficulty.id)).where(
-            Difficulty.mapset_id == mapset_id,
-            Difficulty.delete_at.is_(None),
-        )
-    )
-    existing_in_mapset = existing_in_mapset_result.scalar_one()
-    quota_increase = 0 if existing_in_mapset == 0 else 1
-    current_quota = await get_owner_quota_used(db, mapset.owner_id)
-    if current_quota + quota_increase > MAX_DIFFICULTY_SLOTS_PER_OWNER:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Difficulty limit reached",
-        )
+    # Active-storage check: a new difficulty row costs one row overhead against
+    # the owner's storage quota (its content is added later by uploads).
+    # Known TOCTOU: two concurrent POSTs near the cap can both pass. Acceptable
+    # for the current single-UI use case; add SELECT FOR UPDATE if scripted
+    # abuse becomes a concern.
+    await assert_active_capacity(db, mapset.owner_id, ROW_OVERHEAD_BYTES)
 
     difficulty = Difficulty(
         id=payload.id,
@@ -285,15 +270,10 @@ async def delete_difficulty(
         # Already pending — return the current row idempotently.
         return difficulty
 
-    pending_used = await count_pending_deletion_slots(db, mapset.owner_id)
-    if pending_used >= MAX_PENDING_DELETION_SLOTS_PER_OWNER:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Pending-deletion limit reached ({MAX_PENDING_DELETION_SLOTS_PER_OWNER} slots). "
-                "Wait for scheduled purges or restore a difficulty."
-            ),
-        )
+    # Soft-deleting moves this difficulty's bytes into the pending buffer; reject
+    # if that would overflow it (stops "rotate content through the trash" abuse).
+    cost = await get_difficulty_storage_cost(db, difficulty_id)
+    await assert_pending_capacity(db, mapset.owner_id, cost)
 
     # Use SA Core UPDATE to avoid bumping updated_at — this is a lifecycle
     # transition, not a content edit.
@@ -322,9 +302,9 @@ async def restore_difficulty(
 ) -> Difficulty:
     """Cancel a pending deletion, returning the difficulty to the active pool.
 
-    Permitted for ``owner`` role only. Subject to the active difficulty quota:
-    if restoring would push the owner over ``MAX_DIFFICULTY_SLOTS_PER_OWNER``,
-    the request is rejected with 409 and the row stays in pending state.
+    Permitted for ``owner`` role only. Subject to the active storage quota: if
+    restoring would push the owner over ``STORAGE_LIMIT_BYTES``, the request is
+    rejected with 409 and the row stays in pending state.
     """
     difficulty = await db.get(Difficulty, difficulty_id)
     if difficulty is None:
@@ -345,25 +325,10 @@ async def restore_difficulty(
         # Already active — idempotent.
         return difficulty
 
-    # If the mapset currently has zero active difficulties, restoring this one
-    # does not add a new slot — the mapset was already counted as 1 in the
-    # active quota. Otherwise, restoring adds 1.
-    active_count_result = await db.execute(
-        select(func.count(Difficulty.id)).where(
-            Difficulty.mapset_id == difficulty.mapset_id,
-            Difficulty.delete_at.is_(None),
-        )
-    )
-    quota_increase = 0 if active_count_result.scalar_one() == 0 else 1
-    current_quota = await get_owner_quota_used(db, mapset.owner_id)
-    if current_quota + quota_increase > MAX_DIFFICULTY_SLOTS_PER_OWNER:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Active difficulty limit reached ({MAX_DIFFICULTY_SLOTS_PER_OWNER} slots). "
-                "Cannot restore until you delete other difficulties."
-            ),
-        )
+    # Restoring moves this difficulty's bytes back into the active bucket; reject
+    # if that would exceed the active storage cap.
+    cost = await get_difficulty_storage_cost(db, difficulty_id)
+    await assert_active_capacity(db, mapset.owner_id, cost)
 
     # Use SA Core UPDATE to avoid bumping updated_at (lifecycle, not content edit).
     await db.execute(

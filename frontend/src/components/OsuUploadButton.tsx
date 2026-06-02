@@ -165,6 +165,7 @@ export default function OsuUploadButton({
         queryClient.invalidateQueries({ queryKey: ['difficulties', difficultyId] });
         queryClient.invalidateQueries({ queryKey: ['section-osu-versions', difficultyId, sectionId] });
         queryClient.invalidateQueries({ queryKey: ['base-osu-versions', difficultyId] });
+        queryClient.invalidateQueries({ queryKey: ['storage'] });
 
         setUploadState({ loading: false, error: null, success: true, warning: successWarning });
         if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);

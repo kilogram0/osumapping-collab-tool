@@ -383,21 +383,25 @@ async def test_me_rejects_expired_token(client: AsyncClient):
 
 
 # ---------------------------------------------------------------------------
-# GET /auth/me/quota
+# GET /auth/me/storage
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_me_quota_returns_zero_for_new_user(client: AsyncClient):
-    """A user with no mapsets has used == 0."""
-    user = await _seed_user(91001, "QuotaUser", "https://a.ppy.sh/91001")
+async def test_me_storage_returns_zero_for_new_user(client: AsyncClient):
+    """A user with no mapsets has used_bytes == 0."""
+    from app.queries import PENDING_STORAGE_LIMIT_BYTES, STORAGE_LIMIT_BYTES
+
+    user = await _seed_user(91001, "StorageUser", "https://a.ppy.sh/91001")
     client.cookies.set(settings.cookie_name, create_access_token(user.id))
 
-    resp = await client.get("/api/auth/me/quota")
+    resp = await client.get("/api/auth/me/storage")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["used"] == 0
-    assert body["limit"] == 50
+    assert body["used_bytes"] == 0
+    assert body["pending_bytes"] == 0
+    assert body["limit_bytes"] == STORAGE_LIMIT_BYTES
+    assert body["pending_limit_bytes"] == PENDING_STORAGE_LIMIT_BYTES
 
     # Cleanup
     from sqlalchemy import delete
@@ -409,17 +413,18 @@ async def test_me_quota_returns_zero_for_new_user(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_me_quota_counts_empty_mapset_as_one(client: AsyncClient):
-    """An empty owned mapset consumes one quota slot."""
-    from app.models import Mapset, MapsetMember, MapsetRole
+async def test_me_storage_counts_empty_mapset_as_floor(client: AsyncClient):
+    """An empty owned mapset consumes the per-mapset storage floor."""
+    from app.models import Mapset
+    from app.queries import MAPSET_STORAGE_FLOOR_BYTES
 
-    user = await _seed_user(91002, "QuotaUser2", "https://a.ppy.sh/91002")
+    user = await _seed_user(91002, "StorageUser2", "https://a.ppy.sh/91002")
     client.cookies.set(settings.cookie_name, create_access_token(user.id))
 
     CSRF_HEADERS = {"X-Requested-With": "XMLHttpRequest", "Origin": settings.FRONTEND_URL}
     mapset_payload = {
         "id": str(uuid4()),
-        "title": "Quota Test",
+        "title": "Storage Test",
         "encrypted_song_length_ms": "encrypted:1000",
         "passphrase_salt": "c2FsdC1iYXNlNjQ=",
         "encrypted_verification": "encrypted:verified",
@@ -427,11 +432,10 @@ async def test_me_quota_counts_empty_mapset_as_one(client: AsyncClient):
     r = await client.post("/api/mapsets", json=mapset_payload, headers=CSRF_HEADERS)
     assert r.status_code == 201
 
-    resp = await client.get("/api/auth/me/quota")
+    resp = await client.get("/api/auth/me/storage")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["used"] == 1
-    assert body["limit"] == 50
+    assert body["used_bytes"] == MAPSET_STORAGE_FLOOR_BYTES
 
     # Cleanup
     from sqlalchemy import delete
@@ -444,8 +448,8 @@ async def test_me_quota_counts_empty_mapset_as_one(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_me_quota_rejects_unauthenticated(client: AsyncClient):
-    resp = await client.get("/api/auth/me/quota")
+async def test_me_storage_rejects_unauthenticated(client: AsyncClient):
+    resp = await client.get("/api/auth/me/storage")
     assert resp.status_code == 401
 
 

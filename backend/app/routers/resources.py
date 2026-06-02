@@ -16,7 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Mapset, MapsetResource, MapsetRole, User
-from app.queries import MembershipKind, classify_membership, get_mapset_membership
+from app.queries import (
+    ROW_OVERHEAD_BYTES,
+    MembershipKind,
+    assert_active_capacity,
+    classify_membership,
+    get_mapset_membership,
+)
 from app.schemas import MapsetResourceCreate, MapsetResourceRead
 
 router = APIRouter(prefix="/mapsets", tags=["resources"])
@@ -83,6 +89,17 @@ async def create_resource(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Resource limit of {_RESOURCE_LIMIT} reached",
         )
+
+    # A resource costs one row overhead + its encrypted fields against the
+    # owner's storage quota.
+    mapset = await db.get(Mapset, mapset_id)
+    incoming = (
+        ROW_OVERHEAD_BYTES
+        + len(payload.encrypted_name)
+        + len(payload.encrypted_url)
+        + (len(payload.encrypted_icon) if payload.encrypted_icon else 0)
+    )
+    await assert_active_capacity(db, mapset.owner_id, incoming)  # type: ignore[union-attr]
 
     resource = MapsetResource(
         id=payload.id,

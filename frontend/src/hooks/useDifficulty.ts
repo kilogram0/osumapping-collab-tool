@@ -36,7 +36,7 @@ export function useCreateDifficulty(mapsetId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
-      queryClient.invalidateQueries({ queryKey: ['quota'] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -65,7 +65,7 @@ export function useDeleteDifficulty(mapsetId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
-      queryClient.invalidateQueries({ queryKey: ['quota'] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -78,7 +78,7 @@ export function useRestoreDifficulty(mapsetId: string) {
       queryClient.invalidateQueries({ queryKey: ['difficulties', mapsetId] });
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
-      queryClient.invalidateQueries({ queryKey: ['quota'] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -91,6 +91,7 @@ export function useCreateSection(difficultyId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -119,6 +120,7 @@ export function useDeleteSection(difficultyId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sections', difficultyId] });
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -186,6 +188,7 @@ export function useCreatePost(difficultyId: string) {
     mutationFn: (payload: Parameters<typeof createPost>[1]) => createPost(difficultyId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -197,6 +200,7 @@ export function useUpdatePost(difficultyId: string) {
       updatePost(difficultyId, postId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -207,6 +211,7 @@ export function useDeletePost(difficultyId: string) {
     mutationFn: (postId: string) => deletePost(difficultyId, postId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['difficulty-detail', difficultyId] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }

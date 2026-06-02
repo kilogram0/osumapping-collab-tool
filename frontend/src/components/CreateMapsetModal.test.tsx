@@ -183,7 +183,7 @@ describe('CreateMapsetModal — OSZ import query invalidation', () => {
     vi.clearAllMocks();
   });
 
-  it('re-invalidates mapsets and quota after OSZ difficulties are imported', async () => {
+  it('re-invalidates mapsets and storage after OSZ difficulties are imported', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -209,10 +209,10 @@ describe('CreateMapsetModal — OSZ import query invalidation', () => {
       type InvalidateArg = { queryKey?: unknown[] };
       const keyAt0 = (call: unknown[]) => (call[0] as InvalidateArg)?.queryKey?.[0];
       const mapsetsCalls = invalidateSpy.mock.calls.filter((c) => keyAt0(c) === 'mapsets');
-      const quotaCalls = invalidateSpy.mock.calls.filter((c) => keyAt0(c) === 'quota');
+      const storageCalls = invalidateSpy.mock.calls.filter((c) => keyAt0(c) === 'storage');
       // Once from useCreateMapset onSuccess, once again after OSZ import finishes
       expect(mapsetsCalls.length).toBe(2);
-      expect(quotaCalls.length).toBe(2);
+      expect(storageCalls.length).toBe(2);
     });
   });
 });

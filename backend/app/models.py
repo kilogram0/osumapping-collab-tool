@@ -246,6 +246,7 @@ class Difficulty(SQLModel, table=True):
     base_versions: list["DifficultyBaseOsuVersion"] = Relationship(
         back_populates="difficulty"
     )
+    pins: list["DifficultyPin"] = Relationship(back_populates="difficulty")
 
 
 class Section(SQLModel, table=True):
@@ -338,6 +339,14 @@ class SectionOsuVersion(SQLModel, table=True):
     encrypted_content: str = Field(
         sa_column=sa.Column(sa.Text, nullable=False)
     )
+    # Byte size of encrypted_content at upload time, for deterministic storage
+    # accounting (see app.queries). Always set by the app on insert; the
+    # server_default keeps the NOT NULL add safe for the backfill migration on
+    # pre-existing rows.
+    byte_size: int = Field(
+        default=0,
+        sa_column=sa.Column(sa.Integer, nullable=False, server_default="0"),
+    )
     version: int = Field(nullable=False)
     is_active: bool = Field(
         default=False,
@@ -407,6 +416,14 @@ class DifficultyBaseOsuVersion(SQLModel, table=True):
     encrypted_content: str = Field(
         sa_column=sa.Column(sa.Text, nullable=False)
     )
+    # Byte size of encrypted_content at upload time, for deterministic storage
+    # accounting (see app.queries). Always set by the app on insert; the
+    # server_default keeps the NOT NULL add safe for the backfill migration on
+    # pre-existing rows.
+    byte_size: int = Field(
+        default=0,
+        sa_column=sa.Column(sa.Integer, nullable=False, server_default="0"),
+    )
     version: int = Field(nullable=False)
     is_active: bool = Field(
         default=False,
@@ -443,6 +460,65 @@ class DifficultyBaseOsuVersion(SQLModel, table=True):
     source_section_version: SectionOsuVersion | None = Relationship(
         back_populates="base_versions"
     )
+
+
+class DifficultyPin(SQLModel, table=True):
+    """A named, pinned snapshot of a difficulty's fully-assembled .osu file.
+
+    Unlike SectionOsuVersion/DifficultyBaseOsuVersion, a pin is self-contained:
+    it stores the *merged* .osu (base + all sections) as encrypted ciphertext at
+    the moment of pinning, not pointers to section versions. This is deliberate —
+    sections are hard-deleted with CASCADE, so a pointer-based pin would become
+    hollow. The pin survives any later section edits or deletions.
+    """
+
+    __tablename__ = "difficultypin"
+
+    __table_args__ = (
+        sa.Index("ix_difficultypin_difficulty_id", "difficulty_id"),
+    )
+
+    # Client-minted UUID — the PK is folded into the AAD before encryption.
+    # See Difficulty.id for the full rationale; no server_default by design.
+    id: UUID = Field(primary_key=True)
+    difficulty_id: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("difficulty.id", ondelete="CASCADE"), nullable=False
+        )
+    )
+    # The fully-assembled .osu, encrypted.
+    encrypted_content: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    # Byte size of encrypted_content at pin time, for deterministic storage
+    # accounting (see app.queries). Set by the app on insert.
+    byte_size: int = Field(
+        default=0,
+        sa_column=sa.Column(sa.Integer, nullable=False, server_default="0"),
+    )
+    # The pin's display label (e.g. "version 1"), encrypted.
+    encrypted_label: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    created_by: UUID = Field(
+        sa_column=sa.Column(
+            sa.ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
+        )
+    )
+    created_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+        },
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={
+            "nullable": False,
+            "server_default": func.now(),
+            "onupdate": func.clock_timestamp(),
+        },
+    )
+
+    # Relationships
+    difficulty: Difficulty = Relationship(back_populates="pins")
 
 
 class MapsetResource(SQLModel, table=True):
@@ -528,6 +604,12 @@ class Post(SQLModel, table=True):
     )
     encrypted_body: str = Field(
         sa_column=sa.Column(sa.Text, nullable=False)
+    )
+    # Byte size of encrypted_body, for deterministic storage accounting (see
+    # app.queries). Set by the app on insert and recomputed on edit.
+    byte_size: int = Field(
+        default=0,
+        sa_column=sa.Column(sa.Integer, nullable=False, server_default="0"),
     )
     created_at: datetime | None = Field(
         default=None,

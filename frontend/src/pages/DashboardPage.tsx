@@ -6,20 +6,28 @@ import CreateMapsetModal from '../components/CreateMapsetModal';
 import MapsetCard from '../components/MapsetCard';
 import TopBar from '../components/TopBar';
 import PassphraseModal from '../components/PassphraseModal';
-import { useKickedMapsets, useMapsets, useQuota } from '../hooks/useMapset';
+import { useKickedMapsets, useMapsets, useStorage } from '../hooks/useMapset';
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
 
 export default function DashboardPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: mapsets, isLoading, isError } = useMapsets();
   const { data: kickedMapsets } = useKickedMapsets();
-  const { data: quota } = useQuota();
+  const { data: storage } = useStorage();
   const [showCreate, setShowCreate] = useState(false);
   const [unlockTarget, setUnlockTarget] = useState<Mapset | null>(null);
 
-  const quotaPct = quota ? Math.min((quota.used / quota.limit) * 100, 100) : 0;
-  const quotaColor =
-    quotaPct >= 90 ? 'bg-red-500' : quotaPct >= 70 ? 'bg-yellow-400' : 'bg-green-500';
+  const storagePct = storage
+    ? Math.min((storage.used_bytes / storage.limit_bytes) * 100, 100)
+    : 0;
+  const storageColor =
+    storagePct >= 90 ? 'bg-red-500' : storagePct >= 70 ? 'bg-yellow-400' : 'bg-green-500';
 
   const { activeMapsets, toBeDeletedMapsets } = useMemo(() => {
     const active: Mapset[] = [];
@@ -44,16 +52,23 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {quota && (
+        {storage && (
           <div className="mb-6">
             <div className="flex justify-between text-sm text-gray-400 mb-1">
-              <span>{t('dashboard.difficultySlots')}</span>
-              <span>{quota.used} / {quota.limit}</span>
+              <span>
+                {t('dashboard.storageUsed')}
+                {storage.pending_bytes > 0 && (
+                  <span className="text-gray-500 ml-2">
+                    ({t('dashboard.storagePending', { amount: formatBytes(storage.pending_bytes) })})
+                  </span>
+                )}
+              </span>
+              <span>{formatBytes(storage.used_bytes)} / {formatBytes(storage.limit_bytes)}</span>
             </div>
             <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all ${quotaColor}`}
-                style={{ width: `${quotaPct}%` }}
+                className={`h-full rounded-full transition-all ${storageColor}`}
+                style={{ width: `${storagePct}%` }}
               />
             </div>
           </div>

@@ -16,6 +16,7 @@ import TopBar from '../components/TopBar';
 import ManageMembersModal from '../components/ManageMembersModal';
 import ManageMenuButton from '../components/ManageMenuButton';
 import MergedDownloadButton from '../components/MergedDownloadButton';
+import PinButton from '../components/PinButton';
 import PassphraseModal from '../components/PassphraseModal';
 import PostsPanel from '../components/PostsPanel';
 import RenameDifficultyModal from '../components/RenameDifficultyModal';
@@ -516,6 +517,8 @@ export default function MapsetPage() {
       const key = await getKey(mapsetId);
       if (!key) return;
       await syncBaseBookmarks({ difficultyId: selectedDifficultyId, mapsetId, key, sections });
+      // May have created a base-version row; keep the storage meter in sync.
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     } catch {
       showToast(t('mapsetPage.toastBaseBookmarksSyncFailed'), 'error');
     }
@@ -1068,6 +1071,15 @@ export default function MapsetPage() {
                     sections={decryptedSections}
                   />
                 )}
+                <PinButton
+                  difficultyId={selectedDifficultyId}
+                  mapsetId={mapsetId}
+                  mapsetTitle={mapset.title}
+                  sections={sections}
+                  difficultyName={difficultyNames[selectedDifficultyId] ?? null}
+                  isOwner={isOwner}
+                  resolveUsername={(userId) => membersById.get(userId)?.username}
+                />
                 <button
                   type="button"
                   onClick={handleCopyAssignments}

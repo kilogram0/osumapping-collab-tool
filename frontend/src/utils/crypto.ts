@@ -73,6 +73,10 @@ export function mapsetResourceAad(resourceId: string, mapsetId: string): string 
   return `MapsetResource|${resourceId}|${mapsetId}`;
 }
 
+export function difficultyPinAad(pinId: string, mapsetId: string): string {
+  return `DifficultyPin|${pinId}|${mapsetId}`;
+}
+
 /**
  * Decode the uniform JSON envelope `{"v":<version>,"ms":<value>}`.
  *

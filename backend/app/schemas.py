@@ -106,11 +106,17 @@ _TIME_CT_MAX = 256
 _SORT_ORDER_CT_MAX = 256
 
 
-class QuotaRead(BaseModel):
-    """Current difficulty slot usage for the authenticated user."""
+class StorageRead(BaseModel):
+    """Current storage usage (in bytes) for the authenticated user.
 
-    used: int
-    limit: int
+    ``used``/``limit`` cover live content; ``pending``/``pending_limit`` cover
+    content sitting in the soft-delete grace window before hard deletion.
+    """
+
+    used_bytes: int
+    limit_bytes: int
+    pending_bytes: int
+    pending_limit_bytes: int
 
 
 class DifficultyCreate(BaseModel):
@@ -286,6 +292,35 @@ class BaseOsuVersionListItem(BaseModel):
     is_active: bool
     source_section_version_id: UUID | None
     created_at: datetime
+
+
+_PIN_LABEL_CT_MAX = 2_048
+
+
+class DifficultyPinCreate(BaseModel):
+    """Request body for creating a pinned difficulty version."""
+
+    id: UUID
+    encrypted_label: str = Field(min_length=1, max_length=_PIN_LABEL_CT_MAX)
+    encrypted_content: str = Field(min_length=1, max_length=_OSU_CONTENT_CT_MAX)
+
+
+class DifficultyPinRead(BaseModel):
+    """Metadata for a pin — returned in list responses (no content blob)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    difficulty_id: UUID
+    encrypted_label: str
+    created_by: UUID
+    created_at: datetime
+
+
+class DifficultyPinContentRead(DifficultyPinRead):
+    """A pin with its assembled .osu ciphertext — returned on single fetch."""
+
+    encrypted_content: str
 
 
 class MapsetMemberRead(BaseModel):

@@ -10,7 +10,7 @@ import {
   fetchMapsets,
   fetchMembers,
   fetchMyMembership,
-  fetchQuota,
+  fetchStorage,
   fetchResources,
   inviteMember,
   removeMember,
@@ -23,10 +23,10 @@ import {
   type UpdateMapsetPayload,
 } from '../api/endpoints';
 
-export function useQuota() {
+export function useStorage() {
   return useQuery({
-    queryKey: ['quota'],
-    queryFn: fetchQuota,
+    queryKey: ['storage'],
+    queryFn: fetchStorage,
   });
 }
 
@@ -58,7 +58,7 @@ export function useCreateMapset() {
     mutationFn: (payload: CreateMapsetPayload) => createMapset(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
-      queryClient.invalidateQueries({ queryKey: ['quota'] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -70,6 +70,7 @@ export function useUpdateMapset(id: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mapsets', id] });
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -80,7 +81,7 @@ export function useDeleteMapset() {
     mutationFn: (id: string) => deleteMapset(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
-      queryClient.invalidateQueries({ queryKey: ['quota'] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -141,6 +142,7 @@ export function useScheduleMapsetDeletion() {
     onSuccess: () => {
       // prefix match — also invalidates ['mapsets', id]
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -152,6 +154,7 @@ export function useCancelMapsetDeletion() {
     onSuccess: () => {
       // prefix match — also invalidates ['mapsets', id]
       queryClient.invalidateQueries({ queryKey: ['mapsets'] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -170,6 +173,7 @@ export function useCreateResource(mapsetId: string) {
     mutationFn: (payload: CreateMapsetResourcePayload) => createResource(mapsetId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['resources', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }
@@ -180,6 +184,7 @@ export function useDeleteResource(mapsetId: string) {
     mutationFn: (resourceId: string) => deleteResource(mapsetId, resourceId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['resources', mapsetId] });
+      queryClient.invalidateQueries({ queryKey: ['storage'] });
     },
   });
 }

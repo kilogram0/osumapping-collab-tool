@@ -11,8 +11,12 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import generate_oauth_state, get_current_user, validate_oauth_state
 from app.models import User
-from app.queries import MAX_DIFFICULTY_SLOTS_PER_OWNER, get_owner_quota_used
-from app.schemas import QuotaRead, UserRead
+from app.queries import (
+    PENDING_STORAGE_LIMIT_BYTES,
+    STORAGE_LIMIT_BYTES,
+    get_owner_storage,
+)
+from app.schemas import StorageRead, UserRead
 from app.services.auth_service import (
     AuthServiceError,
     create_access_token,
@@ -181,14 +185,19 @@ async def auth_me(current_user: Annotated[User, Depends(get_current_user)]) -> U
     return current_user
 
 
-@router.get("/me/quota", response_model=QuotaRead)
-async def auth_me_quota(
+@router.get("/me/storage", response_model=StorageRead)
+async def auth_me_storage(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> QuotaRead:
-    """Return the current user's difficulty slot usage."""
-    used = await get_owner_quota_used(db, current_user.id)
-    return QuotaRead(used=used, limit=MAX_DIFFICULTY_SLOTS_PER_OWNER)
+) -> StorageRead:
+    """Return the current user's storage usage in bytes (active + pending)."""
+    used, pending = await get_owner_storage(db, current_user.id)
+    return StorageRead(
+        used_bytes=used,
+        limit_bytes=STORAGE_LIMIT_BYTES,
+        pending_bytes=pending,
+        pending_limit_bytes=PENDING_STORAGE_LIMIT_BYTES,
+    )
 
 
 @router.post("/logout")

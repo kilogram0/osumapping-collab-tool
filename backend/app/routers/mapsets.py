@@ -17,7 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Difficulty, Mapset, MapsetMember, MapsetRole, User
-from app.queries import GHOST_GRACE_DAYS, MembershipKind, classify_membership, get_mapset_membership
+from app.queries import (
+    GHOST_GRACE_DAYS,
+    MAPSET_STORAGE_FLOOR_BYTES,
+    MembershipKind,
+    assert_active_capacity,
+    assert_pending_capacity,
+    classify_membership,
+    get_mapset_membership,
+    get_mapset_storage_cost,
+)
 from app.schemas import KickedMapsetRead, MapsetCreate, MapsetMemberRead, MapsetRead, MapsetUpdate
 
 router = APIRouter(prefix="/mapsets", tags=["mapsets"])
@@ -70,6 +79,9 @@ async def create_mapset(
     automatically inserted into ``MapsetMember`` with role ``owner`` in
     the same transaction.
     """
+    # A new (empty) mapset costs the per-mapset floor against the owner's quota.
+    await assert_active_capacity(db, current_user.id, MAPSET_STORAGE_FLOOR_BYTES)
+
     mapset = Mapset(
         id=payload.id,
         title=payload.title,
@@ -291,6 +303,11 @@ async def schedule_mapset_deletion(
             detail="Deletion already scheduled",
         )
 
+    # Scheduling deletion moves the whole mapset into the pending buffer; reject
+    # if that would overflow it. The floor matches the mapset's active footprint.
+    cost = max(await get_mapset_storage_cost(db, mapset_id), MAPSET_STORAGE_FLOOR_BYTES)
+    await assert_pending_capacity(db, mapset.owner_id, cost)
+
     mapset.delete_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=_DELETION_GRACE_DAYS)
     await db.commit()
     await db.refresh(mapset)
@@ -319,6 +336,14 @@ async def cancel_mapset_deletion(
         or membership.role != MapsetRole.owner  # type: ignore[union-attr]
     ):
         raise _forbidden()
+
+    if mapset.delete_at is not None:
+        # Restoring returns the mapset to the active bucket; reject if that would
+        # exceed the active storage cap.
+        cost = max(
+            await get_mapset_storage_cost(db, mapset_id), MAPSET_STORAGE_FLOOR_BYTES
+        )
+        await assert_active_capacity(db, mapset.owner_id, cost)
 
     mapset.delete_at = None
     await db.commit()

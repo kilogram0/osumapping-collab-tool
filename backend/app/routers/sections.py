@@ -17,12 +17,19 @@ from app.dependencies import get_current_user, require_csrf_protection
 from app.models import (
     Difficulty,
     DifficultyBaseOsuVersion,
+    Mapset,
     MapsetRole,
     Section,
     SectionOsuVersion,
     User,
 )
-from app.queries import MembershipKind, classify_membership, get_mapset_membership
+from app.queries import (
+    ROW_OVERHEAD_BYTES,
+    MembershipKind,
+    assert_active_capacity,
+    classify_membership,
+    get_mapset_membership,
+)
 from app.schemas import (
     BaseOsuCreate,
     BaseOsuRead,
@@ -96,6 +103,9 @@ async def create_section(
         or membership.role != MapsetRole.owner  # type: ignore[union-attr]
     ):
         raise _forbidden()
+
+    mapset = await db.get(Mapset, difficulty.mapset_id)
+    await assert_active_capacity(db, mapset.owner_id, ROW_OVERHEAD_BYTES)  # type: ignore[union-attr]
 
     section = Section(
         id=payload.id,
@@ -365,6 +375,14 @@ async def upload_section_osu(
     ):
         raise _forbidden()
 
+    # Active-storage check: this upload adds one version row (+ optionally one
+    # base-version row), each costing its content plus a fixed row overhead.
+    incoming = ROW_OVERHEAD_BYTES + len(payload.encrypted_content)
+    if payload.base_version is not None:
+        incoming += ROW_OVERHEAD_BYTES + len(payload.base_version.encrypted_content)
+    mapset = await db.get(Mapset, mapset_id)
+    await assert_active_capacity(db, mapset.owner_id, incoming)  # type: ignore[union-attr]
+
     # Compute next version number for this section.
     # Two concurrent uploads may race and compute the same next_version.
     # The partial unique index on (section_id, version) rejects the loser,
@@ -401,6 +419,7 @@ async def upload_section_osu(
             id=payload.id,
             section_id=section_id,
             encrypted_content=payload.encrypted_content,
+            byte_size=len(payload.encrypted_content),
             version=next_version,
             is_active=True,
             uploaded_by=current_user.id,
@@ -422,6 +441,7 @@ async def upload_section_osu(
                 id=payload.base_version.id,
                 difficulty_id=difficulty_id,
                 encrypted_content=payload.base_version.encrypted_content,
+                byte_size=len(payload.base_version.encrypted_content),
                 version=next_base_version,
                 is_active=True,
                 source_section_version_id=payload.id,
@@ -677,6 +697,13 @@ async def create_base_osu_version(
     ):
         raise _forbidden()
 
+    mapset = await db.get(Mapset, difficulty.mapset_id)
+    await assert_active_capacity(
+        db,
+        mapset.owner_id,  # type: ignore[union-attr]
+        ROW_OVERHEAD_BYTES + len(payload.encrypted_content),
+    )
+
     max_base_result = await db.execute(
         select(func.coalesce(func.max(DifficultyBaseOsuVersion.version), 0)).where(
             DifficultyBaseOsuVersion.difficulty_id == difficulty_id
@@ -698,6 +725,7 @@ async def create_base_osu_version(
             id=payload.id,
             difficulty_id=difficulty_id,
             encrypted_content=payload.encrypted_content,
+            byte_size=len(payload.encrypted_content),
             version=next_base_version,
             is_active=True,
             source_section_version_id=None,

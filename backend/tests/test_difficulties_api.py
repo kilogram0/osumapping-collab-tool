@@ -8,7 +8,15 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
-from app.models import Difficulty, Mapset, MapsetMember, MapsetRole, Section, User
+from app.models import (
+    Difficulty,
+    Mapset,
+    MapsetMember,
+    MapsetRole,
+    Section,
+    SectionOsuVersion,
+    User,
+)
 from app.services.auth_service import create_access_token
 from tests.conftest import test_engine
 
@@ -808,33 +816,77 @@ async def test_get_difficulty_includes_sections_and_posts(
 
 
 # ---------------------------------------------------------------------------
-# Difficulty quota cap
+# Storage quota cap (byte-based)
 # ---------------------------------------------------------------------------
 
 
-async def _seed_difficulties(mapset_id: UUID, count: int) -> None:
-    """Insert `count` Difficulty rows directly into the DB for quota tests."""
+async def _seed_diff_with_bytes(
+    mapset_id: UUID,
+    byte_size: int,
+    uploaded_by: UUID,
+    *,
+    delete_at=None,
+) -> UUID:
+    """Seed a difficulty + section + section-version carrying ``byte_size`` of
+    accounted storage. Returns the difficulty id. Passing ``delete_at`` puts the
+    difficulty into the pending-deletion (grace-window) bucket.
+    """
     factory = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
+    diff_id = uuid4()
+    section_id = uuid4()
     async with factory() as session:
-        for _ in range(count):
-            session.add(
-                Difficulty(
-                    id=uuid4(),
-                    mapset_id=mapset_id,
-                    encrypted_name="encrypted:seeded",
-                )
+        session.add(
+            Difficulty(
+                id=diff_id,
+                mapset_id=mapset_id,
+                encrypted_name="encrypted:seeded",
+                delete_at=delete_at,
             )
+        )
+        session.add(
+            Section(
+                id=section_id,
+                difficulty_id=diff_id,
+                encrypted_name="e",
+                encrypted_start_time_ms="e",
+                encrypted_end_time_ms="e",
+                encrypted_sort_order="e",
+            )
+        )
+        session.add(
+            SectionOsuVersion(
+                id=uuid4(),
+                section_id=section_id,
+                encrypted_content="x",
+                byte_size=byte_size,
+                version=1,
+                is_active=True,
+                uploaded_by=uploaded_by,
+            )
+        )
         await session.commit()
+    return diff_id
+
+
+async def _seed_diffs_to_active_cap(mapset_id: UUID, owner_id: UUID) -> list[UUID]:
+    """Fill an owner's active storage to/over the cap with ~1 MiB chunks.
+
+    Returns the seeded difficulty ids. Chunking keeps each difficulty's cost
+    below the pending buffer cap so an individual one can still be soft-deleted.
+    """
+    from app.queries import STORAGE_LIMIT_BYTES
+
+    chunk = STORAGE_LIMIT_BYTES // 5
+    return [
+        await _seed_diff_with_bytes(mapset_id, chunk, owner_id) for _ in range(5)
+    ]
 
 
 @pytest.mark.asyncio
-async def test_difficulty_cap_rejects_when_limit_exceeded(client: AsyncClient):
-    """Adding a difficulty beyond MAX_DIFFICULTIES_PER_USER (50) returns 409.
-
-    Setup: 1 mapset with 50 seeded diffs (quota = 50). The next creation must fail.
-    """
+async def test_storage_cap_rejects_when_limit_exceeded(client: AsyncClient):
+    """Creating content once the owner is at the storage cap returns 409."""
     owner = await _seed_user(79001)
     client.cookies.set(settings.cookie_name, create_access_token(owner.id))
 
@@ -842,7 +894,7 @@ async def test_difficulty_cap_rejects_when_limit_exceeded(client: AsyncClient):
     resp = await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
     assert resp.status_code == 201
 
-    await _seed_difficulties(UUID(ms["id"]), 50)
+    await _seed_diffs_to_active_cap(UUID(ms["id"]), owner.id)
 
     resp = await client.post(
         f"/api/mapsets/{ms['id']}/difficulties",
@@ -855,52 +907,34 @@ async def test_difficulty_cap_rejects_when_limit_exceeded(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_difficulty_cap_first_diff_does_not_increase_quota(client: AsyncClient):
-    """Adding the first diff to an empty mapset does not consume extra quota.
-
-    Setup: mapset1 with 49 diffs + mapset2 empty → quota = 49 + 1 = 50.
-    Adding the first diff to mapset2 keeps quota at 50 → allowed.
-    Adding a second diff to mapset2 pushes quota to 51 → rejected.
-    """
+async def test_empty_difficulties_stay_under_cap(client: AsyncClient):
+    """Empty difficulties are cheap — several fit under the per-mapset floor."""
     owner = await _seed_user(79002)
     client.cookies.set(settings.cookie_name, create_access_token(owner.id))
 
-    ms1 = _mapset_payload()
-    ms2 = _mapset_payload()
-    for ms in (ms1, ms2):
-        r = await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
-        assert r.status_code == 201
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
 
-    await _seed_difficulties(UUID(ms1["id"]), 49)
-
-    # First diff in empty mapset2 — no quota increase (was already 1), must succeed.
-    first = await client.post(
-        f"/api/mapsets/{ms2['id']}/difficulties",
-        json=_difficulty_payload(),
-        headers=CSRF_HEADERS,
-    )
-    assert first.status_code == 201, first.text
-
-    # Second diff in mapset2 — quota would be 51, must be rejected.
-    second = await client.post(
-        f"/api/mapsets/{ms2['id']}/difficulties",
-        json=_difficulty_payload(),
-        headers=CSRF_HEADERS,
-    )
-    assert second.status_code == 409, second.text
+    for _ in range(10):
+        r = await client.post(
+            f"/api/mapsets/{ms['id']}/difficulties",
+            json=_difficulty_payload(),
+            headers=CSRF_HEADERS,
+        )
+        assert r.status_code == 201, r.text
 
     await _delete_user_and_mapsets(owner.id)
 
 
 @pytest.mark.asyncio
-async def test_difficulty_cap_detail_message(client: AsyncClient):
-    """409 response for quota exceeded must carry the expected detail string."""
+async def test_storage_cap_detail_message(client: AsyncClient):
+    """409 response for the storage cap must carry the expected detail string."""
     owner = await _seed_user(79003)
     client.cookies.set(settings.cookie_name, create_access_token(owner.id))
 
     ms = _mapset_payload()
     await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
-    await _seed_difficulties(UUID(ms["id"]), 50)
+    await _seed_diffs_to_active_cap(UUID(ms["id"]), owner.id)
 
     resp = await client.post(
         f"/api/mapsets/{ms['id']}/difficulties",
@@ -908,20 +942,20 @@ async def test_difficulty_cap_detail_message(client: AsyncClient):
         headers=CSRF_HEADERS,
     )
     assert resp.status_code == 409
-    assert resp.json()["detail"] == "Difficulty limit reached"
+    assert "Storage limit reached" in resp.json()["detail"]
 
     await _delete_user_and_mapsets(owner.id)
 
 
 @pytest.mark.asyncio
-async def test_difficulty_cap_delete_frees_slot(client: AsyncClient):
-    """Deleting a difficulty decreases quota so a new one can be created."""
+async def test_storage_cap_soft_delete_frees_space(client: AsyncClient):
+    """Soft-deleting content frees active space so a new diff can be created."""
     owner = await _seed_user(79004)
     client.cookies.set(settings.cookie_name, create_access_token(owner.id))
 
     ms = _mapset_payload()
     await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
-    await _seed_difficulties(UUID(ms["id"]), 50)
+    ids = await _seed_diffs_to_active_cap(UUID(ms["id"]), owner.id)
 
     # At capacity — creating fails.
     blocked = await client.post(
@@ -931,13 +965,13 @@ async def test_difficulty_cap_delete_frees_slot(client: AsyncClient):
     )
     assert blocked.status_code == 409
 
-    # Fetch one of the seeded diffs to get a real ID.
-    list_resp = await client.get(f"/api/mapsets/{ms['id']}/difficulties")
-    diff_id = list_resp.json()[0]["id"]
+    # Soft-delete one ~1 MiB chunk → frees active space (moves to pending buffer).
+    deleted = await client.delete(
+        f"/api/difficulties/{ids[0]}", headers=CSRF_HEADERS
+    )
+    assert deleted.status_code == 200, deleted.text
 
-    await client.delete(f"/api/difficulties/{diff_id}", headers=CSRF_HEADERS)
-
-    # Now there's a free slot — creating must succeed.
+    # Now there's room — creating must succeed.
     freed = await client.post(
         f"/api/mapsets/{ms['id']}/difficulties",
         json=_difficulty_payload(),
@@ -949,12 +983,12 @@ async def test_difficulty_cap_delete_frees_slot(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_difficulty_cap_charges_mapset_owner_not_mapper(client: AsyncClient):
-    """Quota is tracked against the mapset owner, not the user creating the diff.
+async def test_storage_cap_charges_mapset_owner_not_mapper(client: AsyncClient):
+    """Storage is tracked against the mapset owner, not the user creating content.
 
-    Setup: owner has a mapset with 50 diffs (quota full). A mapper on that
-    mapset tries to add a difficulty — it must be rejected by the owner's quota,
-    even though the mapper's own quota is empty.
+    Setup: owner has a mapset filled to the storage cap. A mapper on that mapset
+    tries to add a difficulty — it must be rejected by the owner's quota, even
+    though the mapper's own usage is empty.
     """
     owner = await _seed_user(79005)
     mapper_user = await _seed_user(79006)
@@ -962,7 +996,7 @@ async def test_difficulty_cap_charges_mapset_owner_not_mapper(client: AsyncClien
     client.cookies.set(settings.cookie_name, create_access_token(owner.id))
     ms = _mapset_payload()
     await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
-    await _seed_difficulties(UUID(ms["id"]), 50)
+    await _seed_diffs_to_active_cap(UUID(ms["id"]), owner.id)
 
     factory = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
@@ -990,34 +1024,222 @@ async def test_difficulty_cap_charges_mapset_owner_not_mapper(client: AsyncClien
     await _delete_user_and_mapsets(mapper_user.id)
 
 
+@pytest.mark.asyncio
+async def test_storage_recovered_after_hard_delete_purge(client: AsyncClient):
+    """Hard-deleting (purging) expired content frees both buckets automatically."""
+    from app.main import _purge_expired_difficulties
+
+    owner = await _seed_user(79007)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+
+    # A soft-deleted (~1 MiB) diff whose grace window has already elapsed.
+    await _seed_diff_with_bytes(
+        UUID(ms["id"]),
+        1024 * 1024,
+        owner.id,
+        delete_at=_future_delete_at(offset_days=-1.0),
+    )
+
+    before = (await client.get("/api/auth/me/storage")).json()
+    assert before["pending_bytes"] >= 1024 * 1024
+
+    # Purge runs the bulk cascade DELETE — no per-row app hook.
+    await _purge_expired_difficulties(test_engine)
+
+    after = (await client.get("/api/auth/me/storage")).json()
+    assert after["pending_bytes"] == 0
+    # The mapset itself remains, so active falls back to its floor.
+    assert after["used_bytes"] < before["pending_bytes"]
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_post_counts_toward_storage(client: AsyncClient):
+    """Creating a post adds its row overhead + body length to active usage."""
+    owner = await _seed_user(79008)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    # A diff already over the per-mapset floor so the delta is observable.
+    diff_id = await _seed_diff_with_bytes(UUID(ms["id"]), 200 * 1024, owner.id)
+
+    before = (await client.get("/api/auth/me/storage")).json()["used_bytes"]
+
+    body = "c" * 5000
+    resp = await client.post(
+        f"/api/difficulties/{diff_id}/posts",
+        json={"id": str(uuid4()), "tag": "general", "encrypted_body": body},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 201, resp.text
+
+    after = (await client.get("/api/auth/me/storage")).json()["used_bytes"]
+    assert after - before == 1024 + len(body)
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_post_rejected_when_storage_full(client: AsyncClient):
+    """Posting once the owner is at the storage cap returns 409 (gap closed)."""
+    owner = await _seed_user(79009)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    ids = await _seed_diffs_to_active_cap(UUID(ms["id"]), owner.id)
+
+    resp = await client.post(
+        f"/api/difficulties/{ids[0]}/posts",
+        json={"id": str(uuid4()), "tag": "general", "encrypted_body": "x"},
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 409, resp.text
+    assert "Storage limit reached" in resp.json()["detail"]
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_post_edit_growth_rejected_when_full(client: AsyncClient):
+    """Editing a post *upward* at the cap is rejected; shrink/equal is allowed."""
+    owner = await _seed_user(79013)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    diff_id = await _seed_diff_with_bytes(UUID(ms["id"]), 1024, owner.id)
+
+    # Create a small post while there's room.
+    post_id = str(uuid4())
+    created = await client.post(
+        f"/api/difficulties/{diff_id}/posts",
+        json={"id": post_id, "tag": "general", "encrypted_body": "x"},
+        headers=CSRF_HEADERS,
+    )
+    assert created.status_code == 201, created.text
+
+    # Now fill the owner to the cap.
+    await _seed_diffs_to_active_cap(UUID(ms["id"]), owner.id)
+
+    # Growing the post is rejected...
+    grow = await client.put(
+        f"/api/difficulties/{diff_id}/posts/{post_id}",
+        json={"encrypted_body": "y" * 5000},
+        headers=CSRF_HEADERS,
+    )
+    assert grow.status_code == 409, grow.text
+
+    # ...but an equal-size edit still goes through (charges nothing).
+    same = await client.put(
+        f"/api/difficulties/{diff_id}/posts/{post_id}",
+        json={"encrypted_body": "z"},
+        headers=CSRF_HEADERS,
+    )
+    assert same.status_code == 200, same.text
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_resource_counts_toward_storage(client: AsyncClient):
+    """Creating a resource adds row overhead + its encrypted fields to usage."""
+    owner = await _seed_user(79010)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    # Push the mapset over its floor so the delta is observable.
+    await _seed_diff_with_bytes(UUID(ms["id"]), 200 * 1024, owner.id)
+
+    before = (await client.get("/api/auth/me/storage")).json()["used_bytes"]
+
+    name, url, icon = "n" * 100, "u" * 300, "i" * 50
+    resp = await client.post(
+        f"/api/mapsets/{ms['id']}/resources",
+        json={
+            "id": str(uuid4()),
+            "encrypted_name": name,
+            "encrypted_url": url,
+            "encrypted_icon": icon,
+        },
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 201, resp.text
+
+    after = (await client.get("/api/auth/me/storage")).json()["used_bytes"]
+    assert after - before == 1024 + len(name) + len(url) + len(icon)
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_description_counts_toward_storage(client: AsyncClient):
+    """The mapset's encrypted description is counted (computed on demand)."""
+    owner = await _seed_user(79011)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()  # encrypted_description == "encrypted:desc"
+    old_desc = ms["encrypted_description"]
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    await _seed_diff_with_bytes(UUID(ms["id"]), 200 * 1024, owner.id)
+
+    before = (await client.get("/api/auth/me/storage")).json()["used_bytes"]
+
+    new_desc = "d" * 2000
+    patch = await client.patch(
+        f"/api/mapsets/{ms['id']}",
+        json={"encrypted_description": new_desc},
+        headers=CSRF_HEADERS,
+    )
+    assert patch.status_code == 200, patch.text
+
+    after = (await client.get("/api/auth/me/storage")).json()["used_bytes"]
+    assert after - before == len(new_desc) - len(old_desc)
+
+    await _delete_user_and_mapsets(owner.id)
+
+
+@pytest.mark.asyncio
+async def test_resource_rejected_when_storage_full(client: AsyncClient):
+    """Adding a resource once the owner is at the cap returns 409."""
+    owner = await _seed_user(79012)
+    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
+
+    ms = _mapset_payload()
+    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
+    await _seed_diffs_to_active_cap(UUID(ms["id"]), owner.id)
+
+    resp = await client.post(
+        f"/api/mapsets/{ms['id']}/resources",
+        json={
+            "id": str(uuid4()),
+            "encrypted_name": "n",
+            "encrypted_url": "u",
+        },
+        headers=CSRF_HEADERS,
+    )
+    assert resp.status_code == 409, resp.text
+    assert "Storage limit reached" in resp.json()["detail"]
+
+    await _delete_user_and_mapsets(owner.id)
+
+
 # ---------------------------------------------------------------------------
 # Soft-delete: pending-deletion buffer, restore, include_pending toggle
 # ---------------------------------------------------------------------------
 
 
-async def _seed_difficulties_pending(
-    mapset_id: UUID, count: int, delete_at_offset_days: float = 7.0
-) -> list[UUID]:
-    """Insert ``count`` Difficulty rows with delete_at set to (now + offset days)."""
+def _future_delete_at(offset_days: float = 7.0):
+    """A naive-UTC timestamp ``offset_days`` in the future for seeding pending rows."""
     from datetime import datetime, timedelta, timezone
 
-    factory = async_sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
-    ids: list[UUID] = []
-    async with factory() as session:
-        for _ in range(count):
-            d = Difficulty(
-                id=uuid4(),
-                mapset_id=mapset_id,
-                encrypted_name="encrypted:pending",
-                delete_at=now_naive + timedelta(days=delete_at_offset_days),
-            )
-            session.add(d)
-            ids.append(d.id)
-        await session.commit()
-    return ids
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=offset_days)
 
 
 @pytest.mark.asyncio
@@ -1068,45 +1290,22 @@ async def test_delete_difficulty_is_idempotent_when_already_pending(
 
 
 @pytest.mark.asyncio
-async def test_delete_difficulty_frees_active_quota_slot(client: AsyncClient):
-    """Scheduling deletion immediately frees an active slot so a new diff can be created."""
-    owner = await _seed_user(79100)
-    client.cookies.set(settings.cookie_name, create_access_token(owner.id))
-
-    ms = _mapset_payload()
-    await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
-    await _seed_difficulties(UUID(ms["id"]), 50)
-
-    blocked = await client.post(
-        f"/api/mapsets/{ms['id']}/difficulties",
-        json=_difficulty_payload(),
-        headers=CSRF_HEADERS,
-    )
-    assert blocked.status_code == 409
-
-    list_resp = await client.get(f"/api/mapsets/{ms['id']}/difficulties")
-    diff_id = list_resp.json()[0]["id"]
-    await client.delete(f"/api/difficulties/{diff_id}", headers=CSRF_HEADERS)
-
-    freed = await client.post(
-        f"/api/mapsets/{ms['id']}/difficulties",
-        json=_difficulty_payload(),
-        headers=CSRF_HEADERS,
-    )
-    assert freed.status_code == 201, freed.text
-
-    await _delete_user_and_mapsets(owner.id)
-
-
-@pytest.mark.asyncio
 async def test_delete_difficulty_rejects_when_buffer_full(client: AsyncClient):
-    """409 + buffer-full detail when the owner has 50 pending-deletion slots."""
+    """409 + buffer-full detail when soft-deleting would overflow the pending buffer."""
+    from app.queries import PENDING_STORAGE_LIMIT_BYTES
+
     owner = await _seed_user(79101)
     client.cookies.set(settings.cookie_name, create_access_token(owner.id))
 
     ms = _mapset_payload()
     await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
-    await _seed_difficulties_pending(UUID(ms["id"]), 50)
+    # Park content filling the pending buffer (a soft-deleted ~full diff).
+    await _seed_diff_with_bytes(
+        UUID(ms["id"]),
+        PENDING_STORAGE_LIMIT_BYTES,
+        owner.id,
+        delete_at=_future_delete_at(),
+    )
 
     # Create an additional active diff so we have something to soft-delete.
     new_diff = _difficulty_payload()
@@ -1121,7 +1320,7 @@ async def test_delete_difficulty_rejects_when_buffer_full(client: AsyncClient):
         f"/api/difficulties/{new_diff['id']}", headers=CSRF_HEADERS
     )
     assert resp.status_code == 409
-    assert "Pending-deletion limit reached" in resp.json()["detail"]
+    assert "Pending-deletion storage limit reached" in resp.json()["detail"]
 
     await _delete_user_and_mapsets(owner.id)
 
@@ -1218,25 +1417,25 @@ async def test_restore_difficulty_clears_delete_at(
 
 @pytest.mark.asyncio
 async def test_restore_difficulty_rejects_when_active_quota_full(client: AsyncClient):
-    """If restoring would push the owner past the active quota, return 409."""
+    """If restoring would push the owner past the active storage cap, return 409."""
     owner = await _seed_user(79104)
     client.cookies.set(settings.cookie_name, create_access_token(owner.id))
 
     ms = _mapset_payload()
     await client.post("/api/mapsets", json=ms, headers=CSRF_HEADERS)
 
-    # 49 active diffs in the mapset.
-    await _seed_difficulties(UUID(ms["id"]), 49)
-    # One pending diff in the same mapset (quota = 49, pending = 1).
-    pending_ids = await _seed_difficulties_pending(UUID(ms["id"]), 1)
-    # Fill quota to 50 by adding one more active diff (49 + 1 = 50).
-    await _seed_difficulties(UUID(ms["id"]), 1)
+    # Active storage filled to the cap.
+    await _seed_diffs_to_active_cap(UUID(ms["id"]), owner.id)
+    # A small pending (soft-deleted) diff to attempt restoring.
+    pending_id = await _seed_diff_with_bytes(
+        UUID(ms["id"]), 1024, owner.id, delete_at=_future_delete_at()
+    )
 
     resp = await client.post(
-        f"/api/difficulties/{pending_ids[0]}/restore", headers=CSRF_HEADERS
+        f"/api/difficulties/{pending_id}/restore", headers=CSRF_HEADERS
     )
     assert resp.status_code == 409
-    assert "Active difficulty limit reached" in resp.json()["detail"]
+    assert "Storage limit reached" in resp.json()["detail"]
 
     await _delete_user_and_mapsets(owner.id)
 

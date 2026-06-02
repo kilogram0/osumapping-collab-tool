@@ -15,8 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
-from app.models import Difficulty, MapsetRole, Post, User
-from app.queries import MembershipKind, classify_membership, get_mapset_membership
+from app.models import Difficulty, Mapset, MapsetRole, Post, User
+from app.queries import (
+    ROW_OVERHEAD_BYTES,
+    MembershipKind,
+    assert_active_capacity,
+    classify_membership,
+    get_mapset_membership,
+)
 from app.schemas import PostCreate, PostRead, PostUpdate
 
 router = APIRouter(tags=["posts"])
@@ -80,6 +86,14 @@ async def create_post(
     if classify_membership(membership) != MembershipKind.ACTIVE:
         raise _forbidden()
 
+    # A post costs one row overhead plus its body against the owner's quota.
+    mapset = await db.get(Mapset, difficulty.mapset_id)
+    await assert_active_capacity(
+        db,
+        mapset.owner_id,  # type: ignore[union-attr]
+        ROW_OVERHEAD_BYTES + len(payload.encrypted_body),
+    )
+
     # Verify parent exists and belongs to the same difficulty.
     # Also enforce single-level threading: a reply may not be parented to
     # another reply (parent.parent_id must be null).
@@ -103,6 +117,7 @@ async def create_post(
         parent_id=payload.parent_id,
         tag=payload.tag,
         encrypted_body=payload.encrypted_body,
+        byte_size=len(payload.encrypted_body),
     )
     db.add(post)
     try:
@@ -151,7 +166,16 @@ async def update_post(
     if post.author_id != current_user.id:
         raise _forbidden()
 
+    # Enforce only the *growth* against the cap — posts are many-per-difficulty
+    # with no count cap, so an at-cap owner editing every post upward would
+    # otherwise overshoot in aggregate. Shrinking/equal edits charge nothing.
+    delta = len(payload.encrypted_body) - post.byte_size
+    if delta > 0:
+        mapset = await db.get(Mapset, mapset_id)
+        await assert_active_capacity(db, mapset.owner_id, delta)  # type: ignore[union-attr]
+
     post.encrypted_body = payload.encrypted_body
+    post.byte_size = len(payload.encrypted_body)
     await db.commit()
     await db.refresh(post)
     return post
