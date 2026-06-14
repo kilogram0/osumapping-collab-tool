@@ -5,7 +5,6 @@ call).  Ownership transfer is atomic: demoting the previous owner and
 promoting the new one happen in the same transaction.
 """
 
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -17,7 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
 from app.models import Difficulty, Mapset, MapsetMember, MapsetRole, Section, User
-from app.queries import MembershipKind, classify_membership, get_mapset_membership
+from app.queries import (
+    MembershipKind,
+    classify_membership,
+    forbidden,
+    get_mapset_membership,
+    get_mapset_or_404,
+    require_role,
+    utc_now_naive,
+)
 from app.schemas import (
     MemberInviteRequest,
     MemberRoleUpdate,
@@ -35,19 +42,6 @@ from app.services.rate_limit import (
 )
 
 router = APIRouter(tags=["members"])
-
-
-def _forbidden() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
-
-async def _get_mapset_or_404(db: AsyncSession, mapset_id: UUID) -> Mapset:
-    mapset = await db.get(Mapset, mapset_id)
-    if mapset is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found"
-        )
-    return mapset
 
 
 def _build_member_with_user(member: MapsetMember, user: User) -> MemberWithUserRead:
@@ -76,11 +70,11 @@ async def list_members(
     Available to any member.  Returns each ``MapsetMember`` row joined with
     the corresponding ``User`` (username, avatar_url, osu_id).
     """
-    await _get_mapset_or_404(db, mapset_id)
+    await get_mapset_or_404(db, mapset_id)
 
     caller_membership = await get_mapset_membership(db, mapset_id, current_user.id)
     if classify_membership(caller_membership) == MembershipKind.NONE:
-        raise _forbidden()
+        raise forbidden()
 
     rows = (
         await db.execute(
@@ -113,16 +107,12 @@ async def invite_member(
     Owner-only.  The username is resolved against the local ``User`` table —
     the prospective member must have logged into the forum at least once.
     Returns ``404`` if the username is unknown, ``409`` if they are already a
-    member.  New members are added with role ``modder``.
+    member. New members are added with role ``modder``.
     """
-    await _get_mapset_or_404(db, mapset_id)
+    await get_mapset_or_404(db, mapset_id)
 
     caller_membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if (
-        classify_membership(caller_membership) != MembershipKind.ACTIVE
-        or caller_membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(caller_membership, MapsetRole.owner)
 
     # osu! usernames are case-insensitive on the platform, so match likewise.
     target_user = (
@@ -231,14 +221,10 @@ async def update_member_role(
       to ``mapper`` and updates ``Mapset.owner_id`` in one transaction.
     - Target not a member → ``404``.
     """
-    mapset = await _get_mapset_or_404(db, mapset_id)
+    mapset = await get_mapset_or_404(db, mapset_id)
 
     caller_membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if (
-        classify_membership(caller_membership) != MembershipKind.ACTIVE
-        or caller_membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(caller_membership, MapsetRole.owner)
 
     target_membership = await get_mapset_membership(db, mapset_id, user_id)
     if target_membership is None or target_membership.kicked_at is not None:
@@ -294,14 +280,10 @@ async def remove_member(
     The member row is soft-deleted: ``kicked_at`` is set rather than hard-deleting
     the row, granting read-only access until the grace period expires.
     """
-    await _get_mapset_or_404(db, mapset_id)
+    await get_mapset_or_404(db, mapset_id)
 
     caller_membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if (
-        classify_membership(caller_membership) != MembershipKind.ACTIVE
-        or caller_membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(caller_membership, MapsetRole.owner)
 
     if user_id == current_user.id:
         raise HTTPException(
@@ -315,7 +297,7 @@ async def remove_member(
             status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
         )
 
-    target_membership.kicked_at = datetime.utcnow()
+    target_membership.kicked_at = utc_now_naive()
     # Clear any section assignments the kicked member held within this mapset.
     await db.execute(
         sa_update(Section)

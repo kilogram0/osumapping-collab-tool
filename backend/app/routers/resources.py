@@ -15,13 +15,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
-from app.models import Mapset, MapsetResource, MapsetRole, User
+from app.models import MapsetResource, MapsetRole, User
 from app.queries import (
     ROW_OVERHEAD_BYTES,
     MembershipKind,
     assert_active_capacity,
     classify_membership,
+    forbidden,
     get_mapset_membership,
+    get_mapset_or_404,
+    require_role,
 )
 from app.schemas import MapsetResourceCreate, MapsetResourceRead
 
@@ -37,11 +40,7 @@ async def require_mapset_owner(
 ) -> None:
     """Raise 403 if the current user is not an active owner of the mapset."""
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if (
-        classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    require_role(membership, MapsetRole.owner)
 
 
 @router.get("/{mapset_id}/resources", response_model=list[MapsetResourceRead])
@@ -51,13 +50,11 @@ async def list_resources(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[MapsetResource]:
     """List all resources for a mapset. Accessible to all members (including ghosts)."""
-    mapset = await db.get(Mapset, mapset_id)
-    if mapset is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
+    await get_mapset_or_404(db, mapset_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     if classify_membership(membership) == MembershipKind.NONE:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        raise forbidden()
 
     result = await db.execute(
         select(MapsetResource)
@@ -92,14 +89,14 @@ async def create_resource(
 
     # A resource costs one row overhead + its encrypted fields against the
     # owner's storage quota.
-    mapset = await db.get(Mapset, mapset_id)
+    mapset = await get_mapset_or_404(db, mapset_id)
     incoming = (
         ROW_OVERHEAD_BYTES
         + len(payload.encrypted_name)
         + len(payload.encrypted_url)
         + (len(payload.encrypted_icon) if payload.encrypted_icon else 0)
     )
-    await assert_active_capacity(db, mapset.owner_id, incoming)  # type: ignore[union-attr]
+    await assert_active_capacity(db, mapset.owner_id, incoming)
 
     resource = MapsetResource(
         id=payload.id,

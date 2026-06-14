@@ -1,6 +1,6 @@
 """Shared DB query helpers used across multiple routers."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from uuid import UUID
 
@@ -15,15 +15,27 @@ from app.models import (
     Mapset,
     MapsetMember,
     MapsetResource,
+    MapsetRole,
     Post,
     Section,
     SectionOsuVersion,
 )
 
+
 GHOST_GRACE_DAYS = 7
 
 # Days a soft-deleted difficulty lingers before hard deletion.
 DIFFICULTY_DELETION_GRACE_DAYS = 7
+
+
+def utc_now_naive() -> datetime:
+    """Return the current UTC time as a timezone-naive datetime.
+
+    All database datetime columns store naive UTC values. Centralising this
+    construction removes the risk of drift between ``datetime.utcnow()`` and
+    ``datetime.now(timezone.utc).replace(tzinfo=None)`` on security boundaries.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class MembershipKind(Enum):
@@ -38,10 +50,93 @@ def classify_membership(member: MapsetMember | None) -> MembershipKind:
         return MembershipKind.NONE
     if member.kicked_at is None:
         return MembershipKind.ACTIVE
-    if member.kicked_at + timedelta(days=GHOST_GRACE_DAYS) > datetime.utcnow():
+    if member.kicked_at + timedelta(days=GHOST_GRACE_DAYS) > utc_now_naive():
         return MembershipKind.GHOST
     # Row exists but grace period has expired — treat as no membership until purged.
     return MembershipKind.NONE
+
+
+def forbidden() -> HTTPException:
+    """Standard 403 Forbidden response used by all routers."""
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+def require_active(member: MapsetMember | None) -> MapsetMember:
+    """Require an active mapset membership and return the narrowed member."""
+    if member is None or classify_membership(member) != MembershipKind.ACTIVE:
+        raise forbidden()
+    return member
+
+
+def require_role(member: MapsetMember | None, *roles: MapsetRole) -> MapsetMember:
+    """Require an active membership whose role is one of *roles."""
+    if member is None or classify_membership(member) != MembershipKind.ACTIVE:
+        raise forbidden()
+    if member.role not in roles:
+        raise forbidden()
+    return member
+
+
+async def get_mapset_or_404(db: AsyncSession, mapset_id: UUID) -> Mapset:
+    """Load a mapset or raise 404."""
+    mapset = await db.get(Mapset, mapset_id)
+    if mapset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found"
+        )
+    return mapset
+
+
+async def get_difficulty_or_404(db: AsyncSession, difficulty_id: UUID) -> Difficulty:
+    """Load a difficulty or raise 404."""
+    difficulty = await db.get(Difficulty, difficulty_id)
+    if difficulty is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found"
+        )
+    return difficulty
+
+
+async def get_section_or_404(
+    db: AsyncSession, difficulty_id: UUID, section_id: UUID
+) -> tuple[Section, UUID]:
+    """Load a section verified to belong to difficulty; return (section, mapset_id).
+
+    A single JOIN avoids a second round-trip to fetch the difficulty just for
+    its mapset_id — the parent row is already being touched to verify the path.
+    """
+    row = (
+        await db.execute(
+            select(Section, Difficulty.mapset_id)
+            .join(Difficulty, Difficulty.id == Section.difficulty_id)
+            .where(Section.id == section_id, Section.difficulty_id == difficulty_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Section not found"
+        )
+    section, mapset_id = row
+    return section, mapset_id
+
+
+async def get_post_or_404(
+    db: AsyncSession, difficulty_id: UUID, post_id: UUID
+) -> tuple[Post, UUID]:
+    """Load a post verified to belong to difficulty; return (post, mapset_id)."""
+    row = (
+        await db.execute(
+            select(Post, Difficulty.mapset_id)
+            .join(Difficulty, Difficulty.id == Post.difficulty_id)
+            .where(Post.id == post_id, Post.difficulty_id == difficulty_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
+        )
+    post, mapset_id = row
+    return post, mapset_id
 
 
 # ---------------------------------------------------------------------------

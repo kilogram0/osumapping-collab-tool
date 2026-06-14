@@ -2626,8 +2626,8 @@ async def test_assign_section_non_member_cannot_assign(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_assign_section_owner_can_assign_to_modder(client: AsyncClient):
-    """Owner can assign a section to a modder (e.g. newly invited member who hasn't changed role)."""
+async def test_assign_section_owner_cannot_assign_to_modder(client: AsyncClient):
+    """Owner cannot assign a section to a modder: modders cannot upload .osu files."""
     owner = await _seed_user(80038)
     modder = await _seed_user(80039)
 
@@ -2649,8 +2649,8 @@ async def test_assign_section_owner_can_assign_to_modder(client: AsyncClient):
         json={"user_id": str(modder.id)},
         headers=CSRF_HEADERS,
     )
-    assert resp.status_code == 200
-    assert resp.json()["assigned_to"] == str(modder.id)
+    assert resp.status_code == 422
+    assert "Modders cannot be assigned sections" in resp.json()["detail"]
 
     await _delete_user_and_mapsets(owner.id)
     await _delete_user_and_mapsets(modder.id)

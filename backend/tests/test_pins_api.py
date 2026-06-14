@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
 from app.models import Mapset, MapsetMember, MapsetRole, User
+from app.queries import utc_now_naive
 from app.services.auth_service import create_access_token
 from tests.conftest import test_engine
 
@@ -282,7 +283,7 @@ async def test_ghost_cannot_see_pin_created_after_kick(client: AsyncClient):
     try:
         # Kicked 1 day ago — still inside the 7-day grace window, so GHOST.
         await _add_member(
-            ms_id, ghost.id, MapsetRole.modder, kicked_at=datetime.utcnow() - timedelta(days=1)
+            ms_id, ghost.id, MapsetRole.modder, kicked_at=utc_now_naive() - timedelta(days=1)
         )
         # Owner pins a version *now* — i.e. after the ghost's kicked_at.
         payload = _pin_payload()

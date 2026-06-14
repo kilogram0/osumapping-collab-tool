@@ -16,13 +16,16 @@ from sqlalchemy.orm import defer
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
-from app.models import Difficulty, DifficultyPin, Mapset, MapsetRole, User
+from app.models import DifficultyPin, Mapset, MapsetRole, User
 from app.queries import (
     ROW_OVERHEAD_BYTES,
     MembershipKind,
     assert_active_capacity,
     classify_membership,
+    forbidden,
+    get_difficulty_or_404,
     get_mapset_membership,
+    require_role,
 )
 from app.schemas import (
     DifficultyPinContentRead,
@@ -31,20 +34,6 @@ from app.schemas import (
 )
 
 router = APIRouter(tags=["pins"])
-
-
-def _forbidden() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
-
-async def _get_difficulty(db: AsyncSession, difficulty_id: UUID) -> Difficulty:
-    """Load a difficulty or raise 404."""
-    difficulty = await db.get(Difficulty, difficulty_id)
-    if difficulty is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found"
-        )
-    return difficulty
 
 
 @router.post(
@@ -60,14 +49,10 @@ async def create_pin(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> DifficultyPin:
     """Create a pinned version of a difficulty. Permitted for ``owner`` only."""
-    difficulty = await _get_difficulty(db, difficulty_id)
+    difficulty = await get_difficulty_or_404(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if (
-        classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(membership, MapsetRole.owner)
 
     mapset = await db.get(Mapset, difficulty.mapset_id)
     await assert_active_capacity(
@@ -109,12 +94,12 @@ async def list_pins(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[DifficultyPin]:
     """List pin metadata (no content) for a difficulty. Any member may read."""
-    difficulty = await _get_difficulty(db, difficulty_id)
+    difficulty = await get_difficulty_or_404(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
     kind = classify_membership(membership)
     if kind == MembershipKind.NONE:
-        raise _forbidden()
+        raise forbidden()
 
     # defer(encrypted_content): each pin holds a full assembled .osu (~MB-scale
     # ciphertext) that DifficultyPinRead discards anyway. Deferring keeps the
@@ -145,12 +130,12 @@ async def get_pin(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> DifficultyPin:
     """Fetch a single pin including its assembled .osu ciphertext."""
-    difficulty = await _get_difficulty(db, difficulty_id)
+    difficulty = await get_difficulty_or_404(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
     kind = classify_membership(membership)
     if kind == MembershipKind.NONE:
-        raise _forbidden()
+        raise forbidden()
 
     pin = (
         await db.execute(
@@ -185,14 +170,10 @@ async def delete_pin(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     """Delete a pin. Permitted for ``owner`` only."""
-    difficulty = await _get_difficulty(db, difficulty_id)
+    difficulty = await get_difficulty_or_404(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if (
-        classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(membership, MapsetRole.owner)
 
     pin = (
         await db.execute(

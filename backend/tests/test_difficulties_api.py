@@ -17,6 +17,7 @@ from app.models import (
     SectionOsuVersion,
     User,
 )
+from app.queries import utc_now_naive
 from app.services.auth_service import create_access_token
 from tests.conftest import test_engine
 
@@ -1237,9 +1238,9 @@ async def test_resource_rejected_when_storage_full(client: AsyncClient):
 
 def _future_delete_at(offset_days: float = 7.0):
     """A naive-UTC timestamp ``offset_days`` in the future for seeding pending rows."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta
 
-    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=offset_days)
+    return utc_now_naive() + timedelta(days=offset_days)
 
 
 @pytest.mark.asyncio
@@ -1261,7 +1262,7 @@ async def test_delete_difficulty_sets_delete_at(
     assert resp.status_code == 200
     body = resp.json()
     delete_at = datetime.fromisoformat(body["delete_at"])
-    expected = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=7)
+    expected = utc_now_naive() + timedelta(days=7)
     # Allow a generous skew for slow CI.
     assert abs((delete_at - expected).total_seconds()) < 60
 
@@ -1511,7 +1512,7 @@ async def test_get_difficulty_ghost_cannot_read_post_kick_posts(
     factory = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
-    kick_time = datetime.now(timezone.utc).replace(tzinfo=None)
+    kick_time = utc_now_naive()
     async with factory() as session:
         session.add(
             MapsetMember(

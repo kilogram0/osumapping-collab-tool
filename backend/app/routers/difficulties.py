@@ -5,7 +5,7 @@ verbatim.  Every route is member-gated: non-members and insufficiently-
 privileged members both receive ``403``.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -25,8 +25,13 @@ from app.queries import (
     assert_active_capacity,
     assert_pending_capacity,
     classify_membership,
+    forbidden,
+    get_difficulty_or_404,
     get_difficulty_storage_cost,
     get_mapset_membership,
+    get_mapset_or_404,
+    require_role,
+    utc_now_naive,
 )
 from app.schemas import (
     DifficultyCreate,
@@ -36,10 +41,6 @@ from app.schemas import (
 )
 
 router = APIRouter(tags=["difficulties"])
-
-
-def _forbidden() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 @router.post(
@@ -61,16 +62,10 @@ async def create_difficulty(
     it are owner-only — a mapper contributes a guest difficulty whose
     structure the owner curates.
     """
-    mapset = await db.get(Mapset, mapset_id)
-    if mapset is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
+    mapset = await get_mapset_or_404(db, mapset_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if (
-        classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role not in (MapsetRole.owner, MapsetRole.mapper)  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(membership, MapsetRole.owner, MapsetRole.mapper)
 
     # Active-storage check: a new difficulty row costs one row overhead against
     # the owner's storage quota (its content is added later by uploads).
@@ -115,14 +110,12 @@ async def list_difficulties(
     are never granted ``include_pending`` — they see only active rows that
     existed at their kick time.
     """
-    mapset = await db.get(Mapset, mapset_id)
-    if mapset is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
+    await get_mapset_or_404(db, mapset_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     kind = classify_membership(membership)
     if kind == MembershipKind.NONE:
-        raise _forbidden()
+        raise forbidden()
 
     show_pending = (
         include_pending
@@ -168,7 +161,7 @@ async def get_difficulty(
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
     kind = classify_membership(membership)
     if kind == MembershipKind.NONE:
-        raise _forbidden()
+        raise forbidden()
 
     if kind == MembershipKind.GHOST:
         kicked_at = membership.kicked_at  # type: ignore[union-attr]
@@ -215,16 +208,10 @@ async def update_difficulty(
 
     Permitted for ``owner`` role only.
     """
-    difficulty = await db.get(Difficulty, difficulty_id)
-    if difficulty is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
+    difficulty = await get_difficulty_or_404(db, difficulty_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if (
-        classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(membership, MapsetRole.owner)
 
     if "encrypted_name" in payload.model_fields_set:
         difficulty.encrypted_name = payload.encrypted_name
@@ -251,20 +238,12 @@ async def delete_difficulty(
     The owner can restore it via ``POST /difficulties/{id}/restore`` until
     then. Subject to the per-owner pending-deletion buffer.
     """
-    difficulty = await db.get(Difficulty, difficulty_id)
-    if difficulty is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
+    difficulty = await get_difficulty_or_404(db, difficulty_id)
 
-    mapset = await db.get(Mapset, difficulty.mapset_id)
-    if mapset is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
+    mapset = await get_mapset_or_404(db, difficulty.mapset_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if (
-        classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(membership, MapsetRole.owner)
 
     if difficulty.delete_at is not None:
         # Already pending — return the current row idempotently.
@@ -277,7 +256,7 @@ async def delete_difficulty(
 
     # Use SA Core UPDATE to avoid bumping updated_at — this is a lifecycle
     # transition, not a content edit.
-    new_delete_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+    new_delete_at = utc_now_naive() + timedelta(
         days=DIFFICULTY_DELETION_GRACE_DAYS
     )
     await db.execute(
@@ -306,20 +285,12 @@ async def restore_difficulty(
     restoring would push the owner over ``STORAGE_LIMIT_BYTES``, the request is
     rejected with 409 and the row stays in pending state.
     """
-    difficulty = await db.get(Difficulty, difficulty_id)
-    if difficulty is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found")
+    difficulty = await get_difficulty_or_404(db, difficulty_id)
 
-    mapset = await db.get(Mapset, difficulty.mapset_id)
-    if mapset is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapset not found")
+    mapset = await get_mapset_or_404(db, difficulty.mapset_id)
 
     membership = await get_mapset_membership(db, difficulty.mapset_id, current_user.id)
-    if (
-        classify_membership(membership) != MembershipKind.ACTIVE
-        or membership.role != MapsetRole.owner  # type: ignore[union-attr]
-    ):
-        raise _forbidden()
+    require_role(membership, MapsetRole.owner)
 
     if difficulty.delete_at is None:
         # Already active — idempotent.

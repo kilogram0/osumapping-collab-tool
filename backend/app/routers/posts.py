@@ -9,56 +9,27 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_csrf_protection
-from app.models import Difficulty, Mapset, MapsetRole, Post, User
+from app.models import Mapset, MapsetRole, Post, User
 from app.queries import (
     ROW_OVERHEAD_BYTES,
     MembershipKind,
     assert_active_capacity,
     classify_membership,
+    forbidden,
+    get_difficulty_or_404,
     get_mapset_membership,
+    get_post_or_404,
+    require_active,
 )
 from app.schemas import PostCreate, PostRead, PostUpdate
 
 router = APIRouter(tags=["posts"])
-
-
-def _forbidden() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
-
-async def _get_difficulty(db: AsyncSession, difficulty_id: UUID) -> Difficulty:
-    """Load a difficulty or raise 404."""
-    difficulty = await db.get(Difficulty, difficulty_id)
-    if difficulty is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Difficulty not found"
-        )
-    return difficulty
-
-
-async def _get_post(
-    db: AsyncSession, difficulty_id: UUID, post_id: UUID
-) -> tuple[Post, UUID]:
-    """Load a post verified to belong to difficulty; return (post, mapset_id)."""
-    row = (
-        await db.execute(
-            select(Post, Difficulty.mapset_id)
-            .join(Difficulty, Difficulty.id == Post.difficulty_id)
-            .where(Post.id == post_id, Post.difficulty_id == difficulty_id)
-        )
-    ).one_or_none()
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
-        )
-    post, mapset_id = row
-    return post, mapset_id
 
 
 @router.post(
@@ -78,13 +49,12 @@ async def create_post(
     Any mapset member may create posts.  If ``parent_id`` is supplied, it must
     reference an existing post in the *same* difficulty.
     """
-    difficulty = await _get_difficulty(db, difficulty_id)
+    difficulty = await get_difficulty_or_404(db, difficulty_id)
 
     membership = await get_mapset_membership(
         db, difficulty.mapset_id, current_user.id
     )
-    if classify_membership(membership) != MembershipKind.ACTIVE:
-        raise _forbidden()
+    require_active(membership)
 
     # A post costs one row overhead plus its body against the owner's quota.
     mapset = await db.get(Mapset, difficulty.mapset_id)
@@ -157,14 +127,13 @@ async def update_post(
     Only the original ``author_id`` may edit a post.  Returns ``403`` for
     non-authors (including the mapset owner).
     """
-    post, mapset_id = await _get_post(db, difficulty_id, post_id)
+    post, mapset_id = await get_post_or_404(db, difficulty_id, post_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
-    if classify_membership(membership) != MembershipKind.ACTIVE:
-        raise _forbidden()
+    require_active(membership)
 
     if post.author_id != current_user.id:
-        raise _forbidden()
+        raise forbidden()
 
     # Enforce only the *growth* against the cap — posts are many-per-difficulty
     # with no count cap, so an at-cap owner editing every post upward would
@@ -197,17 +166,17 @@ async def delete_post(
     Permitted for the original author **or** the mapset ``owner``.  Replies
     are cascade-deleted at the DB level via ``ondelete='CASCADE'``.
     """
-    post, mapset_id = await _get_post(db, difficulty_id, post_id)
+    post, mapset_id = await get_post_or_404(db, difficulty_id, post_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     kind = classify_membership(membership)
     if kind == MembershipKind.NONE:
-        raise _forbidden()
+        raise forbidden()
     if kind == MembershipKind.GHOST or (
         post.author_id != current_user.id
         and membership.role != MapsetRole.owner  # type: ignore[union-attr]
     ):
-        raise _forbidden()
+        raise forbidden()
 
     await db.execute(sa_delete(Post).where(Post.id == post_id))
     await db.commit()

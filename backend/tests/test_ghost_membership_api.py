@@ -12,7 +12,7 @@ Tests cover:
 - Ghost membership purge task deletes expired rows
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import settings
 from app.main import _purge_expired_ghost_memberships
 from app.models import Difficulty, Mapset, MapsetMember, MapsetRole, User
+from app.queries import utc_now_naive
 from app.services.auth_service import create_access_token
 from tests.conftest import test_engine
 
@@ -481,7 +482,7 @@ async def _seed_ghost(
                 mapset_id=UUID(mapset_id),
                 user_id=modder.id,
                 role=MapsetRole.modder,
-                kicked_at=datetime.utcnow(),
+                kicked_at=utc_now_naive(),
             )
         )
         await session.commit()
@@ -625,7 +626,7 @@ async def test_list_kicked_mapsets_excludes_expired_grace(
                     mapset_id=UUID(mapset_id),
                     user_id=modder.id,
                     role=MapsetRole.modder,
-                    kicked_at=datetime.utcnow() - timedelta(days=8),
+                    kicked_at=utc_now_naive() - timedelta(days=8),
                 )
             )
             await session.commit()
@@ -659,7 +660,7 @@ async def test_purge_removes_expired_ghost_memberships(owner_and_mapset):
                     mapset_id=UUID(mapset_id),
                     user_id=modder.id,
                     role=MapsetRole.modder,
-                    kicked_at=datetime.utcnow() - timedelta(days=8),
+                    kicked_at=utc_now_naive() - timedelta(days=8),
                 )
             )
             await session.commit()
@@ -696,7 +697,7 @@ async def test_purge_preserves_active_ghost_memberships(owner_and_mapset):
                     mapset_id=UUID(mapset_id),
                     user_id=modder.id,
                     role=MapsetRole.modder,
-                    kicked_at=datetime.utcnow() - timedelta(days=3),
+                    kicked_at=utc_now_naive() - timedelta(days=3),
                 )
             )
             await session.commit()

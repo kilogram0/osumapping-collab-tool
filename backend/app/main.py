@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import FastAPI
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.config import settings
 from app.database import engine
 from app.models import Difficulty, Mapset, MapsetMember
-from app.queries import GHOST_GRACE_DAYS
+from app.queries import GHOST_GRACE_DAYS, utc_now_naive
 from app.routers import auth, difficulties, mapsets, members, pins, posts, resources, sections
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ async def _purge_expired_mapsets(db_engine: AsyncEngine | None = None) -> None:
     async with AsyncSession(db_engine or engine) as session:
         await session.execute(
             sa_delete(Mapset).where(
-                Mapset.delete_at <= datetime.now(timezone.utc).replace(tzinfo=None)
+                Mapset.delete_at <= utc_now_naive()
             )
         )
         await session.commit()
@@ -51,7 +51,7 @@ async def _purge_expired_difficulties(db_engine: AsyncEngine | None = None) -> N
         await session.execute(
             sa_delete(Difficulty).where(
                 Difficulty.delete_at.is_not(None),
-                Difficulty.delete_at <= datetime.now(timezone.utc).replace(tzinfo=None),
+                Difficulty.delete_at <= utc_now_naive(),
             )
         )
         await session.commit()
@@ -59,7 +59,7 @@ async def _purge_expired_difficulties(db_engine: AsyncEngine | None = None) -> N
 
 async def _purge_expired_ghost_memberships(db_engine: AsyncEngine | None = None) -> None:
     """Delete MapsetMember rows whose kicked grace period has expired."""
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=GHOST_GRACE_DAYS)
+    cutoff = utc_now_naive() - timedelta(days=GHOST_GRACE_DAYS)
     async with AsyncSession(db_engine or engine) as session:
         await session.execute(
             sa_delete(MapsetMember).where(
