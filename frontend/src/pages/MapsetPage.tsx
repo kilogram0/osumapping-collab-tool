@@ -10,6 +10,7 @@ import DifficultyDropdown from '../components/DifficultyDropdown';
 import EditMapsetModal from '../components/EditMapsetModal';
 import EditSectionModal from '../components/EditSectionModal';
 import SplitSectionModal from '../components/SplitSectionModal';
+import FrostedPanel from '../components/FrostedPanel';
 import FullDifficultyUploadButton from '../components/FullDifficultyUploadButton';
 import ImportBookmarksButton from '../components/ImportBookmarksButton';
 import TopBar from '../components/TopBar';
@@ -683,23 +684,23 @@ export default function MapsetPage() {
   if (!id) return null;
   if (mapsetLoading) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20">
+      <div className="min-h-screen text-white px-8 pb-8 pt-20">
         <TopBar left={<Skeleton variant="text" width="10rem" />} />
-        <div className="max-w-6xl mx-auto space-y-6">
+        <FrostedPanel className="max-w-6xl mx-auto mt-6 space-y-6">
           <Skeleton variant="rect" height="4rem" />
           <Skeleton variant="rect" height="8rem" />
           <Skeleton variant="rect" height="16rem" />
-        </div>
+        </FrostedPanel>
       </div>
     );
   }
   if (mapsetError || !mapset) {
-    return <div className="min-h-screen bg-gray-900 text-white p-8 text-red-400">{t('mapsetPage.notFound')}</div>;
+    return <div className="min-h-screen text-white p-8 text-red-400">{t('mapsetPage.notFound')}</div>;
   }
 
   if (!unlocked) {
     return (
-      <div className="min-h-screen bg-gray-900">
+      <div className="min-h-screen">
         <PassphraseModal
           mapset={mapset}
           onSuccess={() => {}}
@@ -726,7 +727,7 @@ export default function MapsetPage() {
     : decryptedPosts;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20 animate-fade-in">
+    <div className="min-h-screen text-white px-8 pb-8 pt-20 animate-fade-in">
       <TopBar
         left={
           <button
@@ -738,7 +739,7 @@ export default function MapsetPage() {
           </button>
         }
       />
-      <div className="max-w-6xl mx-auto">
+      <FrostedPanel className="max-w-6xl mx-auto mt-6">
         {actualIsOwner && (emulatedRole || emulateGhost) && (
           <div
             role="status"
@@ -1009,7 +1010,7 @@ export default function MapsetPage() {
             />
           </div>
         )}
-      </div>
+      </FrostedPanel>
 
       {showCreateDifficulty && (
         <CreateDifficultyModal

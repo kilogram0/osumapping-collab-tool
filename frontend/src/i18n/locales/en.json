@@ -20,7 +20,8 @@
     "back": "Back",
     "you": "(you)",
     "required": "*",
-    "language": "Language"
+    "language": "Language",
+    "toggleBackground": "Toggle Animated Background"
   },
   "auth": {
     "loading": "Loading"

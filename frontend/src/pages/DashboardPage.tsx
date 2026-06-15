@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { Mapset } from '../api/endpoints';
 import CreateMapsetModal from '../components/CreateMapsetModal';
+import FrostedPanel from '../components/FrostedPanel';
 import MapsetCard from '../components/MapsetCard';
 import TopBar from '../components/TopBar';
 import PassphraseModal from '../components/PassphraseModal';
@@ -39,9 +40,9 @@ export default function DashboardPage() {
   }, [mapsets]);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20">
+    <div className="min-h-screen text-white px-8 pb-8 pt-20">
       <TopBar />
-      <div className="max-w-4xl mx-auto">
+      <FrostedPanel className="max-w-4xl mx-auto mt-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold text-blue-400">{t('dashboard.title')}</h1>
           <button
@@ -155,7 +156,7 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
-      </div>
+      </FrostedPanel>
 
       {showCreate && (
         <CreateMapsetModal

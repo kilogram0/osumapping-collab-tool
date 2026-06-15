@@ -106,14 +106,14 @@ export default function Modal({
       role="dialog"
       aria-modal="true"
       aria-labelledby={ariaLabelledBy}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={handleBackdropClick}
       onKeyDown={handleKeyDown}
     >
       <div
         ref={panelRef}
         tabIndex={-1}
-        className={`bg-surface-raised border border-surface-border rounded-lg shadow-xl w-full ${maxWidthClasses[maxWidth]} max-h-[90vh] overflow-y-auto`}
+        className={`bg-surface-raised/85 backdrop-blur-xl border border-surface-border rounded-lg shadow-xl w-full ${maxWidthClasses[maxWidth]} max-h-[90vh] overflow-y-auto`}
       >
         {children}
       </div>

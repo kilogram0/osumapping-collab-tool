@@ -20,7 +20,8 @@
     "back": "Enrere",
     "you": "(tu)",
     "required": "*",
-    "language": "Idioma"
+    "language": "Idioma",
+    "toggleBackground": "Deshabilita el fons animat"
   },
   "auth": {
     "loading": "S'està carregant"

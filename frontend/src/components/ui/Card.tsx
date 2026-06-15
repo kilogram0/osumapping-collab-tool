@@ -14,7 +14,7 @@ interface CardProps {
 export default function Card({ children, className = '', flat = false }: CardProps) {
   return (
     <div
-      className={`${flat ? 'bg-surface-panel' : 'bg-surface-raised border border-surface-border'} rounded-lg ${className}`}
+      className={`${flat ? 'bg-surface-panel/80' : 'bg-surface-raised/80 border border-surface-border'} backdrop-blur-md rounded-lg ${className}`}
     >
       {children}
     </div>

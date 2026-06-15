@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
 import { ToastProvider } from './contexts/ToastContext'
 import ToastContainer from './components/ToastContainer'
+import TrianglesBackground from './components/TrianglesBackground'
 import { useAuth } from './hooks/useAuth'
 
 const MapsetPage = lazy(() => import('./pages/MapsetPage'))
@@ -16,7 +17,7 @@ function AuthLoading() {
     <div
       role="status"
       aria-label={t('auth.loading')}
-      className="min-h-screen bg-gray-900 flex items-center justify-center"
+      className="min-h-screen flex items-center justify-center"
     >
       <div className="h-10 w-10 border-2 border-gray-600 border-t-blue-400 rounded-full animate-spin" />
     </div>
@@ -81,6 +82,7 @@ function App() {
       }}
     >
       <ToastProvider>
+        <TrianglesBackground />
         <AppRoutes />
         <ToastContainer />
       </ToastProvider>

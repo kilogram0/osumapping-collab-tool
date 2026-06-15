@@ -6,10 +6,19 @@ vi.mock('./LanguageSwitcher', () => ({
   default: () => <div data-testid="language-switcher" />,
 }));
 
+vi.mock('./BackgroundToggle', () => ({
+  default: () => <div data-testid="background-toggle" />,
+}));
+
 describe('TopBar', () => {
   it('renders the language switcher', () => {
     render(<TopBar />);
     expect(screen.getByTestId('language-switcher')).toBeInTheDocument();
+  });
+
+  it('renders the background toggle', () => {
+    render(<TopBar />);
+    expect(screen.getByTestId('background-toggle')).toBeInTheDocument();
   });
 
   it('renders left content when provided', () => {

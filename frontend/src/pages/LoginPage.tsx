@@ -7,12 +7,12 @@ function LoginPage() {
   const { t } = useTranslation()
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+    <div className="min-h-screen text-white flex items-center justify-center">
       <div className="text-center space-y-6 max-w-md px-4">
         <h1 className="text-4xl font-bold text-blue-400">{t('login.title')}</h1>
         <p className="text-gray-400">{t('login.tagline')}</p>
 
-        <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-sm text-gray-300 text-left space-y-2">
+        <div className="bg-gray-800/75 backdrop-blur-md border border-gray-700 rounded-lg p-4 text-sm text-gray-300 text-left space-y-2">
           <p className="font-semibold text-white">{t('login.e2eeHeading')}</p>
           <p>{t('login.e2eeBody')}</p>
           <a

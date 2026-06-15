@@ -3,6 +3,22 @@
 @tailwind utilities;
 
 @layer base {
+  /* Dark base behind the fixed TrianglesBackground canvas. Acts as the
+   * fallback page color before the canvas paints (and the whole background
+   * when the canvas is unsupported), so transparent page roots never flash
+   * white.
+   *
+   * This MUST stay on <html> only — do not add `body`. The canvas is
+   * position:fixed with z-index:-10, so it paints as a negative-z child of
+   * the root stacking context: after <html>'s background but BEFORE the
+   * backgrounds of in-flow blocks like <body>. <html>'s background is
+   * special-cased to fill the viewport at the very back, so it sits behind
+   * the canvas; an opaque <body> background would paint on top of the canvas
+   * and hide the gradient + triangles entirely (flat dark blue, no motion). */
+  html {
+    background-color: #0b0f17;
+  }
+
   /* Ensure every interactive element gets a consistent, visible focus ring.
    * Components that use the Button/Input/Modal primitives get the same ring
    * via Tailwind utilities; this global fallback covers legacy buttons and
