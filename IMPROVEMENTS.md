@@ -143,9 +143,9 @@
 - **Fix:** ~~Refresh both diagrams, or replace them with a "generated from tree" note so they don't pretend to be exhaustive.~~ ✅ DONE
 
 ### 16. Dependency & supply-chain items still open from the prior audit — ✅ PARTIAL (2026-06-15)
-> Bumped `vite` to `^6.0.0`, `@typescript-eslint/*` to `^8.0.0`, `eslint` to `^8.57.0`, pinned `eslint-plugin-react-refresh` to `0.4.5`, changed the Vite dev host from `0.0.0.0` to `127.0.0.1`, created `frontend/.eslintrc.cjs`, and ran `npm audit --omit=dev` until it reported `0` vulnerabilities. Dev-only vulnerabilities in `esbuild`/`vitest` remain, as fixing them requires a major Vitest upgrade.
+> Bumped `vite` to `^6.0.0`, `@typescript-eslint/*` to `^8.0.0`, `eslint` to `^8.57.0`, pinned `eslint-plugin-react-refresh` to `0.4.5`, created `frontend/.eslintrc.cjs`, and ran `npm audit --omit=dev` until it reported `0` vulnerabilities. Dev-only vulnerabilities in `esbuild`/`vitest` remain, as fixing them requires a major Vitest upgrade.
 - **Dev vulns:** `vite` and `@typescript-eslint/*` bumped; `npm audit --omit=dev` is clean. ✅ DONE
-- **Vite dev host:** `package.json` dev script now uses `--host 127.0.0.1`. ✅ DONE
+- **Vite dev host:** keep `--host 0.0.0.0` in the dev script. The server runs **inside** the frontend container, so Vite must bind all container interfaces or Docker's port-forward has nothing to reach (binding `127.0.0.1` caused a connection-reset on the host). Host exposure is already restricted at the compose layer by `ports: "127.0.0.1:5173:5173"`, which is where the hardening belongs. — *not applicable (compose-layer concern)*
 - **Docker mutable tags:** audit M2 (pin to digests before prod). — *still open*
 - **CI:** confirm `.github/workflows` runs `pytest`, `npm test`, `npm audit --omit=dev`, and a secret scan (audit I1). — *still open*
 
