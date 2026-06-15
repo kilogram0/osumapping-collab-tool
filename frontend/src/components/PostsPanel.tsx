@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Skeleton } from './ui';
 import type { Post, MemberWithUser } from '../api/endpoints';
 import type { DecryptedPost } from '../types';
 import PostCard from './PostCard';
@@ -279,7 +280,13 @@ export default function PostsPanel({
         </div>
       )}
 
-      {loading && <p className="text-gray-400">{t('mapsetPage.loadingPosts')}</p>}
+      {loading && (
+        <div className="space-y-3" aria-busy="true" aria-label={t('mapsetPage.loadingPosts')}>
+          <Skeleton variant="rect" height="4rem" />
+          <Skeleton variant="rect" height="4rem" />
+          <Skeleton variant="rect" height="4rem" />
+        </div>
+      )}
 
       <div className="space-y-4">
         {visibleTopLevel.map((post) => renderRootPostNode(post))}

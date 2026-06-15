@@ -117,6 +117,8 @@ export default function OsuUploadButton({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
+    // handleCancelModal is declared later in the component but is stable (empty deps).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalOpen]);
 
   const performUpload = useCallback(
@@ -178,7 +180,7 @@ export default function OsuUploadButton({
         return false;
       }
     },
-    [difficultyId, sectionId, mapsetId, queryClient],
+    [difficultyId, sectionId, mapsetId, queryClient, t],
   );
 
   /**
@@ -362,7 +364,7 @@ export default function OsuUploadButton({
         setUploadState({ loading: false, error: message, success: false, warning: null });
       }
     },
-    [unlocked, sectionRange, proceedAfterSanitize, t],
+    [unlocked, sectionRange, proceedAfterSanitize, t, assignedToUserId, assignedToUsername, currentUserId],
   );
 
   const handleConfirmSanitize = useCallback(async () => {

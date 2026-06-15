@@ -30,7 +30,6 @@ i18n
     returnNull: false,
     parseMissingKeyHandler: (key) => {
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
         console.warn(`[i18n] missing key: ${key}`);
       }
       return key;

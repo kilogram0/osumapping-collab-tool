@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,6 +19,7 @@ import MergedDownloadButton from '../components/MergedDownloadButton';
 import PinButton from '../components/PinButton';
 import PassphraseModal from '../components/PassphraseModal';
 import PostsPanel from '../components/PostsPanel';
+import { Skeleton } from '../components/ui';
 import RenameDifficultyModal from '../components/RenameDifficultyModal';
 import SectionDetailPanel from '../components/SectionDetailPanel';
 import Timeline from '../components/Timeline';
@@ -40,10 +41,15 @@ import {
 } from '../hooks/useDifficulty';
 import { useMapset, useMembers, useMyMembership } from '../hooks/useMapset';
 import { useMapsetPermissions } from '../hooks/useMapsetPermissions';
-import { decrypt, encrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad, sectionOsuVersionAad, difficultyBaseOsuVersionAad } from '../utils/crypto';
+import {
+  useDecryptedMetadata,
+  useDecryptedPosts,
+  useDecryptedSections,
+  useSectionHitObjectScan,
+} from '../hooks/useDecryptedMapset';
+import { decrypt, encrypt, decodeJsonEnvelope, sectionFieldAad, sectionOsuVersionAad, difficultyBaseOsuVersionAad } from '../utils/crypto';
 import { isAxiosError } from 'axios';
 import { extractApiErrorMessage } from '../utils/errors';
-import { extractFirstTimestamp } from '../utils/extractTimestamp';
 import { logger } from '../utils/logger';
 import { downloadBaseOsu, downloadSectionOsu, fetchDifficultyDetail } from '../api/endpoints';
 import { parseOsuFile, withMetadataVersion } from '../utils/osuParser';
@@ -57,8 +63,7 @@ import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/re
 import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
 import { filterPostsBySection, findSectionForMs } from '../utils/sectionPosts';
 import type { Post, Section } from '../api/endpoints';
-import type { DecryptedSection } from '../components/SectionList';
-import type { DecryptedPost } from '../types';
+import type { DecryptedPost, DecryptedSection } from '../types';
 
 /** Stable empty array reference to avoid new-array churn in deps. */
 const EMPTY_SECTIONS: Section[] = [];
@@ -133,14 +138,6 @@ export default function MapsetPage() {
   const [ghostBannerDismissed, setGhostBannerDismissed] = useState(false);
   const [difficultyNames, setDifficultyNames] = useState<Record<string, string>>({});
   const [editingSection, setEditingSection] = useState<DecryptedSection | null>(null);
-  const [decryptedSections, setDecryptedSections] = useState<DecryptedSection[]>([]);
-  const [sectionHitObjectMap, setSectionHitObjectMap] = useState<Map<string, boolean>>(new Map());
-  // Cache keyed by "sectionId:startMs:endMs" so a range edit forces a rescan for that
-  // section while sibling sections whose range is unchanged are skipped.
-  const hitObjectCacheRef = useRef<Map<string, boolean>>(new Map());
-  const [decryptedDescription, setDecryptedDescription] = useState<string | null>(null);
-  const [songLengthMs, setSongLengthMs] = useState<number | null>(null);
-  const [decryptedPosts, setDecryptedPosts] = useState<DecryptedPost[]>([]);
   const [showOnlyUnresolved, setShowOnlyUnresolved] = useState(false);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
@@ -157,6 +154,20 @@ export default function MapsetPage() {
     emulateGhost,
     setEmulateGhost,
   } = useMapsetPermissions(myMembership);
+
+  const { description: decryptedDescription, songLengthMs } = useDecryptedMetadata(
+    mapset ?? undefined,
+    mapsetId,
+    unlocked,
+  );
+  const decryptedSections = useDecryptedSections(difficultyDetail, mapsetId, unlocked);
+  const decryptedPosts = useDecryptedPosts(difficultyDetail, mapsetId, unlocked);
+  const sectionHitObjectMap = useSectionHitObjectScan(
+    decryptedSections,
+    selectedDifficultyId,
+    mapsetId,
+    unlocked,
+  );
 
   const { activeDifficulties, pendingDifficulties } = useMemo(() => {
     const active: NonNullable<typeof difficulties> = [];
@@ -184,226 +195,6 @@ export default function MapsetPage() {
     setShowOnlyUnresolved(false);
     setSelectedSectionId(null);
   }, [selectedDifficultyId]);
-
-  useEffect(() => {
-    if (!unlocked || !mapset) {
-      setDecryptedDescription(null);
-      setSongLengthMs(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    const m = mapset!;
-    async function decryptMetadata() {
-      try {
-        const key = await getKey(mapsetId);
-        if (!key || cancelled) return;
-
-        const results = await Promise.allSettled([
-          m.encrypted_description
-            ? decrypt(key, m.encrypted_description, mapsetFieldAad(mapsetId))
-            : Promise.resolve(null),
-          decrypt(key, m.encrypted_song_length_ms, mapsetFieldAad(mapsetId)),
-        ]);
-
-        if (cancelled) return;
-
-        const descResult = results[0];
-        // Set unconditionally on success: value is string | null, and a
-        // fulfilled null means the description was cleared (e.g. via the Edit
-        // Mapset modal). Skipping null would leave the stale text on screen.
-        if (descResult.status === 'fulfilled') {
-          setDecryptedDescription(descResult.value);
-        }
-
-        const songResult = results[1];
-        if (songResult.status === 'fulfilled') {
-          setSongLengthMs(decodeJsonEnvelope(songResult.value));
-        }
-      } catch (err) {
-        logger.warn('Failed to decrypt mapset metadata:', err);
-      }
-    }
-
-    decryptMetadata();
-    return () => { cancelled = true; };
-  }, [unlocked, mapset, mapsetId, getKey]);
-
-  // Decrypt sections whenever difficulty detail changes
-  useEffect(() => {
-    if (!unlocked || !difficultyDetail?.sections) {
-      setDecryptedSections([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    const ddSections = difficultyDetail!.sections;
-    async function decryptSections() {
-      try {
-        const key = await getKey(mapsetId);
-        if (!key || cancelled) return;
-
-        const results: DecryptedSection[] = [];
-        await Promise.all(
-          ddSections.map(async (s) => {
-            try {
-              const aad = sectionFieldAad(s.id, mapsetId);
-              // start_time_ms is intentionally not decrypted: section start
-              // times are derived below from the running total of end times
-              // so the timeline stays contiguous when end times are edited.
-              const [name, endRaw, sortRaw] = await Promise.all([
-                decrypt(key, s.encrypted_name, aad),
-                decrypt(key, s.encrypted_end_time_ms, aad),
-                decrypt(key, s.encrypted_sort_order, aad),
-              ]);
-              results.push({
-                id: s.id,
-                name,
-                startTimeMs: 0,
-                endTimeMs: decodeJsonEnvelope(endRaw),
-                sortOrder: decodeJsonEnvelope(sortRaw),
-                assignedTo: s.assigned_to,
-              });
-            } catch (_err) {
-              logger.warn(`Failed to decrypt section ${s.id}:`, _err);
-            }
-          }),
-        );
-
-        if (!cancelled) {
-          // Sort by the legacy sortOrder so we can derive contiguous start times.
-          results.sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
-
-          // Derive start times locally: first section starts at 0, every
-          // subsequent section starts where the previous one ended.  This
-          // guarantees the timeline stays contiguous even when a user edits
-          // a section's end time — the next section shifts automatically.
-          let runningStart = 0;
-          const derived = results.map((s) => {
-            const section = { ...s, startTimeMs: runningStart };
-            runningStart = s.endTimeMs;
-            return section;
-          });
-
-          setDecryptedSections(derived);
-        }
-      } catch (err) {
-        logger.warn('Failed to decrypt sections:', err);
-      }
-    }
-
-    decryptSections();
-    return () => { cancelled = true; };
-  }, [unlocked, difficultyDetail, mapsetId, getKey]);
-
-  // Clear the hit-object map and its cache whenever the difficulty changes so
-  // stale results from a previous difficulty never bleed through.
-  useEffect(() => {
-    hitObjectCacheRef.current = new Map();
-    setSectionHitObjectMap(new Map());
-  }, [selectedDifficultyId]);
-
-  // Background scan: download + parse each section's .osu to check whether it
-  // contains any hit objects within the section's own time range.
-  // Cache key = "sectionId:startMs:endMs" — a range edit invalidates only that
-  // section while siblings with unchanged ranges are skipped.
-  useEffect(() => {
-    if (!decryptedSections.length || !selectedDifficultyId || !unlocked) return;
-
-    const makeKey = (s: DecryptedSection) => `${s.id}:${s.startTimeMs}:${s.endTimeMs}`;
-    const sectionsToScan = decryptedSections.filter((s) => !hitObjectCacheRef.current.has(makeKey(s)));
-    if (!sectionsToScan.length) return;
-
-    let cancelled = false;
-
-    async function scanHitObjects() {
-      const key = await getKey(mapsetId);
-      if (!key || cancelled) return;
-
-      const updates = new Map<string, boolean>();
-      const tasks = sectionsToScan.map((section) => async () => {
-        try {
-          const resp = await downloadSectionOsu(selectedDifficultyId!, section.id);
-          const plaintext = await decrypt(key, resp.encrypted_content, sectionOsuVersionAad(resp.id, mapsetId));
-          const parsed = parseOsuFile(plaintext);
-          const hasInRange = parsed.hitObjects.some(
-            (ho) => ho.time >= section.startTimeMs && ho.time < section.endTimeMs,
-          );
-          updates.set(section.id, hasInRange);
-          hitObjectCacheRef.current.set(makeKey(section), hasInRange);
-        } catch (err) {
-          const is404 = isAxiosError(err) && err.response?.status === 404;
-          updates.set(section.id, false);
-          // Only cache 404 (no file uploaded). Transient failures are left
-          // uncached so the section is retried on the next sections change.
-          if (is404) hitObjectCacheRef.current.set(makeKey(section), false);
-        }
-      });
-
-      const queue = [...tasks];
-      const worker = async () => { while (queue.length > 0) await queue.shift()!(); };
-      await Promise.all(Array.from({ length: Math.min(5, tasks.length) }, worker));
-
-      if (!cancelled) setSectionHitObjectMap((prev) => {
-        const next = new Map(prev);
-        for (const [id, val] of updates) next.set(id, val);
-        return next;
-      });
-    }
-
-    scanHitObjects();
-    return () => { cancelled = true; };
-  }, [decryptedSections, selectedDifficultyId, unlocked, mapsetId, getKey]);
-
-  // Decrypt posts whenever the difficulty detail changes
-  useEffect(() => {
-    if (!unlocked || !difficultyDetail?.posts) {
-      setDecryptedPosts([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    const ddPosts = difficultyDetail!.posts;
-    async function decryptPosts() {
-      try {
-        const key = await getKey(mapsetId);
-        if (!key || cancelled) return;
-
-        const results: DecryptedPost[] = await Promise.all(
-          ddPosts.map(async (post): Promise<DecryptedPost> => {
-            try {
-              const plaintext = await decrypt(key, post.encrypted_body, postFieldAad(post.id, mapsetId));
-              const extracted = extractFirstTimestamp(plaintext);
-              return {
-                ...post,
-                decryptedBody: plaintext,
-                extractedMs: extracted?.ms ?? null,
-              };
-            } catch (_err) {
-              logger.warn(`Failed to decrypt post ${post.id}:`, _err);
-              return {
-                ...post,
-                decryptedBody: '[Failed to decrypt]',
-                extractedMs: null,
-              };
-            }
-          }),
-        );
-
-        if (!cancelled) {
-          setDecryptedPosts(results);
-        }
-      } catch (err) {
-        logger.warn('Failed to decrypt posts:', err);
-      }
-    }
-
-    decryptPosts();
-    return () => { cancelled = true; };
-  }, [unlocked, difficultyDetail, mapsetId, getKey]);
 
   useEffect(() => {
     if (!jumpTarget) return;
@@ -890,7 +681,18 @@ export default function MapsetPage() {
   }
 
   if (!id) return null;
-  if (mapsetLoading) return <div className="min-h-screen bg-gray-900 text-white p-8">{t('mapsetPage.loading')}</div>;
+  if (mapsetLoading) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20">
+        <TopBar left={<Skeleton variant="text" width="10rem" />} />
+        <div className="max-w-6xl mx-auto space-y-6">
+          <Skeleton variant="rect" height="4rem" />
+          <Skeleton variant="rect" height="8rem" />
+          <Skeleton variant="rect" height="16rem" />
+        </div>
+      </div>
+    );
+  }
   if (mapsetError || !mapset) {
     return <div className="min-h-screen bg-gray-900 text-white p-8 text-red-400">{t('mapsetPage.notFound')}</div>;
   }
@@ -924,7 +726,7 @@ export default function MapsetPage() {
     : decryptedPosts;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20">
+    <div className="min-h-screen bg-gray-900 text-white px-8 pb-8 pt-20 animate-fade-in">
       <TopBar
         left={
           <button
@@ -984,7 +786,7 @@ export default function MapsetPage() {
             <div className="flex items-baseline gap-2 flex-wrap min-w-0">
               <h1 className="text-3xl font-bold text-blue-400">{mapset.title}</h1>
               {songLengthMs !== null && songLengthMs > 0 && (
-                <span className="text-sm text-gray-400">{`-  ${formatDuration(songLengthMs)}`}</span>
+                <span className="text-sm text-gray-400">{`- ${formatDuration(songLengthMs)}`}</span>
               )}
             </div>
             <ManageMenuButton
@@ -1007,7 +809,12 @@ export default function MapsetPage() {
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-gray-200 mb-3">{t('mapsetPage.difficultiesHeading')}</h2>
 
-          {difficultiesLoading && <p className="text-gray-400 mb-2">{t('mapsetPage.loadingDifficulties')}</p>}
+          {difficultiesLoading && (
+            <div className="flex items-center gap-2 flex-wrap mb-2" aria-busy="true" aria-label={t('mapsetPage.loadingDifficulties')}>
+              <Skeleton variant="rect" width="12rem" height="2.5rem" />
+              <Skeleton variant="rect" width="2.5rem" height="2.5rem" />
+            </div>
+          )}
 
           <div className="flex items-center gap-2 flex-wrap">
             <DifficultyDropdown
@@ -1093,7 +900,18 @@ export default function MapsetPage() {
           </div>
 
           {activeDifficulties.length === 0 && !difficultiesLoading && (
-            <p className="text-gray-400 italic mt-2">{t('mapsetPage.noDifficulties')}</p>
+            <div className="mt-3 rounded-lg border border-dashed border-surface-border bg-surface-raised/50 p-6 text-center transition-colors">
+              <p className="text-muted">{t('mapsetPage.noDifficulties')}</p>
+              {canEditStructure && (
+                <button
+                  type="button"
+                  onClick={() => setShowCreateDifficulty(true)}
+                  className="mt-3 text-sm font-medium text-brand hover:text-brand-hover transition-colors"
+                >
+                  {t('mapsetPage.addDifficulty')}
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -1107,6 +925,11 @@ export default function MapsetPage() {
 
             {/* Timeline. Rendered for owners even with zero sections so the
                 inline add-section "+" (which fills the empty bar) is reachable. */}
+            {songLengthMs !== null && decryptedSections.length === 0 && !isOwner && (
+              <div className="rounded-lg border border-dashed border-surface-border bg-surface-raised/50 p-6 text-center transition-colors">
+                <p className="text-muted">{t('sectionList.empty')}</p>
+              </div>
+            )}
             {songLengthMs !== null && (decryptedSections.length > 0 || isOwner) && (
               <Timeline
                 sections={decryptedSections}

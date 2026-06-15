@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react'
+import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
-import MapsetPage from './pages/MapsetPage'
 import { ToastProvider } from './contexts/ToastContext'
 import ToastContainer from './components/ToastContainer'
 import { useAuth } from './hooks/useAuth'
+
+const MapsetPage = lazy(() => import('./pages/MapsetPage'))
 
 function AuthLoading() {
   const { t } = useTranslation()
@@ -58,7 +60,9 @@ export function AppRoutes() {
         path="/mapsets/:id"
         element={
           <RequireAuth>
-            <MapsetPage />
+            <Suspense fallback={<AuthLoading />}>
+              <MapsetPage />
+            </Suspense>
           </RequireAuth>
         }
       />

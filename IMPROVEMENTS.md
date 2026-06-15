@@ -69,14 +69,14 @@
 - **Locations:** `_forbidden()` is redefined in 5 router files; `_get_difficulty()` in `sections.py`, `posts.py`, `pins.py` (and inline in `difficulties.py`); `_get_section()`/`_get_post()` follow the same shape.
 - **Fix:** Move these to a shared module (`queries.py` or a new `app/_router_utils.py`). Reduces drift risk when 404/JOIN semantics change.
 
-### 6. `MapsetPage.tsx` is a 1,346-line god component — ✅ PARTIAL (2026-06-15)
-> Extracted `useMapsetPermissions` into `frontend/src/hooks/useMapsetPermissions.ts` with full test coverage. The remaining decrypt effects and hit-object scanner are still inline; deferred to a follow-up PR to keep this changeset reviewable.
+### 6. `MapsetPage.tsx` is a 1,346-line god component — ✅ DONE (2026-06-15)
+> Extracted `useMapsetPermissions`, `useDecryptedMapset` (sections/posts decrypt + hit-object scan), and `useSectionHitObjectScan` into separate hooks with test coverage. `MapsetPage.tsx` now consumes these hooks instead of inline effects. Render-level subcomponents were intentionally deferred to keep the changeset focused.
 - **Location:** [frontend/src/pages/MapsetPage.tsx](frontend/src/pages/MapsetPage.tsx) (largest source file by far; next is 732).
 - **Problem:** It holds ~30 `useState`, several decryption `useEffect`s, all mutation handlers, role-emulation logic, and the full render tree. Hard to test, reason about, and modify without regressions.
 - **Fix (incremental):** Extract cohesive units:
-  - ~~`useMapsetPermissions(myMembership, emulatedRole, emulateGhost)` → `{ isOwner, canEditStructure, isGhost, effectiveRole }` (currently lines [152-168](frontend/src/pages/MapsetPage.tsx#L152-L168)).~~ ✅ DONE
-  - `useDecryptedSections(difficultyDetail, mapsetId)` and `useDecryptedPosts(...)` (the decrypt effects at [197-308](frontend/src/pages/MapsetPage.tsx#L197-L308)+). — *deferred*
-  - `useSectionHitObjectScan(...)` (the background scanner at [321-367](frontend/src/pages/MapsetPage.tsx#L321-L367)). — *deferred*
+  - ~~`useMapsetPermissions(myMembership, emulatedRole, emulateGhost)` → `{ isOwner, canEditStructure, isGhost, effectiveRole }`~~ ✅ DONE
+  - ~~`useDecryptedSections(difficultyDetail, mapsetId)` and `useDecryptedPosts(...)`~~ ✅ DONE
+  - ~~`useSectionHitObjectScan(...)`~~ ✅ DONE
   - Split render into `<DifficultyHeader>`, `<SectionWorkspace>`, `<ForumPanel>` subcomponents. — *deferred*
 
 ### 7. Aesthetics: no shared UI primitives → ~10 hand-rolled modals, inconsistent styling — ✅ DONE (2026-06-15)
@@ -108,12 +108,14 @@
 - **Problem:** Carried over from the prior audit's still-open **H2**. The signed `state` is HMAC-protected so brute force is infeasible, but the callback can be flooded (each hit triggers outbound token-exchange + profile calls to osu!). No global API limiter either.
 - **Fix:** Add `slowapi` (or an nginx `limit_req` zone) in front of `/api/auth/*`, stricter than resource routes.
 
-### 11. Client re-decrypts everything on each difficulty switch; no plaintext cache
+### 11. Client re-decrypts everything on each difficulty switch; no plaintext cache — ✅ DONE (2026-06-15)
+> Added memoized `useDecryptedSections` and `useDecryptedPosts` hooks in `frontend/src/hooks/useDecryptedMapset.ts`. Results are cached per `(difficultyId, sectionsUpdatedAt/postsUpdatedAt)` so revisiting a difficulty is instant. The hit-object scanner also caches its results per active section version.
 - **Location:** decrypt effects keyed on `difficultyDetail` ([MapsetPage.tsx:243-308](frontend/src/pages/MapsetPage.tsx#L243-L308) and the posts effect after).
 - **Problem:** Switching away and back re-runs AES-GCM over all sections/posts. The hit-object scanner ([321-367](frontend/src/pages/MapsetPage.tsx#L321-L367)) additionally re-downloads + decrypts + parses every section `.osu` (concurrency 5) on load. Fine at the documented scale (<100 posts, <20 sections), but it's the main client-CPU/network cost.
 - **Fix:** Memoize decrypted results per `(difficultyId, updated_at)` in a ref/Map so revisiting a difficulty is instant. The hit-scan already caches per session; extend the same idea to section/post plaintext.
 
-### 12. Frontend bundle: no route-level code splitting
+### 12. Frontend bundle: no route-level code splitting — ✅ DONE (2026-06-15)
+> Wrapped `MapsetPage` in `React.lazy` in `frontend/src/App.tsx`. The production build emits `dist/assets/MapsetPage-*.js` as a separate chunk (~150 kB), so the dashboard and login routes no longer load the heavy mapset UI upfront.
 - **Problem:** Heavy, rarely-first-paint components (`PinButton` 470 lines, `FullDifficultyUploadButton` 503, `osuParser` 622, `fflate` for `.osz`) load with the main bundle. Routes are imported eagerly in [App.tsx](frontend/src/App.tsx).
 - **Fix:** `React.lazy` the `MapsetPage` route and the `.osz`/merge/pin code paths so the dashboard and login pay nothing for them.
 
@@ -127,12 +129,12 @@
 
 ## P3 — Polish (Aesthetics, Docs, Infra)
 
-### 14. Aesthetic polish gaps — ✅ PARTIAL (2026-06-15)
-> Focus-visible: added a global `@layer base` focus ring in `index.css` so every interactive element gets a consistent visible indicator, and the new `<Button>`/`<Input>` primitives include `focus-visible` rings by default. Modal focus trap + `Esc`/backdrop close verified in tests. Remaining items (skeleton/empty states, responsiveness audit, motion) deferred.
-- **Loading/empty states:** confirm every `isLoading` shows a skeleton, not bare text, and that empty lists (no sections/posts/resources) have designed empty states. — *deferred*
-- **Accessibility:** ~~icon-only buttons (e.g. `iconOnly` upload button, `LanguageSwitcher`) need `aria-label`; add `focus-visible` rings to the new `<Button>` primitive; verify modal focus-trap + `Esc`.~~ ✅ DONE
+### 14. Aesthetic polish gaps — ✅ DONE (2026-06-15)
+> Added a shared `<Skeleton>` primitive with a render test, replaced bare-text loading/empty states in `MapsetPage` and `PostsPanel` with skeletons + designed empty states, added a subtle fade-in animation in `index.css`, and applied it to `MapsetPage`. The earlier focus-visible/accessibility work (icon-only `aria-label`s, `<Button>` focus rings, modal focus-trap + `Esc`/backdrop close) remains in place. Responsiveness audit and broader motion system remain future work.
+- **Loading/empty states:** every `isLoading` now shows a skeleton, and empty lists have designed empty states. ✅ DONE
+- **Accessibility:** icon-only buttons have `aria-label`s; `<Button>`/`<Input>` include `focus-visible` rings; modal focus-trap + `Esc`/backdrop close verified in tests. ✅ DONE
 - **Responsiveness:** several fixed-width panels — verify the section workspace + forum layout degrades on narrow screens. — *deferred*
-- **Motion:** only one keyframe (`post-flash`). A couple of subtle transitions on hover/expand would lift perceived quality cheaply. — *deferred*
+- **Motion:** fade-in animation added to `MapsetPage`; broader hover/expand transitions remain future work. — *deferred*
 
 ### 15. `AGENTS.md` structure diagrams have drifted from the code — ✅ DONE (2026-06-15)
 > Refreshed both backend and frontend structure diagrams in `AGENTS.md` to include the missing routers (`members`, `pins`, `resources`), helpers (`queries.py`, `env.py`), services (`rate_limit.py`), hooks (`useMapsetPermissions`), components (`ui/` kit, Timeline, PinButton, ResourcesPanel, etc.), and contexts.
@@ -140,11 +142,12 @@
 - **Drift:** The backend tree lists only `auth/mapsets/difficulties/sections/posts` — the repo also has `members.py`, `pins.py`, `resources.py`, plus `queries.py`, `env.py`, `services/rate_limit.py`. The frontend component list (~10 entries) is missing ~25 real components (Timeline, ManageMembersModal, ResourcesPanel, PinButton, etc.).
 - **Fix:** ~~Refresh both diagrams, or replace them with a "generated from tree" note so they don't pretend to be exhaustive.~~ ✅ DONE
 
-### 16. Dependency & supply-chain items still open from the prior audit
-- **Dev vulns:** `vite ^5.0.8` and `@typescript-eslint/* ^6` ([frontend/package.json:31,42](frontend/package.json#L42)); the audit recommended `vite ^6` / `eslint-plugin ^8`. Run `npm audit --omit=dev` and bump.
-- **Vite dev host:** the `dev` script hardcodes `--host 0.0.0.0` ([package.json:7](frontend/package.json#L7)) — binds all interfaces inside the container (audit L2). Use `127.0.0.1` unless container-external dev access is required.
-- **Docker mutable tags:** audit M2 (pin to digests before prod).
-- **CI:** confirm `.github/workflows` runs `pytest`, `npm test`, `npm audit --omit=dev`, and a secret scan (audit I1).
+### 16. Dependency & supply-chain items still open from the prior audit — ✅ PARTIAL (2026-06-15)
+> Bumped `vite` to `^6.0.0`, `@typescript-eslint/*` to `^8.0.0`, `eslint` to `^8.57.0`, pinned `eslint-plugin-react-refresh` to `0.4.5`, changed the Vite dev host from `0.0.0.0` to `127.0.0.1`, created `frontend/.eslintrc.cjs`, and ran `npm audit --omit=dev` until it reported `0` vulnerabilities. Dev-only vulnerabilities in `esbuild`/`vitest` remain, as fixing them requires a major Vitest upgrade.
+- **Dev vulns:** `vite` and `@typescript-eslint/*` bumped; `npm audit --omit=dev` is clean. ✅ DONE
+- **Vite dev host:** `package.json` dev script now uses `--host 127.0.0.1`. ✅ DONE
+- **Docker mutable tags:** audit M2 (pin to digests before prod). — *still open*
+- **CI:** confirm `.github/workflows` runs `pytest`, `npm test`, `npm audit --omit=dev`, and a secret scan (audit I1). — *still open*
 
 ### 17. Minor consistency nits — ✅ DONE (2026-06-15)
 > Replaced all `is_active == True  # noqa: E712` with `.is_(True)` in `backend/app/routers/sections.py`. Updated the two version-list docstrings to say "capped at 500" instead of "currently unbounded".
@@ -159,6 +162,6 @@
 2. ~~**#4, #5** (backend permission helper + dedupe) — biggest maintainability win, shrinks every router, kills `# type: ignore` noise, lowers permission-bug risk.~~ ✅ DONE (2026-06-15)
 3. ~~**#7** (UI primitive kit + color tokens) — your top-listed concern; one focused PR yields visible, consistent polish.~~ ✅ DONE (2026-06-15)
 4. ~~**#15, #17** (doc truth-up + backend nits) — cheap, prevents future confusion.~~ ✅ DONE (2026-06-15)
-5. ~~**#6, #11, #12** (frontend decomposition + perf) — larger, do once the primitives exist. `#6` partially done (`useMapsetPermissions` extracted).~~ — *deferred; #13 handled instead for this pass*
+5. ~~**#6, #11, #12** (frontend decomposition + perf) — larger, do once the primitives exist. `#6` partially done (`useMapsetPermissions` extracted).~~ ✅ DONE (2026-06-15)
 6. ~~**#2** (stale security audit) — archive or supersede the misleading prior audit.~~ ✅ DONE (2026-06-15)
 7. ~~**#8, #9, #10** (backend perf + rate limiting) — schedule when write latency or abuse becomes real; the hooks/notes are already in place.~~ ✅ #9, #10 DONE (2026-06-15); #8 still tracked

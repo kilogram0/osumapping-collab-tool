@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Section } from '../api/endpoints';
+import type { DecryptedSection } from '../types';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { decrypt, decodeJsonEnvelope, sectionFieldAad } from '../utils/crypto';
 import { assembleSectionOsu } from '../utils/sectionDownload';
@@ -10,6 +11,8 @@ import { logger } from '../utils/logger';
 import OsuUploadButton from './OsuUploadButton';
 import OsuVersionHistory from './OsuVersionHistory';
 
+export type { DecryptedSection } from '../types';
+
 interface SectionListProps {
   sections: Section[];
   mapsetId: string;
@@ -18,15 +21,6 @@ interface SectionListProps {
   onEdit?: (section: DecryptedSection) => void;
   onDecrypted?: (sections: DecryptedSection[]) => void;
   role?: 'owner' | 'mapper' | 'modder' | null;
-}
-
-export interface DecryptedSection {
-  id: string;
-  name: string;
-  startTimeMs: number;
-  endTimeMs: number;
-  sortOrder: number;
-  assignedTo: string | null;
 }
 
 export default function SectionList({ sections, mapsetId, mapsetTitle, difficultyId, onEdit, onDecrypted, role }: SectionListProps) {

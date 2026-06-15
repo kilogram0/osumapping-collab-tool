@@ -349,7 +349,11 @@ describe('MapsetPage', () => {
     // Merge the PATCH payload into the live mapset so the page re-renders with
     // the new values once the modal closes (mirrors a refetch after invalidate).
     mockUpdateMapset.mockImplementation(async (payload) => {
-      mockCurrentMapset = { ...mockCurrentMapset, ...payload };
+      mockCurrentMapset = {
+        ...mockCurrentMapset,
+        ...payload,
+        updated_at: new Date().toISOString(),
+      };
       return mockCurrentMapset;
     });
     mockUseMyMembership.mockReturnValue({

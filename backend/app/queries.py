@@ -323,6 +323,17 @@ async def get_owner_storage(db: AsyncSession, owner_id: UUID) -> tuple[int, int]
     cascade DELETE with no per-row hook, so any counter would drift. If an
     owner's difficulty count ever makes this hot, the escape hatch is a
     trigger-maintained counter (a DB trigger *does* fire on cascade deletes).
+
+    TODO: Implement a trigger-maintained ``owner_storage_usage`` counter if
+    write latency becomes measurable. The counter table would hold
+    ``(owner_id, active_bytes, pending_bytes, updated_at)`` and be kept
+    consistent by INSERT/UPDATE/DELETE triggers on the content tables
+    (difficulty, section, sectionosuversion, difficultybaseosuversion,
+    difficultypin, post, mapset, mapsetresource). Triggers are required
+    because the hard-delete purge runs as a bulk cascade DELETE that does not
+    invoke application hooks. ``get_owner_storage`` should then read the
+    counter and fall back to the current derived calculation if the row is
+    missing or stale.
     """
     cost = _difficulty_cost_expr()
     extra = _mapset_extra_expr()
