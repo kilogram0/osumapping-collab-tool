@@ -99,16 +99,18 @@ async def get_difficulty_or_404(db: AsyncSession, difficulty_id: UUID) -> Diffic
 
 async def get_section_or_404(
     db: AsyncSession, difficulty_id: UUID, section_id: UUID
-) -> tuple[Section, UUID]:
-    """Load a section verified to belong to difficulty; return (section, mapset_id).
+) -> tuple[Section, UUID, UUID]:
+    """Load a section verified to belong to difficulty.
 
-    A single JOIN avoids a second round-trip to fetch the difficulty just for
-    its mapset_id — the parent row is already being touched to verify the path.
+    Returns ``(section, mapset_id, owner_id)``.  Joining through ``Difficulty``
+    to ``Mapset`` in one query avoids separate round-trips to fetch the parent
+    row(s) just for their IDs, which matters on the upload/update hot paths.
     """
     row = (
         await db.execute(
-            select(Section, Difficulty.mapset_id)
+            select(Section, Difficulty.mapset_id, Mapset.owner_id)
             .join(Difficulty, Difficulty.id == Section.difficulty_id)
+            .join(Mapset, Mapset.id == Difficulty.mapset_id)
             .where(Section.id == section_id, Section.difficulty_id == difficulty_id)
         )
     ).one_or_none()
@@ -116,18 +118,22 @@ async def get_section_or_404(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Section not found"
         )
-    section, mapset_id = row
-    return section, mapset_id
+    section, mapset_id, owner_id = row
+    return section, mapset_id, owner_id
 
 
 async def get_post_or_404(
     db: AsyncSession, difficulty_id: UUID, post_id: UUID
-) -> tuple[Post, UUID]:
-    """Load a post verified to belong to difficulty; return (post, mapset_id)."""
+) -> tuple[Post, UUID, UUID]:
+    """Load a post verified to belong to difficulty.
+
+    Returns ``(post, mapset_id, owner_id)`` — see :func:`get_section_or_404`.
+    """
     row = (
         await db.execute(
-            select(Post, Difficulty.mapset_id)
+            select(Post, Difficulty.mapset_id, Mapset.owner_id)
             .join(Difficulty, Difficulty.id == Post.difficulty_id)
+            .join(Mapset, Mapset.id == Difficulty.mapset_id)
             .where(Post.id == post_id, Post.difficulty_id == difficulty_id)
         )
     ).one_or_none()
@@ -135,8 +141,8 @@ async def get_post_or_404(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
         )
-    post, mapset_id = row
-    return post, mapset_id
+    post, mapset_id, owner_id = row
+    return post, mapset_id, owner_id
 
 
 # ---------------------------------------------------------------------------

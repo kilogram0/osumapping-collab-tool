@@ -1,3 +1,15 @@
+# ⚠️ SUPERSEDED — Security Audit Re-Review
+
+> **This document is archived and no longer reflects the current security posture of the project.**
+>
+> The codebase described here was still under construction; the HIGH finding "Application security layer is entirely unimplemented" was accurate at the time but is now resolved.
+>
+> **Current audit:** `.claude/security/2026-06-15-audit-full-stack.md`
+>
+> This file is retained for historical context only.
+
+---
+
 # Security Audit Re-Review — Full Stack before v1.0 release
 
 **Auditor:** Security Engineer (AI)

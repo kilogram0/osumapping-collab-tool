@@ -24,6 +24,10 @@ from app.services.auth_service import (
     fetch_osu_user,
     upsert_user_by_osu_id,
 )
+from app.services.rate_limit import (
+    check_oauth_callback_rate_limit,
+    check_oauth_init_rate_limit,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -64,12 +68,40 @@ def _clear_cookie(response: Response, name: str, secure: bool) -> None:
     )
 
 
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP.
+
+    Uses the leftmost value of ``X-Forwarded-For`` when present. This is safe
+    only because the app is expected to sit behind the project's nginx proxy,
+    which sets/overwrites that header. If the backend is ever exposed directly
+    to clients, this value is trivially spoofable and the per-IP rate limiter
+    becomes ineffective — use ``request.client.host`` only, or gate XFF trust
+    on a configured set of trusted proxies.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def require_oauth_init_rate_limit(request: Request) -> None:
+    """Reject OAuth init requests that exceed the per-IP rate limit."""
+    if not check_oauth_init_rate_limit(_client_ip(request)):
+        raise HTTPException(status_code=429, detail="Too many requests")
+
+
+async def require_oauth_callback_rate_limit(request: Request) -> None:
+    """Reject OAuth callback requests that exceed the per-IP rate limit."""
+    if not check_oauth_callback_rate_limit(_client_ip(request)):
+        raise HTTPException(status_code=429, detail="Too many requests")
+
+
 # ------------------------------------------------------------------
 # OAuth init
 # ------------------------------------------------------------------
 
 
-@router.get("/osu/authorize")
+@router.get("/osu/authorize", dependencies=[Depends(require_oauth_init_rate_limit)])
 async def osu_authorize() -> RedirectResponse:
     """Initiate the osu! OAuth 2.0 flow.
 
@@ -102,7 +134,9 @@ async def osu_authorize() -> RedirectResponse:
 # ------------------------------------------------------------------
 
 
-@router.get("/osu/callback")
+@router.get(
+    "/osu/callback", dependencies=[Depends(require_oauth_callback_rate_limit)]
+)
 async def osu_callback(
     request: Request,
     code: str,

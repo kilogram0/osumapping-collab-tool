@@ -127,7 +127,7 @@ async def update_post(
     Only the original ``author_id`` may edit a post.  Returns ``403`` for
     non-authors (including the mapset owner).
     """
-    post, mapset_id = await get_post_or_404(db, difficulty_id, post_id)
+    post, mapset_id, owner_id = await get_post_or_404(db, difficulty_id, post_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     require_active(membership)
@@ -140,8 +140,7 @@ async def update_post(
     # otherwise overshoot in aggregate. Shrinking/equal edits charge nothing.
     delta = len(payload.encrypted_body) - post.byte_size
     if delta > 0:
-        mapset = await db.get(Mapset, mapset_id)
-        await assert_active_capacity(db, mapset.owner_id, delta)  # type: ignore[union-attr]
+        await assert_active_capacity(db, owner_id, delta)
 
     post.encrypted_body = payload.encrypted_body
     post.byte_size = len(payload.encrypted_body)
@@ -166,7 +165,7 @@ async def delete_post(
     Permitted for the original author **or** the mapset ``owner``.  Replies
     are cascade-deleted at the DB level via ``ondelete='CASCADE'``.
     """
-    post, mapset_id = await get_post_or_404(db, difficulty_id, post_id)
+    post, mapset_id, _ = await get_post_or_404(db, difficulty_id, post_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     kind = classify_membership(membership)

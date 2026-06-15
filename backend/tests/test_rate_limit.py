@@ -9,7 +9,10 @@ import app.services.rate_limit as rl
 from app.services.rate_limit import (
     OsuApiBannedError,
     OsuApiRateLimitedError,
+    _IpRateLimiter,
     check_and_record_osu_api_call,
+    check_oauth_callback_rate_limit,
+    check_oauth_init_rate_limit,
 )
 
 
@@ -19,11 +22,15 @@ def clean_state():
     rl._offense_count.clear()
     rl._ban_expires.clear()
     rl._permanent_bans.clear()
+    rl._OAUTH_INIT_LIMITER._log.clear()
+    rl._OAUTH_CALLBACK_LIMITER._log.clear()
     yield
     rl._call_log.clear()
     rl._offense_count.clear()
     rl._ban_expires.clear()
     rl._permanent_bans.clear()
+    rl._OAUTH_INIT_LIMITER._log.clear()
+    rl._OAUTH_CALLBACK_LIMITER._log.clear()
 
 
 def _fill_window(uid, n=None):
@@ -189,3 +196,75 @@ def test_offense_count_persists_through_ban_expiry():
     # Next violation should be the 3rd offense (7 days)
     _trigger_offense(uid)
     assert _approx_days(uid, 7)
+
+
+# ---------------------------------------------------------------------------
+# OAuth IP rate limiting
+# ---------------------------------------------------------------------------
+
+
+def test_ip_rate_limiter_allows_under_limit():
+    limiter = _IpRateLimiter(timedelta(minutes=1), 3)
+    assert limiter.is_allowed("1.2.3.4")
+    assert limiter.is_allowed("1.2.3.4")
+    assert limiter.is_allowed("1.2.3.4")
+
+
+def test_ip_rate_limiter_blocks_at_limit():
+    limiter = _IpRateLimiter(timedelta(minutes=1), 2)
+    assert limiter.is_allowed("1.2.3.4")
+    assert limiter.is_allowed("1.2.3.4")
+    assert not limiter.is_allowed("1.2.3.4")
+
+
+def test_ip_rate_limiter_is_per_ip():
+    limiter = _IpRateLimiter(timedelta(minutes=1), 2)
+    limiter.is_allowed("1.2.3.4")
+    limiter.is_allowed("1.2.3.4")
+    assert limiter.is_allowed("5.6.7.8")
+
+
+def test_ip_rate_limiter_expired_window_resets():
+    limiter = _IpRateLimiter(timedelta(seconds=0), 2)
+    limiter.is_allowed("1.2.3.4")
+    limiter.is_allowed("1.2.3.4")
+    assert limiter.is_allowed("1.2.3.4")
+
+
+def test_oauth_init_rate_limit_blocks_after_threshold():
+    for _ in range(rl._OAUTH_INIT_LIMITER.max_calls):
+        assert check_oauth_init_rate_limit("1.2.3.4")
+    assert not check_oauth_init_rate_limit("1.2.3.4")
+
+
+def test_oauth_callback_rate_limit_blocks_after_threshold():
+    for _ in range(rl._OAUTH_CALLBACK_LIMITER.max_calls):
+        assert check_oauth_callback_rate_limit("1.2.3.4")
+    assert not check_oauth_callback_rate_limit("1.2.3.4")
+
+
+def test_ip_rate_limiter_prunes_expired_entries():
+    limiter = _IpRateLimiter(timedelta(minutes=1), 10)
+    limiter.is_allowed("1.2.3.4")
+    # Push the single timestamp outside the window without waiting.
+    limiter._log["1.2.3.4"][0] = datetime.now(timezone.utc) - timedelta(minutes=2)
+    # The next request triggers pruning and is allowed because the stale hit
+    # no longer counts.
+    assert limiter.is_allowed("1.2.3.4")
+    assert len(limiter._log["1.2.3.4"]) == 1
+    assert limiter._log["1.2.3.4"][0] > datetime.now(timezone.utc) - timedelta(seconds=1)
+
+
+def test_ip_rate_limiter_evicts_oldest_when_cap_exceeded():
+    limiter = _IpRateLimiter(timedelta(minutes=1), 10, max_ips=3)
+    limiter.is_allowed("1.2.3.1")
+    limiter.is_allowed("1.2.3.2")
+    limiter.is_allowed("1.2.3.3")
+    # Wait a tiny bit so the newest entry is clearly the latest.
+    import time
+
+    time.sleep(0.01)
+    limiter.is_allowed("1.2.3.4")
+    assert len(limiter._log) == 3
+    assert "1.2.3.1" not in limiter._log
+    assert "1.2.3.4" in limiter._log

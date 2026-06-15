@@ -137,7 +137,7 @@ async def get_section(
     Returns ``404`` if the section does not exist or does not belong to the
     given difficulty.  Returns ``403`` if the user is not a mapset member.
     """
-    section, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
+    section, mapset_id, _ = await get_section_or_404(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     kind = classify_membership(membership)
@@ -166,7 +166,7 @@ async def update_section(
 
     Permitted for ``owner`` and ``mapper`` roles only.
     """
-    section, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
+    section, mapset_id, _ = await get_section_or_404(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     require_role(membership, MapsetRole.owner, MapsetRole.mapper)
@@ -202,7 +202,7 @@ async def delete_section(
     Permitted for ``owner`` role only.  Cascades to all section versions
     via DB-level ``ondelete='CASCADE'``.
     """
-    section, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
+    section, mapset_id, _ = await get_section_or_404(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     require_role(membership, MapsetRole.owner)
@@ -241,7 +241,7 @@ async def assign_section(
 
     **Modder** and ghost members are forbidden.
     """
-    section, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
+    section, mapset_id, _ = await get_section_or_404(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     membership = require_active(membership)
@@ -322,7 +322,7 @@ async def upload_section_osu(
     ``DifficultyBaseOsuVersion``, satisfying the FK from
     ``source_section_version_id`` without an explicit flush.
     """
-    _, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
+    _, mapset_id, owner_id = await get_section_or_404(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     membership = require_role(membership, MapsetRole.owner, MapsetRole.mapper)
@@ -339,8 +339,7 @@ async def upload_section_osu(
     incoming = ROW_OVERHEAD_BYTES + len(payload.encrypted_content)
     if payload.base_version is not None:
         incoming += ROW_OVERHEAD_BYTES + len(payload.base_version.encrypted_content)
-    mapset = await db.get(Mapset, mapset_id)
-    await assert_active_capacity(db, mapset.owner_id, incoming)  # type: ignore[union-attr]
+    await assert_active_capacity(db, owner_id, incoming)
 
     # Compute next version number for this section.
     # Two concurrent uploads may race and compute the same next_version.
@@ -433,7 +432,7 @@ async def download_section_osu(
 
     Returns ``404`` if no version has been uploaded yet.
     """
-    section, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
+    section, mapset_id, _ = await get_section_or_404(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     kind = classify_membership(membership)
@@ -527,7 +526,7 @@ async def list_section_osu_versions(
        Results are capped at 500 versions. For sections with many uploads,
        consider adding ``limit``/``offset`` parameters in a future release.
     """
-    _, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
+    _, mapset_id, _ = await get_section_or_404(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     kind = classify_membership(membership)
@@ -566,7 +565,7 @@ async def activate_section_osu_version(
     the given section.  Returns ``409`` if a concurrent activation wins the
     race for the partial unique index.
     """
-    _, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
+    _, mapset_id, _ = await get_section_or_404(db, difficulty_id, section_id)
 
     membership = await get_mapset_membership(db, mapset_id, current_user.id)
     require_role(membership, MapsetRole.owner, MapsetRole.mapper)

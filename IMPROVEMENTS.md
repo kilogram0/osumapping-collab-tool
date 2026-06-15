@@ -27,7 +27,8 @@
 - **Why it's faulty:** A `modder` can never upload a `.osu`, so a modder-assigned section is a dead end. The three layers disagree about whether this is even allowed. Not a security hole (the frontend is stricter), but a real correctness/consistency gap.
 - **Fix:** In the owner path, reject `payload.user_id` whose membership role is `modder` with `422` (mirror the existing "Target user is not an active member" guard). Add a permission test.
 
-### 2. Stale security audit is actively misleading
+### 2. Stale security audit is actively misleading — ✅ DONE (2026-06-15)
+> Archived the 2026-05-07 audit with a superseded banner and published `.claude/security/2026-06-15-audit-full-stack.md` reflecting the implemented stack. Resolved H1 (application security layer) and H2 (OAuth rate limiting); carried forward the remaining supply-chain/CI items.
 - **Location:** [.claude/security/2026-05-07-audit-full-stack.md:33,106-114](.claude/security/2026-05-07-audit-full-stack.md#L106-L114)
 - **Problem:** Its headline **HIGH** finding (H1) states *"All auth, models, services, routes, and frontend application files remain empty stubs."* That is no longer true — the whole stack is implemented. Anyone reading this doc to gauge security posture is misled into thinking nothing is built.
 - **Fix:** Re-run a security review against the *current* tree (`/security-review`) and archive or clearly mark this file as superseded. Carry forward the items below that are still genuinely open.
@@ -96,11 +97,13 @@
 - **Problem:** It runs five correlated scalar subqueries (section versions, base versions, pins, posts, sections) across all of an owner's difficulties on each write. The code itself documents this as *"heavier than the COUNT it replaced."* For a power-owner with many difficulties this is the dominant backend cost on writes.
 - **Fix:** Accept for now (the docstring's reasoning is sound at current scale), but the documented escape hatch — a **trigger-maintained counter** (DB triggers *do* fire on cascade deletes, unlike app code) — is the right move if write latency ever shows up. Worth a tracking issue so the rationale isn't lost.
 
-### 9. Several sequential DB round-trips per request that could be merged
+### 9. Several sequential DB round-trips per request that could be merged — ✅ DONE (2026-06-15)
+> Extended `get_section_or_404` and `get_post_or_404` to return `owner_id` via a single `Section→Difficulty→Mapset` / `Post→Difficulty→Mapset` JOIN. Removed the follow-up `db.get(Mapset)` calls in `upload_section_osu` and `update_post`. The `create_*` helpers still use `get_difficulty_or_404`; they can be folded in the same way if the hot path ever justifies it.
 - **Example:** `upload_section_osu` does `_get_section` (JOIN) → `get_mapset_membership` → `db.get(Mapset)` → `assert_active_capacity` (the big query above) → two `MAX(version)` queries → writes — all sequentially awaited ([sections.py:359-405](backend/app/routers/sections.py#L359-L405)). Similar `db.get(Difficulty)` → membership → `db.get(Mapset)` chains appear in `create_section`, `create_difficulty`, `create_post`, `create_pin`.
 - **Fix:** The membership lookup and the parent-row fetch can frequently be a single JOIN (the `_get_section`/`_get_post` helpers already pull `mapset_id` this way — extend them to also return the owner_id and/or membership, eliminating one or two `db.get` round-trips). Low risk, measurable latency win on writes.
 
-### 10. No rate limiting on the OAuth endpoints
+### 10. No rate limiting on the OAuth endpoints — ✅ DONE (2026-06-15)
+> Added an in-memory per-IP rate limiter (`_IpRateLimiter`) in `services/rate_limit.py` and wired it as FastAPI dependencies on `/auth/osu/authorize` (20/min) and `/auth/osu/callback` (10/min). Added unit tests for the limiter and integration tests verifying 429 responses. State is per-worker; a Redis/nginx replacement is noted for multi-worker scale-out.
 - **Location:** [backend/app/routers/auth.py:72,105](backend/app/routers/auth.py#L72) — `/auth/osu/authorize` and `/auth/osu/callback` have no limiter. App-level rate limiting exists only for the username-lookup fallback ([services/rate_limit.py](backend/app/services/rate_limit.py), used in `members.invite_member`).
 - **Problem:** Carried over from the prior audit's still-open **H2**. The signed `state` is HMAC-protected so brute force is infeasible, but the callback can be flooded (each hit triggers outbound token-exchange + profile calls to osu!). No global API limiter either.
 - **Fix:** Add `slowapi` (or an nginx `limit_req` zone) in front of `/api/auth/*`, stricter than resource routes.
@@ -114,7 +117,8 @@
 - **Problem:** Heavy, rarely-first-paint components (`PinButton` 470 lines, `FullDifficultyUploadButton` 503, `osuParser` 622, `fflate` for `.osz`) load with the main bundle. Routes are imported eagerly in [App.tsx](frontend/src/App.tsx).
 - **Fix:** `React.lazy` the `MapsetPage` route and the `.osz`/merge/pin code paths so the dashboard and login pay nothing for them.
 
-### 13. Mapper-creates-difficulty asymmetry is a UX trap (by design, but worth surfacing)
+### 13. Mapper-creates-difficulty asymmetry is a UX trap (by design, but worth surfacing) — ✅ DONE (2026-06-15)
+> Added a UI hint on `MapsetPage`: when the effective role is `mapper` and the selected difficulty has no sections, an amber banner reads "Only the mapset owner can add sections to this difficulty." Translations added for English and Catalan.
 - **Location:** [backend/app/routers/difficulties.py:57-73](backend/app/routers/difficulties.py#L57-L73) — a `mapper` may **create** a difficulty but cannot add sections to it, rename it, or delete it (all owner-only). The frontend mirrors this (`canEditStructure` gates create, but section-add is `isOwner`-only, [MapsetPage.tsx:1122](frontend/src/pages/MapsetPage.tsx#L1122)).
 - **Problem:** A mapper can make an empty difficulty and then be unable to populate it — a confusing dead state, even though both layers agree.
 - **Fix:** Either let the creating mapper add sections to their own difficulty, or surface a clear hint in the UI ("Only the owner can add sections"). Product call, not a bug — flagging for intentional decision.
@@ -155,6 +159,6 @@
 2. ~~**#4, #5** (backend permission helper + dedupe) — biggest maintainability win, shrinks every router, kills `# type: ignore` noise, lowers permission-bug risk.~~ ✅ DONE (2026-06-15)
 3. ~~**#7** (UI primitive kit + color tokens) — your top-listed concern; one focused PR yields visible, consistent polish.~~ ✅ DONE (2026-06-15)
 4. ~~**#15, #17** (doc truth-up + backend nits) — cheap, prevents future confusion.~~ ✅ DONE (2026-06-15)
-5. **#6, #11, #12** (frontend decomposition + perf) — larger, do once the primitives exist. `#6` partially done (`useMapsetPermissions` extracted).
-6. **#2** (stale security audit) — archive or supersede the misleading prior audit.
-7. **#8, #9, #10** (backend perf + rate limiting) — schedule when write latency or abuse becomes real; the hooks/notes are already in place.
+5. ~~**#6, #11, #12** (frontend decomposition + perf) — larger, do once the primitives exist. `#6` partially done (`useMapsetPermissions` extracted).~~ — *deferred; #13 handled instead for this pass*
+6. ~~**#2** (stale security audit) — archive or supersede the misleading prior audit.~~ ✅ DONE (2026-06-15)
+7. ~~**#8, #9, #10** (backend perf + rate limiting) — schedule when write latency or abuse becomes real; the hooks/notes are already in place.~~ ✅ #9, #10 DONE (2026-06-15); #8 still tracked

@@ -115,7 +115,7 @@ async def test_get_difficulty_or_404_missing(db_session):
 
 
 @pytest.mark.asyncio
-async def test_get_section_or_404_found(db_session, mapset_difficulty):
+async def test_get_section_or_404_found(db_session, mapset_difficulty, mapset_owner):
     section = Section(
         id=uuid4(),
         difficulty_id=mapset_difficulty.id,
@@ -127,11 +127,12 @@ async def test_get_section_or_404_found(db_session, mapset_difficulty):
     db_session.add(section)
     await db_session.commit()
 
-    result, mapset_id = await get_section_or_404(
+    result, mapset_id, owner_id = await get_section_or_404(
         db_session, mapset_difficulty.id, section.id
     )
     assert result.id == section.id
     assert mapset_id == mapset_difficulty.mapset_id
+    assert owner_id == mapset_owner.id
 
 
 @pytest.mark.asyncio
@@ -154,11 +155,12 @@ async def test_get_post_or_404_found(db_session, mapset_difficulty, mapset_owner
     db_session.add(post)
     await db_session.commit()
 
-    result, mapset_id = await get_post_or_404(
+    result, mapset_id, owner_id = await get_post_or_404(
         db_session, mapset_difficulty.id, post.id
     )
     assert result.id == post.id
     assert mapset_id == mapset_difficulty.mapset_id
+    assert owner_id == mapset_owner.id
 
 
 @pytest.mark.asyncio

@@ -1099,6 +1099,12 @@ export default function MapsetPage() {
 
         {selectedDifficultyId && (
           <div className="space-y-6">
+            {effectiveRole === 'mapper' && sections.length === 0 && (
+              <p className="text-sm text-amber-300 bg-amber-900/30 border border-amber-700/50 rounded-lg px-4 py-3">
+                {t('mapsetPage.mapperCannotAddSections')}
+              </p>
+            )}
+
             {/* Timeline. Rendered for owners even with zero sections so the
                 inline add-section "+" (which fills the empty bar) is reachable. */}
             {songLengthMs !== null && (decryptedSections.length > 0 || isOwner) && (

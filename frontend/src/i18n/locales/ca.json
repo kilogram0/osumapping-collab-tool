@@ -473,6 +473,7 @@
     "addDifficulty": "Afegeix dificultat",
     "loadingDifficulties": "S'estan carregant les dificultats…",
     "noDifficulties": "Encara no hi ha cap dificultat.",
+    "mapperCannotAddSections": "Només el propietari del mapset pot afegir seccions a aquesta dificultat.",
     "addSection": "Afegeix secció",
     "renameDifficulty": "Renombrar la dificultat",
     "deleteDifficulty": "Suprimeix la dificultat",

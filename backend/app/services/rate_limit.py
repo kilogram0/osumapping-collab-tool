@@ -10,6 +10,76 @@ from uuid import UUID
 _WINDOW = timedelta(minutes=30)
 _MAX_CALLS = 50
 
+
+class _IpRateLimiter:
+    """Simple in-memory per-IP rate limiter with bounded state.
+
+    This is a stop-gap for the OAuth endpoints, which are the only public,
+    unauthenticated entry points.  In-process state is acceptable for the
+    single-worker default deployment; switch to Redis or nginx ``limit_req``
+    before scaling out.
+
+    State is capped at ``max_ips`` entries.  During normal operation expired
+    entries are pruned and the oldest live entry is evicted if the cap is
+    exceeded, so a header-rotating attacker cannot grow memory without bound.
+    """
+
+    def __init__(
+        self, window: timedelta, max_calls: int, max_ips: int = 10000
+    ) -> None:
+        self.window = window
+        self.max_calls = max_calls
+        self.max_ips = max_ips
+        self._log: dict[str, list[datetime]] = {}
+
+    def _prune(self, now: datetime) -> None:
+        """Drop stale timestamps and, if necessary, the oldest live entries."""
+        window_start = now - self.window
+        # Remove timestamps outside the window and keys that became empty.
+        for key in list(self._log.keys()):
+            recent = [t for t in self._log[key] if t > window_start]
+            if recent:
+                self._log[key] = recent
+            else:
+                del self._log[key]
+
+        # Evict the oldest live entries if the cap is reached.  Using >= makes
+        # room before a new IP is recorded in ``is_allowed``.
+        while len(self._log) >= self.max_ips:
+            oldest_key = min(self._log, key=lambda k: self._log[k][0])
+            del self._log[oldest_key]
+
+    def is_allowed(self, ip: str) -> bool:
+        """Return True if *ip* is under its limit and record the hit."""
+        now = datetime.now(timezone.utc)
+        self._prune(now)
+        window_start = now - self.window
+        recent = [t for t in self._log.get(ip, []) if t > window_start]
+        if len(recent) >= self.max_calls:
+            self._log[ip] = recent
+            return False
+        recent.append(now)
+        self._log[ip] = recent
+        return True
+
+
+# OAuth endpoints are public and each callback triggers an outbound token
+# exchange + profile fetch.  20 requests/minute for init and 10/minute for
+# callback is generous for a legitimate user and tight enough to blunt casual
+# flooding.
+_OAUTH_INIT_LIMITER = _IpRateLimiter(timedelta(minutes=1), 20)
+_OAUTH_CALLBACK_LIMITER = _IpRateLimiter(timedelta(minutes=1), 10)
+
+
+def check_oauth_init_rate_limit(ip: str) -> bool:
+    """Gate ``GET /api/auth/osu/authorize`` by source IP."""
+    return _OAUTH_INIT_LIMITER.is_allowed(ip)
+
+
+def check_oauth_callback_rate_limit(ip: str) -> bool:
+    """Gate ``GET /api/auth/osu/callback`` by source IP."""
+    return _OAUTH_CALLBACK_LIMITER.is_allowed(ip)
+
 # Escalating ban duration indexed by offense number (0-based).
 # The last entry applies to all subsequent offenses.
 _BAN_DURATIONS: list[timedelta | None] = [

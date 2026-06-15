@@ -474,6 +474,7 @@
     "addDifficulty": "Add Difficulty",
     "loadingDifficulties": "Loading difficulties…",
     "noDifficulties": "No difficulties yet.",
+    "mapperCannotAddSections": "Only the mapset owner can add sections to this difficulty.",
     "addSection": "Add Section",
     "renameDifficulty": "Rename Difficulty",
     "deleteDifficulty": "Delete Difficulty",

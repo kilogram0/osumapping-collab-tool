@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import app.services.auth_service as _auth_svc
+import app.services.rate_limit as _rl
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -15,6 +16,16 @@ from app.dependencies import generate_oauth_state
 from app.models import User
 from app.services.auth_service import AuthServiceError, create_access_token
 from tests.conftest import test_engine
+
+
+@pytest.fixture(autouse=True)
+def clean_oauth_rate_limit_state():
+    """Reset the OAuth IP limiters so auth tests don't share quota."""
+    _rl._OAUTH_INIT_LIMITER._log.clear()
+    _rl._OAUTH_CALLBACK_LIMITER._log.clear()
+    yield
+    _rl._OAUTH_INIT_LIMITER._log.clear()
+    _rl._OAUTH_CALLBACK_LIMITER._log.clear()
 
 
 # ------------------------------------------------------------------
@@ -666,4 +677,39 @@ async def test_lookup_osu_user_raises_on_network_error():
     ):
         with pytest.raises(AuthServiceError, match="refused"):
             await _auth_svc.lookup_osu_user_by_username("test")
+
+
+# ------------------------------------------------------------------
+# OAuth endpoint rate limiting
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_authorize_rate_limited_after_threshold(client: AsyncClient):
+    """Excessive OAuth init requests from one IP receive 429."""
+    for _ in range(_rl._OAUTH_INIT_LIMITER.max_calls):
+        response = await client.get(
+            "/api/auth/osu/authorize", follow_redirects=False
+        )
+        assert response.status_code == 302
+
+    response = await client.get("/api/auth/osu/authorize", follow_redirects=False)
+    assert response.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_callback_rate_limited_after_threshold(client: AsyncClient):
+    """Excessive OAuth callback requests from one IP receive 429."""
+    for _ in range(_rl._OAUTH_CALLBACK_LIMITER.max_calls):
+        response = await client.get(
+            "/api/auth/osu/callback?code=x&state=y", follow_redirects=False
+        )
+        # Missing state cookie means the request is processed but rejected;
+        # the rate limiter still counts it.
+        assert response.status_code == 400
+
+    response = await client.get(
+        "/api/auth/osu/callback?code=x&state=y", follow_redirects=False
+    )
+    assert response.status_code == 429
 
