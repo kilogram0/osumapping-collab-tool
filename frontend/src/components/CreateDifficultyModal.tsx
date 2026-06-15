@@ -12,6 +12,7 @@ import {
   type ParsedOsuFile,
 } from '../utils/osuParser';
 import { importSectionsFromBookmarks } from '../utils/importSectionsFromBookmarks';
+import { Button, Input, Modal } from './ui';
 
 interface CreateDifficultyModalProps {
   mapsetId: string;
@@ -159,39 +160,26 @@ export default function CreateDifficultyModal({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="create-difficulty-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl">
+    <Modal open ariaLabelledBy="create-difficulty-title" onClose={onCancel}>
+      <div className="p-6">
         <h2 id="create-difficulty-title" className="text-xl font-bold text-white mb-4">
           {t('createDifficultyModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="difficulty-name" className="block text-sm font-medium text-gray-300 mb-1">
-              {t('createDifficultyModal.nameLabel')} <span className="text-red-400">{t('common.required')}</span>
-            </label>
-            <input
-              id="difficulty-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={255}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder={t('createDifficultyModal.namePlaceholder')}
-            />
-          </div>
+          <Input
+            id="difficulty-name"
+            label={t('createDifficultyModal.nameLabel')}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            maxLength={255}
+            placeholder={t('createDifficultyModal.namePlaceholder')}
+          />
 
           <div>
-            <label htmlFor="difficulty-osu" className="block text-sm font-medium text-gray-300 mb-1">
+            <label htmlFor="difficulty-osu" className="block text-sm font-medium text-muted-light mb-1">
               {t('createDifficultyModal.osuLabel')}
             </label>
             <input
@@ -200,43 +188,35 @@ export default function CreateDifficultyModal({
               type="file"
               accept=".osu"
               onChange={handleFileChange}
-              className="block w-full text-sm text-gray-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-purple-600 file:text-white hover:file:bg-purple-500"
+              className="block w-full text-sm text-muted-light file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-purple-600 file:text-white hover:file:bg-purple-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-muted/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-muted mt-1">
               {t('createDifficultyModal.osuHelpPrefix')}<code>[Editor] Bookmarks</code>{t('createDifficultyModal.osuHelpSuffix')}
             </p>
             {osuFile && !parseError && (
-              <p className="text-xs text-green-400 mt-1">{t('createDifficultyModal.selectedFile', { name: osuFile.name })}</p>
+              <p className="text-xs text-success-muted mt-1">{t('createDifficultyModal.selectedFile', { name: osuFile.name })}</p>
             )}
             {parseError && (
-              <p role="alert" className="text-xs text-red-400 mt-1">{parseError}</p>
+              <p role="alert" className="text-xs text-danger-muted mt-1">{parseError}</p>
             )}
           </div>
 
           {error && (
-            <p role="alert" className="text-red-400 text-sm">
+            <p role="alert" className="text-danger-muted text-sm">
               {error}
             </p>
           )}
 
           <div className="flex gap-3 justify-end pt-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
-            >
+            <Button type="button" variant="ghost" onClick={onCancel}>
               {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={!name.trim() || submitting}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
-            >
+            </Button>
+            <Button type="submit" disabled={!name.trim()} loading={submitting}>
               {submitting ? t('createDifficultyModal.submitting') : t('createDifficultyModal.submit')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

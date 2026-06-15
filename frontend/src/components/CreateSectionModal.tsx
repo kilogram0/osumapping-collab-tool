@@ -4,6 +4,7 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import { encrypt, sectionFieldAad } from '../utils/crypto';
 import { useCreateSection } from '../hooks/useDifficulty';
 import { formatTimestamp, parseTimestampString } from '../utils/extractTimestamp';
+import { Button, Input, Modal } from './ui';
 
 interface PreviousSection {
   id: string;
@@ -108,84 +109,59 @@ export default function CreateSectionModal({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="create-section-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
+    <Modal open ariaLabelledBy="create-section-title" onClose={onCancel}>
+      <div className="p-6">
         <h2 id="create-section-title" className="text-xl font-bold text-white mb-4">
           {t('createSectionModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="section-name" className="block text-sm font-medium text-gray-300 mb-1">
-              {t('createSectionModal.nameLabel')} <span className="text-red-400">{t('common.required')}</span>
-            </label>
-            <input
-              id="section-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={255}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder={t('createSectionModal.namePlaceholder')}
-            />
-          </div>
+          <Input
+            id="section-name"
+            label={t('createSectionModal.nameLabel')}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            maxLength={255}
+            placeholder={t('createSectionModal.namePlaceholder')}
+          />
 
           <div>
-            <span className="block text-sm font-medium text-gray-300 mb-1">{t('createSectionModal.startTimeLabel')}</span>
-            <p className="text-sm text-gray-400">
-              {formatTimestamp(startMs)} <span className="text-xs text-gray-500">{t('createSectionModal.startTimeHint')}</span>
+            <span className="block text-sm font-medium text-muted-light mb-1">{t('createSectionModal.startTimeLabel')}</span>
+            <p className="text-sm text-muted-light">
+              {formatTimestamp(startMs)} <span className="text-xs text-muted">{t('createSectionModal.startTimeHint')}</span>
             </p>
           </div>
 
-          <div>
-            <label htmlFor="section-end-time" className="block text-sm font-medium text-gray-300 mb-1">
-              {t('createSectionModal.endTimeLabel')} <span className="text-red-400">{t('common.required')}</span>
-            </label>
-            <input
-              id="section-end-time"
-              type="text"
-              value={endTimeInput}
-              onChange={(e) => setEndTimeInput(e.target.value)}
-              required
-              placeholder={t('createSectionModal.endTimePlaceholder')}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 font-mono"
-            />
-            <p className="text-xs text-gray-500 mt-1">{t('createSectionModal.endTimeFormatHint')}</p>
-          </div>
+          <Input
+            id="section-end-time"
+            label={t('createSectionModal.endTimeLabel')}
+            type="text"
+            value={endTimeInput}
+            onChange={(e) => setEndTimeInput(e.target.value)}
+            required
+            placeholder={t('createSectionModal.endTimePlaceholder')}
+            className="font-mono"
+            hint={t('createSectionModal.endTimeFormatHint')}
+          />
 
           {error && (
-            <p role="alert" className="text-red-400 text-sm">
+            <p role="alert" className="text-danger-muted text-sm">
               {error}
             </p>
           )}
 
           <div className="flex gap-3 justify-end pt-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
-            >
+            <Button type="button" variant="ghost" onClick={onCancel}>
               {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={!name.trim() || submitting}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
-            >
+            </Button>
+            <Button type="submit" disabled={!name.trim()} loading={submitting}>
               {submitting ? t('createSectionModal.submitting') : t('createSectionModal.submit')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

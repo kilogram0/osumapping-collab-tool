@@ -39,6 +39,7 @@ import {
   useUpdateSection,
 } from '../hooks/useDifficulty';
 import { useMapset, useMembers, useMyMembership } from '../hooks/useMapset';
+import { useMapsetPermissions } from '../hooks/useMapsetPermissions';
 import { decrypt, encrypt, decodeJsonEnvelope, mapsetFieldAad, postFieldAad, sectionFieldAad, sectionOsuVersionAad, difficultyBaseOsuVersionAad } from '../utils/crypto';
 import { isAxiosError } from 'axios';
 import { extractApiErrorMessage } from '../utils/errors';
@@ -55,7 +56,7 @@ import { buildAssignmentText, toAssignmentInputs } from '../utils/sectionAssignm
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
 import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
 import { filterPostsBySection, findSectionForMs } from '../utils/sectionPosts';
-import type { MapsetRole, Post, Section } from '../api/endpoints';
+import type { Post, Section } from '../api/endpoints';
 import type { DecryptedSection } from '../components/SectionList';
 import type { DecryptedPost } from '../types';
 
@@ -143,29 +144,19 @@ export default function MapsetPage() {
   const [showOnlyUnresolved, setShowOnlyUnresolved] = useState(false);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
-  // Owner-only role emulation: lets the owner preview the page as a mapper,
-  // modder, or ghost member. Stored in component state — resets when leaving
-  // the page. Only the owner's UI is affected; nothing is sent to the server.
-  const [emulatedRole, setEmulatedRole] = useState<MapsetRole | null>(null);
-  const [emulateGhost, setEmulateGhost] = useState(false);
 
-  const realIsGhost = !!(myMembership?.kicked_at);
-  const isGhost = realIsGhost || emulateGhost;
-  const actualRole = myMembership?.role ?? null;
-  const actualIsOwner = !realIsGhost && actualRole === 'owner';
-  const effectiveRole = actualIsOwner && emulatedRole && !emulateGhost ? emulatedRole : actualRole;
-  const isOwner = !isGhost && effectiveRole === 'owner';
-  const canEditStructure = !isGhost && (isOwner || effectiveRole === 'mapper');
-
-  // If the user loses ownership mid-session (e.g. transferred it to another
-  // member), drop any active preview so it can't silently reactivate on a
-  // future re-promotion.
-  useEffect(() => {
-    if (!actualIsOwner) {
-      if (emulatedRole !== null) setEmulatedRole(null);
-      if (emulateGhost) setEmulateGhost(false);
-    }
-  }, [actualIsOwner, emulatedRole, emulateGhost]);
+  const {
+    realIsGhost,
+    isGhost,
+    actualIsOwner,
+    effectiveRole,
+    isOwner,
+    canEditStructure,
+    emulatedRole,
+    setEmulatedRole,
+    emulateGhost,
+    setEmulateGhost,
+  } = useMapsetPermissions(myMembership);
 
   const { activeDifficulties, pendingDifficulties } = useMemo(() => {
     const active: NonNullable<typeof difficulties> = [];

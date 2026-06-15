@@ -6,6 +6,7 @@ import { encrypt, mapsetFieldAad } from '../utils/crypto';
 import { makeClampedOnChange } from '../utils/numericInput';
 import { useUpdateMapset } from '../hooks/useMapset';
 import type { UpdateMapsetPayload } from '../api/endpoints';
+import { Button, Input, Modal } from './ui';
 
 interface EditMapsetModalProps {
   mapsetId: string;
@@ -100,112 +101,79 @@ export default function EditMapsetModal({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="edit-mapset-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
+    <Modal open ariaLabelledBy="edit-mapset-title" onClose={onCancel} maxWidth="lg">
+      <div className="p-6">
         <h2 id="edit-mapset-title" className="text-xl font-bold text-white mb-4">
           {t('editMapsetModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="edit-mapset-title-input" className="block text-sm font-medium text-gray-300 mb-1">
-              {t('editMapsetModal.titleLabel')} <span className="text-red-400">{t('common.required')}</span>
-            </label>
-            <input
-              id="edit-mapset-title-input"
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
-              maxLength={255}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder={t('editMapsetModal.titlePlaceholder')}
-              autoFocus
-            />
-            <p className="text-xs text-yellow-500 mt-1">
-              {t('editMapsetModal.titleWarning')}
-            </p>
-          </div>
+          <Input
+            id="edit-mapset-title-input"
+            label={t('editMapsetModal.titleLabel')}
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            maxLength={255}
+            placeholder={t('editMapsetModal.titlePlaceholder')}
+            autoFocus
+            hint={t('editMapsetModal.titleWarning')}
+          />
+
+          <Input
+            id="edit-mapset-description"
+            label={t('editMapsetModal.descriptionLabel')}
+            multiline
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('editMapsetModal.descriptionPlaceholder')}
+          />
 
           <div>
-            <label htmlFor="edit-mapset-description" className="block text-sm font-medium text-gray-300 mb-1">
-              {t('editMapsetModal.descriptionLabel')}
-            </label>
-            <textarea
-              id="edit-mapset-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 resize-none"
-              placeholder={t('editMapsetModal.descriptionPlaceholder')}
-            />
-          </div>
-
-          <div>
-            <span className="block text-sm font-medium text-gray-300 mb-1">{t('editMapsetModal.songLengthLabel')}</span>
+            <span className="block text-sm font-medium text-muted-light mb-1">{t('editMapsetModal.songLengthLabel')}</span>
             <div className="flex gap-2">
-              <div className="flex-1">
-                <label htmlFor="edit-mapset-song-minutes" className="sr-only">{t('editMapsetModal.minutes')}</label>
-                <input
-                  id="edit-mapset-song-minutes"
-                  type="number"
-                  value={minutes}
-                  onChange={makeClampedOnChange(setMinutes)}
-                  min={0}
-                  className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                  placeholder="0"
-                />
-                <span className="text-xs text-gray-400 mt-1 block">{t('editMapsetModal.minutes')}</span>
-              </div>
-              <div className="flex-1">
-                <label htmlFor="edit-mapset-song-seconds" className="sr-only">{t('editMapsetModal.seconds')}</label>
-                <input
-                  id="edit-mapset-song-seconds"
-                  type="number"
-                  value={seconds}
-                  onChange={makeClampedOnChange(setSeconds, 59)}
-                  min={0}
-                  max={59}
-                  className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                  placeholder="0"
-                />
-                <span className="text-xs text-gray-400 mt-1 block">{t('editMapsetModal.seconds')}</span>
-              </div>
+              <Input
+                id="edit-mapset-song-minutes"
+                label={t('editMapsetModal.minutes')}
+                type="number"
+                value={minutes}
+                onChange={makeClampedOnChange(setMinutes)}
+                min={0}
+                placeholder="0"
+                className="flex-1"
+              />
+              <Input
+                id="edit-mapset-song-seconds"
+                label={t('editMapsetModal.seconds')}
+                type="number"
+                value={seconds}
+                onChange={makeClampedOnChange(setSeconds, 59)}
+                min={0}
+                max={59}
+                placeholder="0"
+                className="flex-1"
+              />
             </div>
           </div>
 
           {error && (
-            <p role="alert" className="text-red-400 text-sm">
+            <p role="alert" className="text-danger-muted text-sm">
               {error}
             </p>
           )}
 
           <div className="flex gap-3 justify-end pt-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
-            >
+            <Button type="button" variant="ghost" onClick={onCancel}>
               {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={!title.trim() || submitting}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
-            >
+            </Button>
+            <Button type="submit" disabled={!title.trim()} loading={submitting}>
               {submitting ? t('editMapsetModal.submitting') : t('editMapsetModal.submit')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

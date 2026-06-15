@@ -567,6 +567,29 @@ describe('MapsetPage', () => {
     );
   });
 
+  it('shows a preview banner while emulating and clears it on exit', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Test Mapset')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /^Manage$/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /manage members/i }));
+    const emulateSelect = await screen.findByRole('combobox', { name: /preview/i });
+    await userEvent.selectOptions(emulateSelect, 'mapper');
+
+    const banner = await screen.findByRole('status');
+    expect(banner).toHaveTextContent(/mapper/i);
+
+    await userEvent.click(within(banner).getByRole('button', { name: /exit preview/i }));
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+
+    // After exiting the preview, ResourcesPanel should see isOwner=true again.
+    await waitFor(() =>
+      expect(mockResourcesPanelProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({ isOwner: true }),
+      ),
+    );
+  });
+
   it('shows Show All Posts toggle', async () => {
     renderPage();
     await waitFor(() => {

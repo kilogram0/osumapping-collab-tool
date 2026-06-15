@@ -104,17 +104,23 @@ backend/app/
 ├── main.py              # App factory, middleware, mount routers
 ├── database.py          # Async engine, session factory, get_db dependency
 ├── config.py            # Pydantic Settings (env vars)
+├── env.py               # Environment helper for explicit env var access
 ├── models.py            # SQLModel tables (the ONLY source of truth for schema)
 ├── schemas.py           # Pydantic request/response models (API contracts)
 ├── dependencies.py      # FastAPI dependencies: get_current_user, require_mapset_member
+├── queries.py           # Shared DB helpers + membership/permission primitives
 ├── routers/             # One router per domain
 │   ├── auth.py
 │   ├── mapsets.py
 │   ├── difficulties.py
 │   ├── sections.py
-│   └── posts.py
+│   ├── posts.py
+│   ├── pins.py
+│   ├── members.py
+│   └── resources.py
 └── services/            # Pure business logic, NO FastAPI imports
-    └── auth_service.py  # OAuth flow, JWT creation
+    ├── auth_service.py  # OAuth flow, JWT creation
+    └── rate_limit.py    # In-memory rate-limiting helper
     # NOTE: osu_parser.py is REMOVED — all .osu processing is client-side.
 ```
 
@@ -140,22 +146,51 @@ frontend/src/
 ├── hooks/
 │   ├── useAuth.ts        # React Context + hook for current user
 │   ├── useMapset.ts      # TanStack Query hooks for mapset data
-│   └── useDifficulty.ts  # TanStack Query hooks for difficulty/section data
+│   ├── useDifficulty.ts  # TanStack Query hooks for difficulty/section data
+│   └── useMapsetPermissions.ts # Effective role + owner emulation
 ├── pages/
 │   ├── LoginPage.tsx
 │   ├── DashboardPage.tsx
 │   └── MapsetPage.tsx
-└── components/
-    ├── Navbar.tsx
-    ├── MapsetCard.tsx
-    ├── DifficultyTabs.tsx
-    ├── SectionList.tsx
-    ├── PostCard.tsx
-    ├── CreatePostForm.tsx
-    ├── OsuUploadButton.tsx
-    ├── OsuVersionHistory.tsx
-    ├── BaseVersionHistory.tsx
-    └── DownloadOsuButton.tsx
+├── components/
+│   ├── Navbar.tsx
+│   ├── TopBar.tsx
+│   ├── MapsetCard.tsx
+│   ├── DifficultyDropdown.tsx
+│   ├── SectionList.tsx
+│   ├── SectionDetailPanel.tsx
+│   ├── Timeline.tsx
+│   ├── PostCard.tsx
+│   ├── PostsPanel.tsx
+│   ├── CreatePostForm.tsx
+│   ├── OsuUploadButton.tsx
+│   ├── FullDifficultyUploadButton.tsx
+│   ├── MergedDownloadButton.tsx
+│   ├── OsuVersionHistory.tsx
+│   ├── BaseVersionHistory.tsx
+│   ├── PinButton.tsx
+│   ├── ResourcesPanel.tsx
+│   ├── ManageMembersModal.tsx
+│   ├── ManageMenuButton.tsx
+│   ├── PassphraseModal.tsx
+│   ├── CreateDifficultyModal.tsx
+│   ├── CreateSectionModal.tsx
+│   ├── EditSectionModal.tsx
+│   ├── RenameDifficultyModal.tsx
+│   ├── SplitSectionModal.tsx
+│   ├── EditMapsetModal.tsx
+│   ├── CreateMapsetModal.tsx
+│   ├── ImportBookmarksButton.tsx
+│   ├── LanguageSwitcher.tsx
+│   ├── ToastContainer.tsx
+│   └── ui/               # Shared UI primitives (Modal, Button, Input, Card)
+│       ├── Modal.tsx
+│       ├── Button.tsx
+│       ├── Input.tsx
+│       └── Card.tsx
+└── contexts/
+    ├── EncryptionContext.tsx
+    └── ToastContext.tsx
 ```
 
 **Rules:**

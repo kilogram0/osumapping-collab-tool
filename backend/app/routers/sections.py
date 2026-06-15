@@ -369,7 +369,7 @@ async def upload_section_osu(
             sa_update(SectionOsuVersion)
             .where(
                 SectionOsuVersion.section_id == section_id,
-                SectionOsuVersion.is_active == True,  # noqa: E712
+                SectionOsuVersion.is_active.is_(True),
             )
             .values(is_active=False)
         )
@@ -391,7 +391,7 @@ async def upload_section_osu(
                 sa_update(DifficultyBaseOsuVersion)
                 .where(
                     DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
-                    DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
+                    DifficultyBaseOsuVersion.is_active.is_(True),
                 )
                 .values(is_active=False)
             )
@@ -447,7 +447,7 @@ async def download_section_osu(
 
     query = select(SectionOsuVersion).where(
         SectionOsuVersion.section_id == section_id,
-        SectionOsuVersion.is_active == True,  # noqa: E712
+        SectionOsuVersion.is_active.is_(True),
     )
     if kind == MembershipKind.GHOST:
         query = query.where(SectionOsuVersion.created_at <= membership.kicked_at)  # type: ignore[union-attr]
@@ -488,7 +488,7 @@ async def download_base_osu(
 
     query = select(DifficultyBaseOsuVersion).where(
         DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
-        DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
+        DifficultyBaseOsuVersion.is_active.is_(True),
     )
     if kind == MembershipKind.GHOST:
         query = query.where(DifficultyBaseOsuVersion.created_at <= membership.kicked_at)  # type: ignore[union-attr]
@@ -524,9 +524,8 @@ async def list_section_osu_versions(
     given difficulty.  Returns ``403`` if the user is not a mapset member.
 
     .. note::
-       This endpoint is currently unbounded. For sections with many uploads
-       (hundreds of versions), consider adding ``limit``/``offset``
-       parameters in a future release.
+       Results are capped at 500 versions. For sections with many uploads,
+       consider adding ``limit``/``offset`` parameters in a future release.
     """
     _, mapset_id = await get_section_or_404(db, difficulty_id, section_id)
 
@@ -596,7 +595,7 @@ async def activate_section_osu_version(
             sa_update(SectionOsuVersion)
             .where(
                 SectionOsuVersion.section_id == section_id,
-                SectionOsuVersion.is_active == True,  # noqa: E712
+                SectionOsuVersion.is_active.is_(True),
             )
             .values(is_active=False)
         )
@@ -667,7 +666,7 @@ async def create_base_osu_version(
             sa_update(DifficultyBaseOsuVersion)
             .where(
                 DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
-                DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
+                DifficultyBaseOsuVersion.is_active.is_(True),
             )
             .values(is_active=False)
         )
@@ -709,9 +708,8 @@ async def list_base_osu_versions(
     user is not a mapset member.
 
     .. note::
-       This endpoint is currently unbounded. For difficulties with many
-       uploads (hundreds of versions), consider adding ``limit``/``offset``
-       parameters in a future release.
+       Results are capped at 500 versions. For difficulties with many uploads,
+       consider adding ``limit``/``offset`` parameters in a future release.
     """
     difficulty = await get_difficulty_or_404(db, difficulty_id)
 
@@ -780,7 +778,7 @@ async def activate_base_osu_version(
             sa_update(DifficultyBaseOsuVersion)
             .where(
                 DifficultyBaseOsuVersion.difficulty_id == difficulty_id,
-                DifficultyBaseOsuVersion.is_active == True,  # noqa: E712
+                DifficultyBaseOsuVersion.is_active.is_(True),
             )
             .values(is_active=False)
         )

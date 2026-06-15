@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  /* Ensure every interactive element gets a consistent, visible focus ring.
+   * Components that use the Button/Input/Modal primitives get the same ring
+   * via Tailwind utilities; this global fallback covers legacy buttons and
+   * native inputs until they are migrated. */
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:not([tabindex="-1"]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px #111827, 0 0 0 4px #60a5fa;
+  }
+}
+
 @keyframes post-flash {
   0%   { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.6); }
   20%  { box-shadow: 0 0 0 8px rgba(250, 204, 21, 0.3); }

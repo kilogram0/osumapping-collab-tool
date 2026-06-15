@@ -6,6 +6,7 @@ import { encrypt, sectionFieldAad } from '../utils/crypto';
 import { useUpdateSection } from '../hooks/useDifficulty';
 import { formatTimestamp, parseTimestampString } from '../utils/extractTimestamp';
 import { redistributeForShorten } from '../utils/sectionRedistribute';
+import { Button, Input, Modal } from './ui';
 
 interface EditSectionModalProps {
   difficultyId: string;
@@ -158,83 +159,58 @@ export default function EditSectionModal({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="edit-section-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
+    <Modal open ariaLabelledBy="edit-section-title" onClose={onCancel}>
+      <div className="p-6">
         <h2 id="edit-section-title" className="text-xl font-bold text-white mb-4">
           {t('editSectionModal.title')}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="edit-section-name" className="block text-sm font-medium text-gray-300 mb-1">
-              {t('editSectionModal.nameLabel')} <span className="text-red-400">{t('common.required')}</span>
-            </label>
-            <input
-              id="edit-section-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={255}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-            />
-          </div>
+          <Input
+            id="edit-section-name"
+            label={t('editSectionModal.nameLabel')}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            maxLength={255}
+          />
 
           <div>
-            <span className="block text-sm font-medium text-gray-300 mb-1">{t('editSectionModal.startTimeLabel')}</span>
-            <p className="text-sm text-gray-400">
-              {formatTimestamp(initialStartTimeMs)} <span className="text-xs text-gray-500">{t('editSectionModal.startTimeHint')}</span>
+            <span className="block text-sm font-medium text-muted-light mb-1">{t('editSectionModal.startTimeLabel')}</span>
+            <p className="text-sm text-muted-light">
+              {formatTimestamp(initialStartTimeMs)} <span className="text-xs text-muted">{t('editSectionModal.startTimeHint')}</span>
             </p>
           </div>
 
-          <div>
-            <label htmlFor="edit-section-end-time" className="block text-sm font-medium text-gray-300 mb-1">
-              {t('editSectionModal.endTimeLabel')} <span className="text-red-400">{t('common.required')}</span>
-            </label>
-            <input
-              id="edit-section-end-time"
-              type="text"
-              value={endTimeInput}
-              onChange={(e) => setEndTimeInput(e.target.value)}
-              required
-              placeholder={t('editSectionModal.endTimePlaceholder')}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 font-mono"
-            />
-            <p className="text-xs text-gray-500 mt-1">{t('editSectionModal.endTimeFormatHint')}</p>
-          </div>
+          <Input
+            id="edit-section-end-time"
+            label={t('editSectionModal.endTimeLabel')}
+            type="text"
+            value={endTimeInput}
+            onChange={(e) => setEndTimeInput(e.target.value)}
+            required
+            placeholder={t('editSectionModal.endTimePlaceholder')}
+            className="font-mono"
+            hint={t('editSectionModal.endTimeFormatHint')}
+          />
 
           {error && (
-            <p role="alert" className="text-red-400 text-sm">
+            <p role="alert" className="text-danger-muted text-sm">
               {error}
             </p>
           )}
 
           <div className="flex gap-3 justify-end pt-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
-            >
+            <Button type="button" variant="ghost" onClick={onCancel}>
               {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={!name.trim() || submitting}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
-            >
+            </Button>
+            <Button type="submit" disabled={!name.trim()} loading={submitting}>
               {submitting ? t('editSectionModal.submitting') : t('editSectionModal.submit')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

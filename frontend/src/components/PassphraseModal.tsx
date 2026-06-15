@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Mapset } from '../api/endpoints';
 import { useEncryption } from '../contexts/EncryptionContext';
+import { Button, Input, Modal } from './ui';
 
 interface PassphraseModalProps {
   mapset: Mapset;
@@ -31,63 +32,45 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="passphrase-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-    >
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-md shadow-xl">
+    <Modal open ariaLabelledBy="passphrase-modal-title" onClose={onCancel ?? (() => {})} closeOnBackdrop={false} closeOnEscape={false}>
+      <div className="p-6">
         <h2 id="passphrase-modal-title" className="text-xl font-bold text-white mb-2">
           {t('passphraseModal.title')}
         </h2>
-        <p className="text-gray-400 text-sm mb-4">
+        <p className="text-muted-light text-sm mb-4">
           {t('passphraseModal.intro')}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="passphrase-input" className="block text-sm font-medium text-gray-300 mb-1">
-              {t('passphraseModal.label')}
-            </label>
-            <input
-              id="passphrase-input"
-              type="password"
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
-              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              placeholder={t('passphraseModal.placeholder')}
-              autoComplete="off"
-              autoFocus
-            />
-          </div>
+          <Input
+            id="passphrase-input"
+            label={t('passphraseModal.label')}
+            type="password"
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.target.value)}
+            placeholder={t('passphraseModal.placeholder')}
+            autoComplete="off"
+            autoFocus
+          />
 
           {error && (
-            <p role="alert" className="text-red-400 text-sm">
+            <p role="alert" className="text-danger-muted text-sm">
               {error}
             </p>
           )}
 
           <div className="flex gap-3 justify-end">
             {onCancel && (
-              <button
-                type="button"
-                onClick={onCancel}
-                className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
-              >
+              <Button type="button" variant="ghost" onClick={onCancel}>
                 {t('common.cancel')}
-              </button>
+              </Button>
             )}
-            <button
-              type="submit"
-              disabled={loading || !passphrase}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
-            >
+            <Button type="submit" disabled={loading || !passphrase} loading={loading}>
               {loading ? t('passphraseModal.submitting') : t('passphraseModal.submit')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }
