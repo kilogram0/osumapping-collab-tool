@@ -69,7 +69,10 @@
     "placeholder": "Introdueix la contrasenya del mapset",
     "submit": "Desbloqueja",
     "submitting": "S'està desbloquejant…",
-    "incorrect": "Contrasenya incorrecta. Torna-ho a provar."
+    "incorrect": "Contrasenya incorrecta. Torna-ho a provar.",
+    "keepOnBrowserAria": "Recorda aquesta contrasenya en aquest navegador",
+    "keepOnBrowserLabel": "Recorda aquesta contrasenya en aquest navegador.",
+    "keepOnBrowserWarning": "Avís de seguretat: emmagatzemar la contrasenya en aquest navegador la manté al localStorage. Qualsevol amb accés a aquest perfil de navegador (incloent-hi programari maliciós o un ordinador compartit) podrà desbloquejar aquest mapset. Utilitza-ho només en dispositius de confiança."
   },
   "createMapsetModal": {
     "title": "Crea un mapset",
@@ -94,6 +97,11 @@
     "warningBody": " Si perds aquesta contrasenya i cap altre membre no la té, totes les dades del mapset seran irrecuperables. No hi ha recuperació al servidor.",
     "confirmSavedAria": "He desat aquesta contrasenya",
     "confirmSavedLabel": "He desat aquesta contrasenya en un lloc segur.",
+    "allowKeepOnBrowserAria": "Permet als membres mantenir la contrasenya al navegador",
+    "allowKeepOnBrowserLabel": "Permet als membres mantenir la contrasenya al navegador.",
+    "allowKeepOnBrowserWarning": "Avís: això permet que qualsevol membre convidat emmagatzemi la contrasenya localment al seu dispositiu. És més còmode, però qualsevol amb accés a aquest perfil de navegador podrà desbloquejar aquest mapset.",
+    "rememberOnThisBrowserAria": "Recorda aquesta contrasenya en aquest navegador",
+    "rememberOnThisBrowserLabel": "Recorda aquesta contrasenya en aquest navegador.",
     "submit": "Crea el mapset",
     "submitting": "S'està creant…",
     "errorGeneric": "No s'ha pogut crear el mapset. Torna-ho a provar.",
@@ -457,6 +465,7 @@
   },
   "mapsetPage": {
     "loading": "S'està carregant…",
+    "unlocking": "S'està desbloquejant des d'aquest navegador…",
     "notFound": "No s'ha trobat el mapset.",
     "back": "Torna al tauler",
     "previewingPrefix": "Previsualitzant aquest mapset com a ",
@@ -548,6 +557,9 @@
     "submitting": "S'està desant…",
     "toastUpdated": "Mapset actualitzat.",
     "errorKeyMissing": "No s'ha trobat la clau de xifratge. Desbloqueja primer el mapset.",
-    "errorGeneric": "No s'ha pogut actualitzar el mapset."
+    "errorGeneric": "No s'ha pogut actualitzar el mapset.",
+    "allowKeepOnBrowserAria": "Permet als membres mantenir la contrasenya al navegador",
+    "allowKeepOnBrowserLabel": "Permet als membres mantenir la contrasenya al navegador.",
+    "allowKeepOnBrowserWarning": "Avís: això permet que qualsevol membre convidat emmagatzemi la contrasenya localment al seu dispositiu. És més còmode, però qualsevol amb accés a aquest perfil de navegador podrà desbloquejar aquest mapset."
   }
 }

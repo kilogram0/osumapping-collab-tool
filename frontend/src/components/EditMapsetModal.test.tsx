@@ -14,6 +14,7 @@ vi.mock('../api/endpoints', () => ({
     encrypted_song_length_ms: 'encrypted-mock',
     passphrase_salt: 'mock-salt',
     encrypted_verification: 'encrypted-verification',
+    allow_keep_on_browser: false,
     owner_id: 'owner-uuid',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
@@ -22,9 +23,14 @@ vi.mock('../api/endpoints', () => ({
   fetchMapset: vi.fn().mockResolvedValue(null),
 }));
 
+const mockDeletePersistedPassphrase = vi.fn();
+
 vi.mock('../contexts/EncryptionContext', () => ({
   useEncryption: () => ({
     getKey: vi.fn().mockResolvedValue({} as CryptoKey),
+    isUnlocked: vi.fn(() => true),
+    isPersisted: vi.fn(() => false),
+    deletePersistedPassphrase: mockDeletePersistedPassphrase,
   }),
 }));
 
@@ -42,6 +48,7 @@ function renderModal(overrides: Partial<React.ComponentProps<typeof EditMapsetMo
     currentTitle: 'Original Title',
     currentDescription: 'Original description',
     currentSongLengthMs: 90_000,
+    currentAllowKeepOnBrowser: false,
     onSuccess: vi.fn(),
     onCancel: vi.fn(),
     ...overrides,
@@ -122,5 +129,38 @@ describe('EditMapsetModal', () => {
     await user.click(screen.getByRole('button', { name: /save/i }));
 
     expect(vi.mocked(updateMapset)).not.toHaveBeenCalled();
+  });
+
+  it('submits allow_keep_on_browser when the toggle is checked', async () => {
+    const user = userEvent.setup();
+    renderModal({ currentAllowKeepOnBrowser: false });
+
+    await user.click(screen.getByRole('checkbox', { name: /allow members to keep the passphrase/i }));
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(vi.mocked(updateMapset)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(updateMapset).mock.calls[0][1].allow_keep_on_browser).toBe(true);
+  });
+
+  it('submits allow_keep_on_browser false when the toggle is unchecked', async () => {
+    const user = userEvent.setup();
+    renderModal({ currentAllowKeepOnBrowser: true });
+
+    await user.click(screen.getByRole('checkbox', { name: /allow members to keep the passphrase/i }));
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(vi.mocked(updateMapset)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(updateMapset).mock.calls[0][1].allow_keep_on_browser).toBe(false);
+  });
+
+  it('purges a persisted passphrase immediately when the owner revokes browser persistence', async () => {
+    const user = userEvent.setup();
+    renderModal({ currentAllowKeepOnBrowser: true });
+
+    await user.click(screen.getByRole('checkbox', { name: /allow members to keep the passphrase/i }));
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(vi.mocked(updateMapset)).toHaveBeenCalledTimes(1));
+    expect(mockDeletePersistedPassphrase).toHaveBeenCalledWith('test-mapset-id');
   });
 });

@@ -11,6 +11,9 @@ const mockIsUnlocked = vi.fn(() => true);
 const mockGetKey = vi.fn(async () => ({ key: 'mock-key' } as unknown as CryptoKey));
 const mockUnlockMapset = vi.fn();
 const mockUnlockWithKey = vi.fn();
+const mockTryAutoUnlock = vi.fn(async () => false);
+const mockIsPersisted = vi.fn(() => false);
+const mockDeletePersistedPassphrase = vi.fn();
 
 vi.mock('../contexts/EncryptionContext', () => ({
   useEncryption: () => ({
@@ -18,9 +21,12 @@ vi.mock('../contexts/EncryptionContext', () => ({
     getKey: mockGetKey,
     unlockMapset: mockUnlockMapset,
     unlockWithKey: mockUnlockWithKey,
+    tryAutoUnlock: mockTryAutoUnlock,
     lockMapset: vi.fn(),
     clearAll: vi.fn(),
     getPassphrase: vi.fn(() => null),
+    isPersisted: mockIsPersisted,
+    deletePersistedPassphrase: mockDeletePersistedPassphrase,
   }),
 }));
 
@@ -106,6 +112,7 @@ const MOCK_MAPSET = {
   owner_id: 'owner-uuid',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
+  allow_keep_on_browser: false,
 };
 
 const MOCK_DIFFICULTIES = [
@@ -371,6 +378,102 @@ describe('MapsetPage', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  describe('auto-unlock', () => {
+    it('shows a loading state instead of the passphrase modal while auto-unlock is pending', async () => {
+      mockIsUnlocked.mockReturnValue(false);
+      mockIsPersisted.mockReturnValue(true);
+      // Never resolves so the UI stays in the pending state.
+      mockTryAutoUnlock.mockReturnValue(new Promise(() => {}));
+      mockCurrentMapset = { ...MOCK_MAPSET, allow_keep_on_browser: true };
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText(/Unlocking from this browser/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('heading', { name: /Unlock Mapset/i })).not.toBeInTheDocument();
+    });
+
+    it('renders the mapset once auto-unlock succeeds', async () => {
+      let unlocked = false;
+      mockIsUnlocked.mockImplementation(() => unlocked);
+      mockIsPersisted.mockReturnValue(true);
+      mockTryAutoUnlock.mockImplementation(async () => {
+        unlocked = true;
+        return true;
+      });
+      mockCurrentMapset = { ...MOCK_MAPSET, allow_keep_on_browser: true };
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /Test Mapset/i })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('heading', { name: /Unlock Mapset/i })).not.toBeInTheDocument();
+    });
+
+    it('falls back to the passphrase modal when auto-unlock fails', async () => {
+      mockIsUnlocked.mockReturnValue(false);
+      mockIsPersisted.mockReturnValue(true);
+      mockTryAutoUnlock.mockResolvedValue(false);
+      mockCurrentMapset = { ...MOCK_MAPSET, allow_keep_on_browser: true };
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /Unlock Mapset/i })).toBeInTheDocument();
+      });
+    });
+
+    it('shows the passphrase modal immediately when keep-on-browser is not allowed', async () => {
+      mockIsUnlocked.mockReturnValue(false);
+      mockIsPersisted.mockReturnValue(false);
+      mockTryAutoUnlock.mockResolvedValue(false);
+      mockCurrentMapset = { ...MOCK_MAPSET, allow_keep_on_browser: false };
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /Unlock Mapset/i })).toBeInTheDocument();
+      });
+    });
+
+    it('purges a persisted passphrase when keep-on-browser is revoked', async () => {
+      mockIsUnlocked.mockReturnValue(false);
+      mockIsPersisted.mockReturnValue(true);
+      mockCurrentMapset = { ...MOCK_MAPSET, allow_keep_on_browser: false };
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /Unlock Mapset/i })).toBeInTheDocument();
+      });
+      expect(mockDeletePersistedPassphrase).toHaveBeenCalledWith('ms1');
+      expect(mockTryAutoUnlock).not.toHaveBeenCalled();
+    });
+
+    it('purges a persisted passphrase on policy revocation even when the session is unlocked', async () => {
+      mockIsUnlocked.mockReturnValue(true);
+      mockIsPersisted.mockReturnValue(true);
+      mockCurrentMapset = { ...MOCK_MAPSET, allow_keep_on_browser: false };
+      renderPage();
+
+      // The page is already unlocked, so the mapset content renders; no modal.
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /Test Mapset/i })).toBeInTheDocument();
+      });
+      expect(mockDeletePersistedPassphrase).toHaveBeenCalledWith('ms1');
+      expect(mockTryAutoUnlock).not.toHaveBeenCalled();
+    });
+
+    it('shows the passphrase modal immediately when no passphrase is persisted', async () => {
+      mockIsUnlocked.mockReturnValue(false);
+      mockIsPersisted.mockReturnValue(false);
+      mockTryAutoUnlock.mockResolvedValue(false);
+      mockCurrentMapset = { ...MOCK_MAPSET, allow_keep_on_browser: true };
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /Unlock Mapset/i })).toBeInTheDocument();
+      });
+    });
   });
 
   it('navigates back to dashboard when back button is clicked', async () => {

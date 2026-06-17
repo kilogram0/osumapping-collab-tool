@@ -56,6 +56,7 @@ class MapsetCreate(BaseModel):
     encrypted_verification: str = Field(
         min_length=1, max_length=_VERIFICATION_CT_MAX
     )
+    allow_keep_on_browser: bool = Field(default=False)
 
 
 class MapsetUpdate(BaseModel):
@@ -81,6 +82,7 @@ class MapsetUpdate(BaseModel):
     encrypted_song_length_ms: str = Field(  # type: ignore[assignment]
         default=None, min_length=1, max_length=_SONG_LENGTH_CT_MAX
     )
+    allow_keep_on_browser: bool = Field(default=False)
 
 
 class MapsetRead(BaseModel):
@@ -98,6 +100,7 @@ class MapsetRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     delete_at: datetime | None
+    allow_keep_on_browser: bool
     difficulty_count: int
 
 

@@ -32,7 +32,7 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
 ### Threat Model
 - **Protected against:** Database administrator curiosity, server compromise, backup theft, insider threats.
 - **Not protected against:** Compromised client device, XSS on an unlocked session, a malicious group member sharing the passphrase, the passphrase leaking via the out-of-band sharing channel (Discord, email, etc.), browser dev tools, or a compromised server delivering modified frontend JavaScript that exfiltrates the passphrase.
-- **Member removal is not access revocation.** Deleting a `MapsetMember` row revokes API access, but the removed user may still have the passphrase in their `sessionStorage` or memory, and can decrypt any ciphertext they downloaded before removal. There is no passphrase rotation flow in the MVP.
+- **Member removal is not access revocation.** Deleting a `MapsetMember` row revokes API access, but the removed user may still have the passphrase in their `sessionStorage`, `localStorage` (if they opted in to "keep on this browser"), or memory, and can decrypt any ciphertext they downloaded before removal. There is no passphrase rotation flow in the MVP.
 - **Server integrity limitations:** The server is trusted to report the correct "active" version. A malicious server could serve an old version as active — the ciphertext is genuine, so the client displays outdated content. Version rollback is not mitigated by E2EE. Future mitigation would require chaining version rows via AAD, which is a non-trivial schema change.
   - **Detection:** Version history UIs display version numbers, so attentive collaborators may notice discrepancies, but the main view does not surface them prominently.
 
@@ -53,11 +53,21 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
 - **Passphrase:** 48-character alphanumeric string, **auto-generated per mapset on creation**. User-chosen passphrases are forbidden because `encrypted_verification` is a known-plaintext canary that enables offline brute-force against a stolen DB. The 48-char auto-generated passphrase (~286 bits of entropy) makes this infeasible.
 
 ### Key Storage
-- **Passphrase + salt** are stored in **`sessionStorage`** (survives refresh, dies with tab or browser uninstall). The derived `CryptoKey` lives only in **JavaScript memory** and is recreated lazily on demand. This preserves `extractable: false`.
+- **Derived `CryptoKey`:** Stored in **IndexedDB** with `extractable: false`. This lets the key survive browser restarts while keeping the raw key material out of JavaScript memory and inaccessible to the page.
+- **Unlocked presence flag:** A lightweight flag is stored in **`sessionStorage`** so `isUnlocked()` is synchronous on mount. It does not contain the passphrase or key.
+- **Passphrase cache:** The plaintext passphrase is kept in **JavaScript memory** only while the tab is open. It is used to re-derive the key lazily and to let members re-view the passphrase in the UI. It is not persisted by default.
+- **Optional passphrase persistence:** If `Mapset.allow_keep_on_browser` is true and the user opts in, the passphrase is also stored in **`localStorage`** so the mapset unlocks automatically on future visits. See "Optional Passphrase Persistence" below.
 - **Wrong-passphrase detection:** Decrypt `encrypted_verification` with the derived key. If the GCM auth tag fails, the passphrase is wrong. Do not store a hash of the passphrase.
 - The passphrase is **never sent to the server**.
-- If a user loses their session (browser uninstalled, cache cleared), they must re-enter the passphrase. If they don't have it, they must obtain it from another group member. **There is no server-side recovery — this is by design.**
+- If a user loses their session (browser uninstalled, cache cleared) and did not opt in to `localStorage` persistence, they must re-enter the passphrase. If they don't have it, they must obtain it from another group member. **There is no server-side recovery — this is by design.**
 - **Passphrase rotation:** There is no passphrase rotation or re-encryption flow in the MVP. If a passphrase leaks, the only recovery is to create a new mapset and migrate content manually.
+
+### Optional Passphrase Persistence ("Keep on this browser")
+- The mapset owner can opt in to **`Mapset.allow_keep_on_browser = true`**. When this flag is true, members (including the owner) are offered a checkbox when entering the passphrase: **"Remember this passphrase on this browser"**.
+- If checked, the plaintext passphrase is stored in **`localStorage`** under a per-mapset key. On the next visit, the app can derive the key and unlock the mapset automatically without prompting.
+- This is **strictly less secure** than session-only storage: anyone with access to the browser profile (malware, a shared computer, a stolen laptop that is not password-protected, etc.) can read the passphrase out of `localStorage`. A clear disclaimer must be shown at creation and at unlock time.
+- The flag defaults to **false** for every new mapset; passphrase persistence must never happen without both owner consent and an explicit per-user opt-in.
+- `lockMapset` and `clearAll` must wipe any persisted passphrase from `localStorage` along with the `sessionStorage` presence flag and the IndexedDB key.
 
 ### Encrypted vs. Unencrypted Data
 

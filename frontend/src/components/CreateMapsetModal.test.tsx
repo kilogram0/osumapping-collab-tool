@@ -12,6 +12,8 @@ vi.mock('../utils/oszParser', () => ({
   parseOszFile: vi.fn(),
 }));
 
+const mockUnlockWithKey = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
 vi.mock('../api/endpoints', () => ({
   createMapset: vi.fn().mockResolvedValue({
     id: 'test-mapset-id',
@@ -20,6 +22,7 @@ vi.mock('../api/endpoints', () => ({
     encrypted_song_length_ms: 'encrypted-mock',
     passphrase_salt: 'mock-salt',
     encrypted_verification: 'encrypted-verification',
+    allow_keep_on_browser: false,
     owner_id: 'owner-uuid',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
@@ -33,12 +36,14 @@ vi.mock('../api/endpoints', () => ({
 
 vi.mock('../contexts/EncryptionContext', () => ({
   useEncryption: () => ({
-    unlockWithKey: vi.fn().mockResolvedValue(undefined),
+    unlockWithKey: mockUnlockWithKey,
     isUnlocked: vi.fn(() => false),
     getKey: vi.fn().mockResolvedValue(null),
     unlockMapset: vi.fn().mockResolvedValue(undefined),
+    tryAutoUnlock: vi.fn().mockResolvedValue(false),
     lockMapset: vi.fn().mockResolvedValue(undefined),
     clearAll: vi.fn().mockResolvedValue(undefined),
+    isPersisted: vi.fn(() => false),
   }),
 }));
 
@@ -149,6 +154,78 @@ describe('CreateMapsetModal', () => {
     await userEvent.click(screen.getByRole('button', { name: /create mapset/i }));
 
     expect(vi.mocked(createMapset)).not.toHaveBeenCalled();
+  });
+
+  it('submits allow_keep_on_browser when the set-level checkbox is checked', async () => {
+    renderModal();
+    await userEvent.type(screen.getByLabelText(/title/i), 'Test Mapset');
+    await userEvent.click(screen.getByRole('checkbox', { name: /saved this passphrase/i }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /allow members to keep the passphrase/i }));
+    await userEvent.click(screen.getByRole('button', { name: /create mapset/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(createMapset)).toHaveBeenCalled();
+    });
+    expect(vi.mocked(createMapset).mock.calls[0][0].allow_keep_on_browser).toBe(true);
+  });
+
+  it('does not persist the passphrase when the remember checkbox is unchecked', async () => {
+    renderModal();
+    await fillAndSubmit('Test Mapset');
+
+    expect(mockUnlockWithKey).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      'mock-passphrase-mock-passphrase-mock-passphrase',
+      { persist: false },
+    );
+  });
+
+  it('persists the passphrase when both checkboxes are checked', async () => {
+    renderModal();
+    await userEvent.type(screen.getByLabelText(/title/i), 'Test Mapset');
+    await userEvent.click(screen.getByRole('checkbox', { name: /saved this passphrase/i }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /allow members to keep the passphrase/i }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /remember this passphrase/i }));
+    await userEvent.click(screen.getByRole('button', { name: /create mapset/i }));
+
+    await waitFor(() => {
+      expect(mockUnlockWithKey).toHaveBeenCalled();
+    });
+    expect(mockUnlockWithKey).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      'mock-passphrase-mock-passphrase-mock-passphrase',
+      { persist: true },
+    );
+  });
+
+  it('does not persist the passphrase when remember is checked but keep-on-browser is not allowed', async () => {
+    renderModal();
+    await userEvent.type(screen.getByLabelText(/title/i), 'Test Mapset');
+    await userEvent.click(screen.getByRole('checkbox', { name: /saved this passphrase/i }));
+    // Do NOT check the set-level "allow members to keep" checkbox.
+    await userEvent.click(screen.getByRole('checkbox', { name: /remember this passphrase/i }));
+    await userEvent.click(screen.getByRole('button', { name: /create mapset/i }));
+
+    await waitFor(() => {
+      expect(mockUnlockWithKey).toHaveBeenCalled();
+    });
+    expect(mockUnlockWithKey).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      'mock-passphrase-mock-passphrase-mock-passphrase',
+      { persist: false },
+    );
+  });
+
+  it('disables the remember-on-this-browser checkbox until keep-on-browser is allowed', async () => {
+    renderModal();
+    const rememberCheckbox = screen.getByRole('checkbox', { name: /remember this passphrase/i });
+    expect(rememberCheckbox).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /allow members to keep the passphrase/i }));
+    expect(rememberCheckbox).toBeEnabled();
   });
 });
 

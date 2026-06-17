@@ -58,6 +58,7 @@ def _to_read(mapset: Mapset, difficulty_count: int) -> MapsetRead:
         created_at=mapset.created_at,
         updated_at=mapset.updated_at,
         delete_at=mapset.delete_at,
+        allow_keep_on_browser=mapset.allow_keep_on_browser,
         difficulty_count=difficulty_count,
     )
 
@@ -89,6 +90,7 @@ async def create_mapset(
         encrypted_song_length_ms=payload.encrypted_song_length_ms,
         passphrase_salt=payload.passphrase_salt,
         encrypted_verification=payload.encrypted_verification,
+        allow_keep_on_browser=payload.allow_keep_on_browser,
         owner_id=current_user.id,
     )
     membership = MapsetMember(
@@ -227,6 +229,8 @@ async def update_mapset(
         mapset.encrypted_description = payload.encrypted_description
     if "encrypted_song_length_ms" in fields_set:
         mapset.encrypted_song_length_ms = payload.encrypted_song_length_ms
+    if "allow_keep_on_browser" in fields_set:
+        mapset.allow_keep_on_browser = payload.allow_keep_on_browser
 
     await db.commit()
     await db.refresh(mapset)

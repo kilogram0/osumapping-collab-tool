@@ -41,6 +41,8 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
   const [passphrase] = useState(() => generatePassphrase());
   const [copied, setCopied] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [allowKeepOnBrowser, setAllowKeepOnBrowser] = useState(false);
+  const [rememberOnThisBrowser, setRememberOnThisBrowser] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [oszFile, setOszFile] = useState<File | null>(null);
@@ -192,11 +194,13 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
         encrypted_song_length_ms: encryptedSongLengthMs,
         passphrase_salt: salt,
         encrypted_verification: encryptedVerification,
+        allow_keep_on_browser: allowKeepOnBrowser,
       });
 
       // Re-use the already-derived key — avoids a second 600k-iteration PBKDF2 run.
       // Cache the passphrase in memory so the owner can re-view it from the Manage Members modal.
-      await unlockWithKey(id, key, passphrase);
+      // Only persist when both the mapset policy and the personal opt-in are true.
+      await unlockWithKey(id, key, passphrase, { persist: allowKeepOnBrowser && rememberOnThisBrowser });
 
       // If a .osz was uploaded, create all difficulties + sections.
       // A failure here is toasted as a warning but does not abort onSuccess
@@ -361,6 +365,38 @@ export default function CreateMapsetModal({ onSuccess, onCancel }: CreateMapsetM
 
           <div className="bg-red-950 border border-red-800 rounded p-3 text-sm text-red-300">
             <strong>{t('createMapsetModal.warningPrefix')}</strong>{t('createMapsetModal.warningBody')}
+          </div>
+
+          <div className="space-y-3 border border-gray-700 rounded p-3 bg-gray-900/50">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allowKeepOnBrowser}
+                onChange={(e) => setAllowKeepOnBrowser(e.target.checked)}
+                className="mt-0.5 accent-blue-500"
+                aria-label={t('createMapsetModal.allowKeepOnBrowserAria')}
+              />
+              <span className="text-sm text-gray-300">
+                {t('createMapsetModal.allowKeepOnBrowserLabel')}
+              </span>
+            </label>
+            <p className="text-xs text-red-300">
+              {t('createMapsetModal.allowKeepOnBrowserWarning')}
+            </p>
+
+            <label className={`flex items-start gap-2 pl-1 ${allowKeepOnBrowser ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+              <input
+                type="checkbox"
+                checked={rememberOnThisBrowser}
+                onChange={(e) => setRememberOnThisBrowser(e.target.checked)}
+                disabled={!allowKeepOnBrowser}
+                className="mt-0.5 accent-blue-500 disabled:accent-gray-500"
+                aria-label={t('createMapsetModal.rememberOnThisBrowserAria')}
+              />
+              <span className="text-sm text-gray-300">
+                {t('createMapsetModal.rememberOnThisBrowserLabel')}
+              </span>
+            </label>
           </div>
 
           <label className="flex items-start gap-2 cursor-pointer">

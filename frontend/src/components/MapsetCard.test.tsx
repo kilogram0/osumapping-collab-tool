@@ -12,11 +12,13 @@ vi.mock('react-router-dom', async (importOriginal) => {
 });
 
 const mockIsUnlocked = vi.fn(() => false);
+const mockIsPersisted = vi.fn(() => false);
 const mockGetKey = vi.fn(async () => null);
 
 vi.mock('../contexts/EncryptionContext', () => ({
   useEncryption: () => ({
     isUnlocked: mockIsUnlocked,
+    isPersisted: mockIsPersisted,
     getKey: mockGetKey,
     unlockMapset: vi.fn().mockResolvedValue(undefined),
     unlockWithKey: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +52,7 @@ const MAPSET: Mapset = {
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
   delete_at: null,
+  allow_keep_on_browser: false,
   difficulty_count: 0,
 };
 
@@ -69,6 +72,7 @@ function renderCard(mapset: Mapset = MAPSET, onUnlock?: (m: Mapset) => void) {
 describe('MapsetCard (locked)', () => {
   beforeEach(() => {
     mockIsUnlocked.mockReturnValue(false);
+    mockIsPersisted.mockReturnValue(false);
     mockGetKey.mockResolvedValue(null);
     mockNavigate.mockReset();
     mockScheduleMutate.mockReset();
@@ -113,6 +117,33 @@ describe('MapsetCard (unlocked)', () => {
   it('renders the mapset title when unlocked', () => {
     renderCard();
     expect(screen.getByText(MAPSET.title)).toBeInTheDocument();
+  });
+});
+
+describe('MapsetCard (auto-unlock via stored passphrase)', () => {
+  beforeEach(() => {
+    // Session flag is gone (e.g. browser reopened), but the passphrase is stored.
+    mockIsUnlocked.mockReturnValue(false);
+    mockIsPersisted.mockReturnValue(true);
+  });
+
+  const ALLOWED: Mapset = { ...MAPSET, allow_keep_on_browser: true };
+
+  it('hides the Unlock button when the mapset allows persistence and a passphrase is stored', async () => {
+    renderCard(ALLOWED, vi.fn());
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: /unlock/i })).toBeNull();
+  });
+
+  it('still shows the Unlock button when the owner does not allow persistence, even if a stale passphrase is stored', () => {
+    renderCard({ ...MAPSET, allow_keep_on_browser: false }, vi.fn());
+    expect(screen.getByRole('button', { name: /unlock mapset/i })).toBeInTheDocument();
+  });
+
+  it('shows the Unlock button when persistence is allowed but no passphrase is stored', () => {
+    mockIsPersisted.mockReturnValue(false);
+    renderCard(ALLOWED, vi.fn());
+    expect(screen.getByRole('button', { name: /unlock mapset/i })).toBeInTheDocument();
   });
 });
 

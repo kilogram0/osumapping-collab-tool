@@ -44,6 +44,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 describe('EncryptionContext', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
     idbStore.clear();
   });
 
@@ -219,5 +220,134 @@ describe('EncryptionContext', () => {
     expect(result.current.isUnlocked(MAPSET_ID)).toBe(true);
     expect(idbStore.get(MAPSET_ID)).toBe(key);
     expect(await result.current.getKey(MAPSET_ID)).toBe(key);
+  });
+
+  it('persists the passphrase in localStorage when persist option is true', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    await act(async () => {
+      await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification, { persist: true });
+    });
+
+    expect(result.current.isPersisted(MAPSET_ID)).toBe(true);
+    expect(localStorage.getItem(`mapset-kept-passphrase:${MAPSET_ID}`)).toBe(PASSPHRASE);
+  });
+
+  it('does not persist the passphrase when persist option is false or omitted', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    await act(async () => {
+      await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification);
+    });
+
+    expect(result.current.isPersisted(MAPSET_ID)).toBe(false);
+    expect(localStorage.getItem(`mapset-kept-passphrase:${MAPSET_ID}`)).toBeNull();
+  });
+
+  it('tryAutoUnlock unlocks from a persisted passphrase', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    localStorage.setItem(`mapset-kept-passphrase:${MAPSET_ID}`, PASSPHRASE);
+
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    let success = false;
+    await act(async () => {
+      success = await result.current.tryAutoUnlock(MAPSET_ID, salt, verification);
+    });
+
+    expect(success).toBe(true);
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(true);
+  });
+
+  it('tryAutoUnlock returns false when no passphrase is persisted', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    let success = true;
+    await act(async () => {
+      success = await result.current.tryAutoUnlock(MAPSET_ID, salt, verification);
+    });
+
+    expect(success).toBe(false);
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(false);
+  });
+
+  it('tryAutoUnlock clears stale persisted passphrase on verification failure', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    localStorage.setItem(`mapset-kept-passphrase:${MAPSET_ID}`, 'wrong-passphrase-0000000000000000000000000000000');
+
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    let success = true;
+    await act(async () => {
+      success = await result.current.tryAutoUnlock(MAPSET_ID, salt, verification);
+    });
+
+    expect(success).toBe(false);
+    expect(localStorage.getItem(`mapset-kept-passphrase:${MAPSET_ID}`)).toBeNull();
+    expect(result.current.isPersisted(MAPSET_ID)).toBe(false);
+  });
+
+  it('lockMapset clears both sessionStorage and localStorage passphrase', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    await act(async () => {
+      await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification, { persist: true });
+    });
+
+    await act(async () => { await result.current.lockMapset(MAPSET_ID); });
+
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(false);
+    expect(result.current.isPersisted(MAPSET_ID)).toBe(false);
+    expect(sessionStorage.getItem(`mapset-unlocked:${MAPSET_ID}`)).toBeNull();
+    expect(localStorage.getItem(`mapset-kept-passphrase:${MAPSET_ID}`)).toBeNull();
+  });
+
+  it('clearAll wipes IDB, sessionStorage flags, and persisted passphrases', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    await act(async () => {
+      await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification, { persist: true });
+    });
+    expect(result.current.isPersisted(MAPSET_ID)).toBe(true);
+
+    await act(async () => {
+      await result.current.clearAll();
+    });
+
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(false);
+    expect(result.current.isPersisted(MAPSET_ID)).toBe(false);
+    expect(localStorage.getItem(`mapset-kept-passphrase:${MAPSET_ID}`)).toBeNull();
+  });
+
+  it('deletePersistedPassphrase removes the localStorage entry without affecting the session unlock state', async () => {
+    const salt = generateSalt();
+    const verification = await buildVerification(PASSPHRASE, salt, MAPSET_ID);
+    const { result } = renderHook(() => useEncryption(), { wrapper });
+
+    await act(async () => {
+      await result.current.unlockMapset(MAPSET_ID, PASSPHRASE, salt, verification, { persist: true });
+    });
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(true);
+    expect(result.current.isPersisted(MAPSET_ID)).toBe(true);
+
+    act(() => {
+      result.current.deletePersistedPassphrase(MAPSET_ID);
+    });
+
+    expect(result.current.isUnlocked(MAPSET_ID)).toBe(true);
+    expect(result.current.isPersisted(MAPSET_ID)).toBe(false);
+    expect(localStorage.getItem(`mapset-kept-passphrase:${MAPSET_ID}`)).toBeNull();
   });
 });

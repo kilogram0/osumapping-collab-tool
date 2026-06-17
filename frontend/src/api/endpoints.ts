@@ -37,6 +37,7 @@ export interface Mapset {
   created_at: string;
   updated_at: string;
   delete_at: string | null;
+  allow_keep_on_browser: boolean;
   difficulty_count: number;
 }
 
@@ -59,12 +60,14 @@ export interface CreateMapsetPayload {
   encrypted_song_length_ms: string;
   passphrase_salt: string;
   encrypted_verification: string;
+  allow_keep_on_browser: boolean;
 }
 
 export interface UpdateMapsetPayload {
   title?: string;
   encrypted_description?: string | null;
   encrypted_song_length_ms?: string;
+  allow_keep_on_browser?: boolean;
 }
 
 export async function fetchMapsets(): Promise<Mapset[]> {

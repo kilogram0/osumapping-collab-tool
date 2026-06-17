@@ -18,7 +18,7 @@ CSRF_HEADERS = {
 }
 
 
-def _build_payload(mapset_id: UUID | None = None) -> dict:
+def _build_payload(mapset_id: UUID | None = None, allow_keep_on_browser: bool = False) -> dict:
     return {
         "id": str(mapset_id or uuid4()),
         "title": "Test Mapset",
@@ -26,6 +26,7 @@ def _build_payload(mapset_id: UUID | None = None) -> dict:
         "encrypted_song_length_ms": "encrypted:200000",
         "passphrase_salt": "c2FsdC1iYXNlNjQ=",
         "encrypted_verification": "encrypted:verified",
+        "allow_keep_on_browser": allow_keep_on_browser,
     }
 
 
@@ -96,6 +97,7 @@ async def test_create_mapset_succeeds_and_adds_owner_membership(
     assert body["encrypted_song_length_ms"] == payload["encrypted_song_length_ms"]
     assert body["passphrase_salt"] == payload["passphrase_salt"]
     assert body["encrypted_verification"] == payload["encrypted_verification"]
+    assert body["allow_keep_on_browser"] == payload["allow_keep_on_browser"]
     assert body["owner_id"] == str(authed_user.id)
 
     # Verify a MapsetMember(owner) row was created in the same transaction.
@@ -294,7 +296,17 @@ async def test_get_mapset_returns_full_details(
     assert body["encrypted_song_length_ms"] == payload["encrypted_song_length_ms"]
     assert body["passphrase_salt"] == payload["passphrase_salt"]
     assert body["encrypted_verification"] == payload["encrypted_verification"]
+    assert body["allow_keep_on_browser"] == payload["allow_keep_on_browser"]
     assert body["owner_id"] == str(authed_user.id)
+
+
+@pytest.mark.asyncio
+async def test_create_mapset_with_keep_on_browser_enabled(client: AsyncClient, authed_user: User):
+    payload = _build_payload(allow_keep_on_browser=True)
+    response = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["allow_keep_on_browser"] is True
 
 
 @pytest.mark.asyncio
@@ -355,6 +367,33 @@ async def test_patch_mapset_owner_can_update(
     assert response.json()["title"] == "New Title"
     # Omitted fields are preserved unchanged
     assert response.json()["encrypted_description"] == payload["encrypted_description"]
+
+
+@pytest.mark.asyncio
+async def test_patch_mapset_owner_can_toggle_allow_keep_on_browser(
+    client: AsyncClient, authed_user: User
+):
+    payload = _build_payload()
+    create = await client.post("/api/mapsets", json=payload, headers=CSRF_HEADERS)
+    assert create.status_code == 201
+    assert create.json()["allow_keep_on_browser"] is False
+
+    response = await client.patch(
+        f"/api/mapsets/{payload['id']}",
+        json={"allow_keep_on_browser": True},
+        headers=CSRF_HEADERS,
+    )
+    assert response.status_code == 200
+    assert response.json()["allow_keep_on_browser"] is True
+
+    # Toggle back off.
+    response = await client.patch(
+        f"/api/mapsets/{payload['id']}",
+        json={"allow_keep_on_browser": False},
+        headers=CSRF_HEADERS,
+    )
+    assert response.status_code == 200
+    assert response.json()["allow_keep_on_browser"] is False
 
 
 @pytest.mark.asyncio

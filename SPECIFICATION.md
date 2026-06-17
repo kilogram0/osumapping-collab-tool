@@ -340,7 +340,7 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
 #### Threat Model
 - **Protected against:** Database administrator curiosity, server compromise, backup theft, insider threats.
 - **Not protected against:** Compromised client device, XSS on an unlocked session, a malicious group member sharing the passphrase, the passphrase leaking via the out-of-band sharing channel (Discord, email, etc.), browser dev tools, or a compromised server delivering modified frontend JavaScript that exfiltrates the passphrase on entry. The security model assumes the JS bundle the user receives is the audited one; SRI / repository pinning / browser extension audits are out of scope for the MVP.
-- **Member removal is not access revocation.** Deleting a `MapsetMember` row revokes API access, but the removed user may still have the passphrase in their `sessionStorage` or memory. They can also decrypt any ciphertext they downloaded before removal. There is no passphrase rotation flow in the MVP; the only recovery from a compromise is to create a new mapset and re-upload everything.
+- **Member removal is not access revocation.** Deleting a `MapsetMember` row revokes API access, but the removed user may still have the passphrase in their `sessionStorage`, `localStorage` (if they opted in to "keep on this browser"), or memory. They can also decrypt any ciphertext they downloaded before removal. There is no passphrase rotation flow in the MVP; the only recovery from a compromise is to create a new mapset and re-upload everything.
 - **Server integrity limitations:** The server is trusted to report the correct "active" version for each section and base (i.e., which `SectionOsuVersion` and `DifficultyBaseOsuVersion` row has `is_active = true`). A malicious server could serve an old version as the active one — the ciphertext is genuine and GCM-valid, so the client would display outdated content without detecting tampering. Version rollback is not mitigated by E2EE; it requires server integrity. This is an accepted trade-off for the MVP. Future mitigation would require chaining version rows (e.g., each row's AAD includes the previous version's ciphertext hash), which is a non-trivial schema change.
   - **Detection:** The version history UI (`OsuVersionHistory`, `BaseVersionHistory`) displays version numbers, so a collaborator who checks the history may notice "we were on v7 yesterday, why is it v5?" However, the main mapset view does not surface version numbers prominently — most users will not notice a silent rollback without explicitly opening the history.
 
@@ -363,10 +363,13 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
   - **User-chosen passphrases are forbidden.** Because `encrypted_verification` is a known-plaintext canary, a stolen database enables offline PBKDF2 brute-force. The 48-char auto-generated passphrase (~286 bits of entropy) makes this infeasible; a weak user-chosen passphrase would not. The create-mapset flow must enforce auto-generation with no override.
 
 #### Key Storage
-- **Passphrase + salt** are stored in **`sessionStorage`** (survives refresh, dies with tab or browser uninstall). The derived `CryptoKey` itself lives only in **JavaScript memory** and is recreated lazily on demand via PBKDF2. This preserves the Web Crypto API's `extractable: false` property.
+- **Derived `CryptoKey`:** Stored in **IndexedDB** with `extractable: false`. This lets the key survive browser restarts while keeping the raw key material out of JavaScript memory and inaccessible to the page.
+- **Unlocked presence flag:** A lightweight flag is stored in **`sessionStorage`** so `isUnlocked()` is synchronous on mount. It does not contain the passphrase or key.
+- **Passphrase cache:** The plaintext passphrase is kept in **JavaScript memory** only while the tab is open. It is used to re-derive the key lazily and to let members re-view the passphrase in the UI (e.g., the owner sharing it with a new member). It is not persisted by default.
+- **Optional passphrase persistence:** If `Mapset.allow_keep_on_browser` is true and the user opts in, the passphrase is also stored in **`localStorage`** so the mapset unlocks automatically on future visits. See "Optional Passphrase Persistence" below for the security trade-off.
 - **Wrong-passphrase detection:** The frontend attempts to decrypt `Mapset.encrypted_verification` with the derived key. If the GCM authentication tag fails (AES-GCM throws), the passphrase is wrong. Do not store a hash of the passphrase — that would create a second offline brute-force surface and defeat the canary design.
 - The passphrase is **never sent to the server**.
-- If a user loses their session (browser uninstalled, cache cleared), they must re-enter the passphrase. If they don't have it, they must obtain it from another group member. **There is no server-side recovery — this is by design.**
+- If a user loses their session (browser uninstalled, cache cleared) and did not opt in to `localStorage` persistence, they must re-enter the passphrase. If they don't have it, they must obtain it from another group member. **There is no server-side recovery — this is by design.**
 
 #### Encrypted vs. Unencrypted Data
 
@@ -388,11 +391,18 @@ All mapset content is **end-to-end encrypted** with AES-256-GCM. The server stor
 
 > **Note:** `Mapset.title` is intentionally **not encrypted**. A user may belong to many mapsets (e.g., multiple contest collaborations) and needs to distinguish them on the dashboard before entering a passphrase. The title is visible to anyone who receives an invitation link. A disclaimer is shown during creation and editing.
 
+#### Optional Passphrase Persistence ("Keep on this browser")
+- The mapset owner can opt in to **`Mapset.allow_keep_on_browser = true`**. When this flag is true, members (including the owner) are offered a checkbox when entering the passphrase: **"Remember this passphrase on this browser"**.
+- If checked, the plaintext passphrase is stored in **`localStorage`** under a per-mapset key. On the next visit, the app can derive the key and unlock the mapset automatically without prompting.
+- This is **strictly less secure** than session-only storage: anyone with access to the browser profile (malware, a shared computer, a stolen laptop that is not password-protected, etc.) can read the passphrase out of `localStorage`. A clear disclaimer is shown at creation and at unlock time.
+- The flag defaults to **false** for every new mapset; passphrase persistence must never happen without both owner consent and an explicit per-user opt-in.
+- `lockMapset` and `clearAll` wipe any persisted passphrase from `localStorage` along with the `sessionStorage` presence flag and the IndexedDB key.
+
 #### UX Implications
 - **Dashboard:** Mapset titles are always visible (plaintext). Other content remains encrypted until the mapset is unlocked with the passphrase.
-- **Mapset Page:** If the key is missing, a full-screen passphrase input modal is shown. Nothing else renders until the correct passphrase is entered.
+- **Mapset Page:** If the key is missing, a full-screen passphrase input modal is shown. Nothing else renders until the correct passphrase is entered. If a passphrase was persisted and the mapset owner allowed it, the mapset unlocks automatically instead of showing the modal.
 - **Passphrase Sharing:** New members must obtain the passphrase from an existing member out-of-band (Discord, etc.). Any member whose session has the passphrase cached can re-view it in the UI — this is a social convention, not a technical restriction (all unlocked sessions have equal access to the key).
-- **Passphrase Rotation:** There is no passphrase rotation or re-encryption flow in the MVP. If a passphrase leaks (e.g., shared in the wrong Discord channel), the only recovery is to create a new mapset and migrate content manually. This is a known limitation.
+- **Passphrase Rotation:** There is no passphrase rotation or re-encryption flow in the MVP. If a passphrase leaks (e.g., shared in the wrong Discord channel or extracted from `localStorage`), the only recovery is to create a new mapset and migrate content manually. This is a known limitation.
 
 #### Performance Implications
 Because the server cannot read encrypted fields, certain operations that would normally happen server-side must happen client-side:
@@ -498,7 +508,7 @@ This is the core of the application. It will be a single-page layout inspired by
 
 ### State Management
 - **Global Auth State:** Managed via `useAuth` hook and React Context. Checks `/auth/me` on app load.
-- **Encryption State:** Managed via `useEncryption` hook and React Context. Stores a `Map<string, CryptoKey>` (mapset UUID → derived AES key) in **JavaScript memory**, and stores the **passphrase + salt** in **`sessionStorage`** so keys can be re-derived lazily after refresh. Functions: `unlockMapset(mapsetId, passphrase, salt)` derives key via PBKDF2 and verifies against `encrypted_verification` canary. `getKey(mapsetId)` returns the in-memory key or re-derives it from `sessionStorage`. `lockMapset(mapsetId)` clears both memory and `sessionStorage`.
+- **Encryption State:** Managed via `useEncryption` hook and React Context. The derived `CryptoKey` is stored in **IndexedDB** (`extractable: false`); a presence flag is stored in **`sessionStorage`**; the plaintext passphrase is kept in JavaScript memory only while the tab is open. If the mapset owner allows it and the user opts in, the passphrase may also be persisted in **`localStorage`** for automatic unlock on future visits. Functions: `unlockMapset(mapsetId, passphrase, salt)` derives the key via PBKDF2 and verifies it against the `encrypted_verification` canary. `getKey(mapsetId)` returns the cached or IndexedDB key. `tryAutoUnlock(mapsetId, salt, encryptedVerification)` unlocks from a persisted passphrase if one exists. `lockMapset(mapsetId)` clears memory, IndexedDB, `sessionStorage`, and any `localStorage` passphrase.
 - **Server State:** All mapset, difficulty, section, and post data is managed via TanStack Query (`useQuery`, `useMutation`).
   - Mutations (create/edit/delete post) will invalidate the difficulty query to automatically refresh the forum thread.
 

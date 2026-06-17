@@ -104,7 +104,7 @@ export default function MapsetPage() {
   });
   const [selectedDifficultyId, setSelectedDifficultyId] = useState<string | null>(null);
   const { data: difficultyDetail, isLoading: detailLoading } = useDifficultyDetail(selectedDifficultyId);
-  const { isUnlocked, getKey } = useEncryption();
+  const { isUnlocked, getKey, tryAutoUnlock, isPersisted, deletePersistedPassphrase } = useEncryption();
   const { user } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -137,6 +137,7 @@ export default function MapsetPage() {
   const [showEditMapset, setShowEditMapset] = useState(false);
   const [showManageMembers, setShowManageMembers] = useState(false);
   const [ghostBannerDismissed, setGhostBannerDismissed] = useState(false);
+  const [autoUnlockFailed, setAutoUnlockFailed] = useState(false);
   const [difficultyNames, setDifficultyNames] = useState<Record<string, string>>({});
   const [editingSection, setEditingSection] = useState<DecryptedSection | null>(null);
   const [showOnlyUnresolved, setShowOnlyUnresolved] = useState(false);
@@ -208,6 +209,38 @@ export default function MapsetPage() {
     el.classList.add('post-flash');
     setTimeout(() => el.classList.remove('post-flash'), 3000);
   }, [jumpTarget, decryptedPosts]);
+
+  // If the passphrase was persisted for this mapset and the owner allowed it,
+  // derive the key automatically instead of showing the PassphraseModal.
+  useEffect(() => {
+    if (!mapset) return;
+    if (!mapset.allow_keep_on_browser) {
+      // Owner revoked browser persistence. Purge any previously persisted
+      // passphrase for this browser so the plaintext does not outlive consent.
+      // This runs even when the session is already unlocked, because a
+      // refetched mapset with the flag disabled should clean up immediately.
+      if (isPersisted(mapsetId)) {
+        deletePersistedPassphrase(mapsetId);
+      }
+      return;
+    }
+    if (unlocked) return;
+    if (!isPersisted(mapsetId)) {
+      // No persisted passphrase, so auto-unlock cannot succeed. Skip straight
+      // to the manual modal rather than showing a loading spinner indefinitely.
+      setAutoUnlockFailed(true);
+      return;
+    }
+    setAutoUnlockFailed(false);
+    let cancelled = false;
+    (async () => {
+      const ok = await tryAutoUnlock(mapsetId, mapset.passphrase_salt, mapset.encrypted_verification);
+      if (!cancelled) setAutoUnlockFailed(!ok);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mapset, mapsetId, unlocked, tryAutoUnlock, isPersisted, deletePersistedPassphrase]);
 
   // Build reply trees for the timeline's resolved-state derivation
   const globalPostTree = useMemo(() => {
@@ -699,6 +732,17 @@ export default function MapsetPage() {
   }
 
   if (!unlocked) {
+    const showAutoUnlockLoading = mapset.allow_keep_on_browser && isPersisted(mapsetId) && !autoUnlockFailed;
+    if (showAutoUnlockLoading) {
+      return (
+        <div className="min-h-screen flex items-center justify-center text-white px-8 pt-20">
+          <div className="text-center space-y-3">
+            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-sm text-gray-300">{t('mapsetPage.unlocking')}</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen">
         <PassphraseModal
@@ -1094,6 +1138,7 @@ export default function MapsetPage() {
           currentTitle={mapset.title}
           currentDescription={decryptedDescription}
           currentSongLengthMs={songLengthMs}
+          currentAllowKeepOnBrowser={mapset.allow_keep_on_browser}
           onSuccess={() => setShowEditMapset(false)}
           onCancel={() => setShowEditMapset(false)}
         />

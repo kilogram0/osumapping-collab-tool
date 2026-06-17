@@ -60,6 +60,7 @@ const MAPSET: Mapset = {
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
   delete_at: null,
+  allow_keep_on_browser: false,
   difficulty_count: 0,
 };
 

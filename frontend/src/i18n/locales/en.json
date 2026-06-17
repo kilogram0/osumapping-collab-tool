@@ -69,7 +69,10 @@
     "placeholder": "Enter mapset passphrase",
     "submit": "Unlock",
     "submitting": "Unlocking…",
-    "incorrect": "Incorrect passphrase. Please try again."
+    "incorrect": "Incorrect passphrase. Please try again.",
+    "keepOnBrowserAria": "Remember this passphrase on this browser",
+    "keepOnBrowserLabel": "Remember this passphrase on this browser.",
+    "keepOnBrowserWarning": "Security warning: storing the passphrase in this browser keeps it in localStorage. Anyone with access to this browser profile (including malware or a shared computer) can unlock this mapset. Only use this on devices you trust."
   },
   "createMapsetModal": {
     "title": "Create Mapset",
@@ -94,6 +97,11 @@
     "warningBody": " If you lose this passphrase and no other member has it, all mapset data is permanently unrecoverable. There is no server-side recovery.",
     "confirmSavedAria": "I have saved this passphrase",
     "confirmSavedLabel": "I have saved this passphrase in a secure location.",
+    "allowKeepOnBrowserAria": "Allow members to keep the passphrase in their browser",
+    "allowKeepOnBrowserLabel": "Allow members to keep the passphrase in their browser.",
+    "allowKeepOnBrowserWarning": "Warning: this lets any invited member store the passphrase locally on their device. It is more convenient, but anyone with access to that browser profile can unlock this mapset.",
+    "rememberOnThisBrowserAria": "Remember this passphrase on this browser",
+    "rememberOnThisBrowserLabel": "Remember this passphrase on this browser.",
     "submit": "Create Mapset",
     "submitting": "Creating…",
     "errorGeneric": "Failed to create mapset. Please try again.",
@@ -458,6 +466,7 @@
   },
   "mapsetPage": {
     "loading": "Loading…",
+    "unlocking": "Unlocking from this browser…",
     "notFound": "Mapset not found.",
     "back": "Back to Dashboard",
     "previewingPrefix": "Previewing this mapset as ",
@@ -549,6 +558,9 @@
     "submitting": "Saving…",
     "toastUpdated": "Mapset updated.",
     "errorKeyMissing": "Encryption key not found. Please unlock the mapset first.",
-    "errorGeneric": "Failed to update mapset."
+    "errorGeneric": "Failed to update mapset.",
+    "allowKeepOnBrowserAria": "Allow members to keep the passphrase in their browser",
+    "allowKeepOnBrowserLabel": "Allow members to keep the passphrase in their browser.",
+    "allowKeepOnBrowserWarning": "Warning: this lets any invited member store the passphrase locally on their device. It is more convenient, but anyone with access to that browser profile can unlock this mapset."
   }
 }

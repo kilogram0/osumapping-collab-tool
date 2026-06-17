@@ -16,6 +16,8 @@ interface EditMapsetModalProps {
   currentDescription: string | null;
   /** Decrypted song length in ms, or null when unknown. */
   currentSongLengthMs: number | null;
+  /** Whether members are allowed to persist the passphrase in this browser. */
+  currentAllowKeepOnBrowser: boolean;
   onSuccess: () => void;
   onCancel: () => void;
 }
@@ -25,11 +27,12 @@ export default function EditMapsetModal({
   currentTitle,
   currentDescription,
   currentSongLengthMs,
+  currentAllowKeepOnBrowser,
   onSuccess,
   onCancel,
 }: EditMapsetModalProps) {
   const { t } = useTranslation();
-  const { getKey } = useEncryption();
+  const { getKey, deletePersistedPassphrase } = useEncryption();
   const { showToast } = useToast();
   const updateMapset = useUpdateMapset(mapsetId);
 
@@ -41,6 +44,7 @@ export default function EditMapsetModal({
   const [seconds, setSeconds] = useState(
     currentSongLengthMs != null ? String(Math.floor(currentSongLengthMs / 1000) % 60) : '',
   );
+  const [allowKeepOnBrowser, setAllowKeepOnBrowser] = useState(currentAllowKeepOnBrowser);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -85,11 +89,19 @@ export default function EditMapsetModal({
       const payload: UpdateMapsetPayload = {
         title: trimmedTitle,
         encrypted_description: encryptedDescription,
+        allow_keep_on_browser: allowKeepOnBrowser,
       };
       if (encryptedSongLengthMs !== null) {
         payload.encrypted_song_length_ms = encryptedSongLengthMs;
       }
       await updateMapset.mutateAsync(payload);
+
+      // If the owner just revoked browser persistence, purge any locally
+      // persisted passphrase immediately so the plaintext does not outlive
+      // consent even while the current session remains unlocked.
+      if (currentAllowKeepOnBrowser && !allowKeepOnBrowser) {
+        deletePersistedPassphrase(mapsetId);
+      }
 
       showToast(t('editMapsetModal.toastUpdated'), 'success');
       onSuccess();
@@ -156,6 +168,24 @@ export default function EditMapsetModal({
                 className="flex-1"
               />
             </div>
+          </div>
+
+          <div className="space-y-2 border border-gray-700 rounded p-3 bg-gray-900/50">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allowKeepOnBrowser}
+                onChange={(e) => setAllowKeepOnBrowser(e.target.checked)}
+                className="mt-0.5 accent-blue-500"
+                aria-label={t('editMapsetModal.allowKeepOnBrowserAria')}
+              />
+              <span className="text-sm text-gray-300">
+                {t('editMapsetModal.allowKeepOnBrowserLabel')}
+              </span>
+            </label>
+            <p className="text-xs text-red-300">
+              {t('editMapsetModal.allowKeepOnBrowserWarning')}
+            </p>
           </div>
 
           {error && (

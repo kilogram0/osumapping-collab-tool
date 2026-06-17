@@ -13,7 +13,7 @@ interface MapsetCardProps {
 
 export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
   const { t } = useTranslation();
-  const { isUnlocked } = useEncryption();
+  const { isUnlocked, isPersisted } = useEncryption();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -22,7 +22,14 @@ export default function MapsetCard({ mapset, onUnlock }: MapsetCardProps) {
   const scheduleDelete = useScheduleMapsetDeletion();
   const cancelDelete = useCancelMapsetDeletion();
 
-  const unlocked = isUnlocked(mapset.id);
+  // Treat as unlocked when the session flag is set OR the mapset will
+  // auto-unlock on open: the owner allows browser persistence and a passphrase
+  // is stored. This must mirror MapsetPage's auto-unlock guard so the card's
+  // lock state matches what actually happens when the card is opened — without
+  // it, a freshly-reopened browser shows "Unlock" on a mapset that opens
+  // straight through.
+  const unlocked =
+    isUnlocked(mapset.id) || (mapset.allow_keep_on_browser && isPersisted(mapset.id));
   const isOwner = !!user && user.id === mapset.owner_id;
   const isPendingDeletion = !!mapset.delete_at;
 

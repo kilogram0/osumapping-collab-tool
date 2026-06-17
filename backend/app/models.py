@@ -133,6 +133,14 @@ class Mapset(SQLModel, table=True):
         default=None,
         sa_column_kwargs={"nullable": True},
     )
+    # Per-mapset opt-in set by the owner. When true, members are offered the
+    # option to persist the passphrase in this browser (localStorage). This is
+    # intentionally off by default: passphrase persistence is a real security
+    # trade-off and must never happen without explicit owner consent.
+    allow_keep_on_browser: bool = Field(
+        default=False,
+        sa_column=sa.Column(sa.Boolean, nullable=False, server_default=sa.false()),
+    )
 
     # Relationships
     owner: User = Relationship(back_populates="owned_mapsets")

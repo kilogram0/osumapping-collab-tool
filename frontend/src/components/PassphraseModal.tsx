@@ -14,6 +14,7 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
   const { t } = useTranslation();
   const { unlockMapset } = useEncryption();
   const [passphrase, setPassphrase] = useState('');
+  const [keepOnBrowser, setKeepOnBrowser] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -22,7 +23,13 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
     setError(null);
     setLoading(true);
     try {
-      await unlockMapset(mapset.id, passphrase, mapset.passphrase_salt, mapset.encrypted_verification);
+      await unlockMapset(
+        mapset.id,
+        passphrase,
+        mapset.passphrase_salt,
+        mapset.encrypted_verification,
+        { persist: mapset.allow_keep_on_browser && keepOnBrowser },
+      );
       onSuccess();
     } catch {
       setError(t('passphraseModal.incorrect'));
@@ -52,6 +59,26 @@ export default function PassphraseModal({ mapset, onSuccess, onCancel }: Passphr
             autoComplete="off"
             autoFocus
           />
+
+          {mapset.allow_keep_on_browser && (
+            <div className="space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={keepOnBrowser}
+                  onChange={(e) => setKeepOnBrowser(e.target.checked)}
+                  className="mt-0.5 accent-blue-500"
+                  aria-label={t('passphraseModal.keepOnBrowserAria')}
+                />
+                <span className="text-sm text-gray-300">
+                  {t('passphraseModal.keepOnBrowserLabel')}
+                </span>
+              </label>
+              <p className="text-xs text-red-300 bg-red-950/60 border border-red-900 rounded p-2">
+                {t('passphraseModal.keepOnBrowserWarning')}
+              </p>
+            </div>
+          )}
 
           {error && (
             <p role="alert" className="text-danger-muted text-sm">
