@@ -43,6 +43,10 @@ export function toAssignmentInputs(
   }));
 }
 
+function formatAssignmentLine(s: AssignmentInput): string {
+  return `${formatTimestamp(s.startTimeMs)} - ${formatTimestamp(s.endTimeMs)}: ${s.assignee}`;
+}
+
 /**
  * Build the copy-paste assignment list, one line per range:
  *
@@ -50,7 +54,7 @@ export function toAssignmentInputs(
  *
  * Sections are sorted by start time, then consecutive sections with the same
  * assignee are merged into a single range so the same name never appears on two
- * subsequent lines.
+ * subsequent lines. This is the "For Submission" format.
  */
 export function buildAssignmentText(sections: AssignmentInput[]): string {
   const sorted = [...sections].sort((a, b) => a.startTimeMs - b.startTimeMs);
@@ -69,7 +73,17 @@ export function buildAssignmentText(sections: AssignmentInput[]): string {
     }
   }
 
-  return merged
-    .map((s) => `${formatTimestamp(s.startTimeMs)} - ${formatTimestamp(s.endTimeMs)}: ${s.assignee}`)
-    .join('\n');
+  return merged.map(formatAssignmentLine).join('\n');
+}
+
+/**
+ * Build a raw copy-paste assignment list with one line per section.
+ *
+ * Unlike `buildAssignmentText`, consecutive sections assigned to the same user
+ * are kept as separate lines. This is useful for pinning in Discord servers to
+ * see which individual sections are still unassigned.
+ */
+export function buildRawAssignmentText(sections: AssignmentInput[]): string {
+  const sorted = [...sections].sort((a, b) => a.startTimeMs - b.startTimeMs);
+  return sorted.map(formatAssignmentLine).join('\n');
 }

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DecryptedSection } from './SectionList';
 import type { DecryptedPost } from '../types';
-import type { PostTag } from '../api/endpoints';
+import type { MapsetRole, PostTag } from '../api/endpoints';
 import { formatTimestamp } from '../utils/extractTimestamp';
 import { TagIcon } from './postTagIcons';
 
@@ -33,7 +33,8 @@ interface TimelineProps {
   selectedSectionId: string | null;
   onSelectSection: (sectionId: string) => void;
   onJumpToPost?: (postId: string) => void;
-  membersById?: Map<string, { username: string }>;
+  membersById?: Map<string, { username: string; role?: MapsetRole }>;
+  currentUserId?: string;
   sectionHitObjectMap?: Map<string, boolean>;
   /** IDs of root posts whose last status reply has tag 'resolve'. */
   resolvedPostIds?: Set<string>;
@@ -66,6 +67,7 @@ export default function Timeline({
   onSelectSection,
   onJumpToPost,
   membersById,
+  currentUserId,
   sectionHitObjectMap,
   resolvedPostIds,
   onAddSection,
@@ -81,20 +83,27 @@ export default function Timeline({
     return [...sections].sort((a, b) => a.startTimeMs - b.startTimeMs || a.sortOrder - b.sortOrder);
   }, [sections]);
 
-  // Map each assigned user ID to a hue (0–300°), sorted by username.
+  // Pre-compute a stable hue for every member that can upload content
+  // (owners and mappers).  This keeps user colors consistent across all
+  // difficulties instead of changing as the set of assigned users changes.
   const memberHueMap = useMemo(() => {
-    const uniqueIds = [...new Set(sections.map((s) => s.assignedTo).filter((id): id is string => id !== null))];
-    uniqueIds.sort((a, b) => {
-      const nameA = membersById?.get(a)?.username ?? a;
-      const nameB = membersById?.get(b)?.username ?? b;
+    const eligible: [string, { username: string; role?: MapsetRole }][] = [];
+    for (const [id, m] of membersById ?? []) {
+      if (m.role !== 'modder') {
+        eligible.push([id, m]);
+      }
+    }
+    eligible.sort((a, b) => {
+      const nameA = a[1].username ?? a[0];
+      const nameB = b[1].username ?? b[0];
       return nameA.localeCompare(nameB);
     });
     const map = new Map<string, number>();
-    uniqueIds.forEach((id, idx) => {
-      map.set(id, memberHue(idx, uniqueIds.length));
+    eligible.forEach(([id], idx) => {
+      map.set(id, memberHue(idx, eligible.length));
     });
     return map;
-  }, [sections, membersById]);
+  }, [membersById]);
 
   const markerPosts = useMemo(() => {
     // Only root posts get a marker — one dot per discussion thread, not per reply.
@@ -157,14 +166,17 @@ export default function Timeline({
           // undefined = scan not yet complete; treat as "has content" to avoid flash.
           const pending = sectionHitObjectMap?.get(section.id) === false;
           const hue = section.assignedTo != null ? (memberHueMap.get(section.assignedTo) ?? null) : null;
+          const isOwn = !!currentUserId && section.assignedTo === currentUserId;
 
           return (
             <button
               key={section.id}
               type="button"
               data-testid={`timeline-section-${section.id}`}
-              className={`absolute top-0 bottom-0 transition-all hover:brightness-110
+              data-own-section={isOwn ? 'true' : undefined}
+              className={`absolute top-0 bottom-0 transition-all
                 ${isLast ? '' : 'border-r-2 border-black/30'}
+                ${isOwn ? 'brightness-110 hover:brightness-125' : 'hover:brightness-110'}
                 ${isSelected ? 'ring ring-inset ring-white/40 z-10' : ''}
                 flex items-center justify-center text-white text-xs font-medium px-1
                 overflow-hidden whitespace-nowrap text-ellipsis`}

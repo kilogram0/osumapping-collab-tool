@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildAssignmentText,
+  buildRawAssignmentText,
   toAssignmentInputs,
   type AssignmentInput,
   type AssignableSection,
@@ -130,6 +131,39 @@ describe('toAssignmentInputs', () => {
     ];
     expect(buildAssignmentText(toAssignmentInputs(sections, labels))).toBe(
       '00:00:000 - 00:10:000: CebollaVladimir',
+    );
+  });
+});
+
+describe('buildRawAssignmentText', () => {
+  it('formats each section individually without merging contiguous assignees', () => {
+    const sections: AssignmentInput[] = [
+      { startTimeMs: 0, endTimeMs: 5000, assignee: 'alice' },
+      { startTimeMs: 5000, endTimeMs: 10000, assignee: 'alice' },
+      { startTimeMs: 10000, endTimeMs: 15000, assignee: 'bob' },
+    ];
+    expect(buildRawAssignmentText(sections)).toBe(
+      '00:00:000 - 00:05:000: alice\n00:05:000 - 00:10:000: alice\n00:10:000 - 00:15:000: bob',
+    );
+  });
+
+  it('sorts unordered sections by start time before building', () => {
+    const sections: AssignmentInput[] = [
+      { startTimeMs: 20000, endTimeMs: 30000, assignee: 'bob' },
+      { startTimeMs: 0, endTimeMs: 20000, assignee: 'alice' },
+    ];
+    expect(buildRawAssignmentText(sections)).toBe(
+      '00:00:000 - 00:20:000: alice\n00:20:000 - 00:30:000: bob',
+    );
+  });
+
+  it('keeps same-assignee sections separated by a gap as separate lines', () => {
+    const sections: AssignmentInput[] = [
+      { startTimeMs: 0, endTimeMs: 5000, assignee: 'alice' },
+      { startTimeMs: 8000, endTimeMs: 12000, assignee: 'alice' },
+    ];
+    expect(buildRawAssignmentText(sections)).toBe(
+      '00:00:000 - 00:05:000: alice\n00:08:000 - 00:12:000: alice',
     );
   });
 });

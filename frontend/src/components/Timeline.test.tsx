@@ -237,6 +237,68 @@ describe('Timeline', () => {
     expect(block.style.backgroundColor).not.toContain('/ 0.4');
   });
 
+  it('keeps a user color stable when another eligible member has no sections', () => {
+    const sections: DecryptedSection[] = [
+      { id: 's1', name: 'A', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: 'user-1' },
+    ];
+    const membersA = new Map([
+      ['user-1', { username: 'alice' }],
+      ['user-2', { username: 'bob' }],
+    ]);
+    const membersB = new Map([
+      ['user-1', { username: 'alice' }],
+      ['user-2', { username: 'bob' }],
+      ['user-3', { username: 'charlie' }],
+    ]);
+    const { rerender } = renderTimeline({ sections, membersById: membersA });
+    const block = screen.getByTestId('timeline-section-s1');
+    const colorA = block.style.backgroundColor;
+    rerender(
+      <Timeline
+        sections={sections}
+        posts={POSTS}
+        songLengthMs={30000}
+        selectedSectionId={null}
+        onSelectSection={vi.fn()}
+        onJumpToPost={vi.fn()}
+        membersById={membersB}
+      />,
+    );
+    expect(screen.getByTestId('timeline-section-s1').style.backgroundColor).toBe(colorA);
+  });
+
+  it('does not assign a color to sections assigned to a modder', () => {
+    const sections: DecryptedSection[] = [
+      { id: 's1', name: 'A', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: 'user-1' },
+    ];
+    const membersById = new Map([['user-1', { username: 'modder', role: 'modder' as const }]]);
+    renderTimeline({ sections, membersById });
+    const block = screen.getByTestId('timeline-section-s1');
+    expect(block.style.backgroundColor).toBe('oklch(0.42 0 0)');
+  });
+
+  it('highlights sections assigned to the current user', () => {
+    const sections: DecryptedSection[] = [
+      { id: 's1', name: 'A', startTimeMs: 0, endTimeMs: 30000, sortOrder: 0, assignedTo: 'user-1' },
+      { id: 's2', name: 'B', startTimeMs: 30000, endTimeMs: 60000, sortOrder: 1, assignedTo: 'user-2' },
+    ];
+    const membersById = new Map([
+      ['user-1', { username: 'alice' }],
+      ['user-2', { username: 'bob' }],
+    ]);
+    renderTimeline({ sections, membersById, currentUserId: 'user-1' });
+    const own = screen.getByTestId('timeline-section-s1');
+    expect(own.className).toMatch(/(^|\s)brightness-110(\s|$)/);
+    // Own sections hover brighter than their resting state, so hovering still
+    // gives feedback instead of colliding with the base hover:brightness-110.
+    expect(own.className).toMatch(/(^|\s)hover:brightness-125(\s|$)/);
+    expect(own).toHaveAttribute('data-own-section', 'true');
+    const other = screen.getByTestId('timeline-section-s2');
+    expect(other.className).not.toMatch(/(^|\s)brightness-110(\s|$)/);
+    expect(other.className).toMatch(/(^|\s)hover:brightness-110(\s|$)/);
+    expect(other).not.toHaveAttribute('data-own-section');
+  });
+
   it('does not render markers for reply posts even when they have timestamps', () => {
     const posts: DecryptedPost[] = [
       { id: 'root', difficulty_id: 'd1', author_id: 'u1', parent_id: null,     tag: 'suggestion', encrypted_body: '', created_at: '', updated_at: '', decryptedBody: '', extractedMs: 15000 },

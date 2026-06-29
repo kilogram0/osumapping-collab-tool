@@ -539,7 +539,7 @@ describe('MapsetPage', () => {
     expect(screen.getByRole('heading', { name: /Add Section/i })).toBeInTheDocument();
   });
 
-  it('copies assignments to the clipboard from the toolbar button', async () => {
+  it('copies assignments to the clipboard from the toolbar button (For Submission)', async () => {
     renderPage();
     const user = userEvent.setup();
     // Define after setup(): userEvent installs its own clipboard stub on setup.
@@ -549,6 +549,20 @@ describe('MapsetPage', () => {
       expect(screen.getByRole('button', { name: /Copy Assignments/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole('button', { name: /Copy Assignments/i }));
+    await user.click(screen.getByRole('menuitem', { name: /For Submission/i }));
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it('copies raw assignments to the clipboard from the toolbar dropdown', async () => {
+    renderPage();
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Copy Assignments/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Copy Assignments/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Raw/i }));
     expect(writeText).toHaveBeenCalledTimes(1);
   });
 

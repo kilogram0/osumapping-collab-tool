@@ -59,7 +59,7 @@ import { mergeOsu } from '../utils/osuMerge';
 import { redistributeForDelete, redistributeForMerge, redistributeForShorten, hasSectionOsu } from '../utils/sectionRedistribute';
 import { syncBaseBookmarks } from '../utils/syncBaseBookmarks';
 import { findNextSection, sortSections } from '../utils/sectionOrder';
-import { buildAssignmentText, toAssignmentInputs } from '../utils/sectionAssignments';
+import CopyAssignmentsButton from '../components/CopyAssignmentsButton';
 import { deriveResolvedRootIds, canBeResolved, isStatusReply } from '../utils/resolveUtils';
 import { compareRootPostOrder, compareReplyOrder } from '../utils/postSort';
 import { filterPostsBySection, findSectionForMs } from '../utils/sectionPosts';
@@ -68,15 +68,6 @@ import type { DecryptedPost, DecryptedSection } from '../types';
 
 /** Stable empty array reference to avoid new-array churn in deps. */
 const EMPTY_SECTIONS: Section[] = [];
-
-function CopyIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
-      <path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" />
-    </svg>
-  );
-}
 
 export default function MapsetPage() {
   const { t } = useTranslation();
@@ -589,22 +580,6 @@ export default function MapsetPage() {
     }
   }
 
-  async function handleCopyAssignments() {
-    const text = buildAssignmentText(
-      toAssignmentInputs(decryptedSections, {
-        resolveUsername: (id) => membersById.get(id)?.username,
-        unassignedLabel: t('mapsetPage.unassigned'),
-        unknownUserLabel: t('mapsetPage.unknownUser'),
-      }),
-    );
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast(t('mapsetPage.toastAssignmentsCopied'), 'success');
-    } catch {
-      showToast(t('mapsetPage.toastFailedCopyAssignments'), 'error');
-    }
-  }
-
   async function handleAssignSection(sectionId: string, userId: string | null) {
     try {
       await assignSectionMutation.mutateAsync({ sectionId, userId });
@@ -923,16 +898,10 @@ export default function MapsetPage() {
                   isOwner={isOwner}
                   resolveUsername={(userId) => membersById.get(userId)?.username}
                 />
-                <button
-                  type="button"
-                  onClick={handleCopyAssignments}
-                  disabled={decryptedSections.length === 0}
-                  aria-label={t('mapsetPage.copyAssignments')}
-                  title={t('mapsetPage.copyAssignments')}
-                  className="px-4 py-3.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-800 text-white rounded-lg transition-colors"
-                >
-                  <CopyIcon />
-                </button>
+                <CopyAssignmentsButton
+                  sections={decryptedSections}
+                  membersById={membersById}
+                />
                 <MergedDownloadButton
                   difficultyId={selectedDifficultyId}
                   mapsetId={mapsetId}
@@ -982,6 +951,7 @@ export default function MapsetPage() {
                 songLengthMs={songLengthMs}
                 selectedSectionId={selectedSectionId}
                 membersById={membersById}
+                currentUserId={user?.id}
                 sectionHitObjectMap={sectionHitObjectMap}
                 resolvedPostIds={resolvedPostIds}
                 onAddSection={isOwner ? () => setShowCreateSection(true) : undefined}
