@@ -169,6 +169,67 @@ describe('diffBase', () => {
     expect(report.notice).not.toContain('TimingPoints');
   });
 
+  // Fields are: time,beatLength,meter,sampleSet,sampleIndex,volume,uninherited,effects
+  it('whitelists a positive [TimingPoints] volume-only change', () => {
+    const candidate = ACTIVE_BASE.replace('0,500,4,2,1,50,1,0', '0,500,4,2,1,30,1,0');
+    const report = diffBase(candidate, ACTIVE_BASE);
+    expect(report.critical).not.toContain('TimingPoints');
+    expect(report.notice).not.toContain('TimingPoints');
+    expect(report.hasDiff).toBe(false);
+  });
+
+  it('whitelists a positive [TimingPoints] sample-set (hitsound group) change', () => {
+    const candidate = ACTIVE_BASE.replace('0,500,4,2,1,50,1,0', '0,500,4,3,1,50,1,0');
+    const report = diffBase(candidate, ACTIVE_BASE);
+    expect(report.critical).not.toContain('TimingPoints');
+    expect(report.notice).not.toContain('TimingPoints');
+  });
+
+  it('whitelists a positive [TimingPoints] sample-index (custom hitsound) change', () => {
+    const candidate = ACTIVE_BASE.replace('0,500,4,2,1,50,1,0', '0,500,4,2,7,50,1,0');
+    const report = diffBase(candidate, ACTIVE_BASE);
+    expect(report.critical).not.toContain('TimingPoints');
+    expect(report.notice).not.toContain('TimingPoints');
+  });
+
+  it('still flags a positive [TimingPoints] BPM change even when volume also changed', () => {
+    const candidate = ACTIVE_BASE.replace('0,500,4,2,1,50,1,0', '0,600,4,2,1,30,1,0');
+    const report = diffBase(candidate, ACTIVE_BASE);
+    expect(report.critical).toContain('TimingPoints');
+  });
+
+  it('still flags a positive [TimingPoints] meter (time signature) change', () => {
+    const candidate = ACTIVE_BASE.replace('0,500,4,2,1,50,1,0', '0,500,3,2,1,50,1,0');
+    const report = diffBase(candidate, ACTIVE_BASE);
+    expect(report.critical).toContain('TimingPoints');
+  });
+
+  it('whitelists a positive [TimingPoints] effects (kiai) change', () => {
+    const candidate = ACTIVE_BASE.replace('0,500,4,2,1,50,1,0', '0,500,4,2,1,50,1,1');
+    const report = diffBase(candidate, ACTIVE_BASE);
+    expect(report.critical).not.toContain('TimingPoints');
+    expect(report.notice).not.toContain('TimingPoints');
+  });
+
+  it('still flags a positive [TimingPoints] BPM change even when effects also changed', () => {
+    const candidate = ACTIVE_BASE.replace('0,500,4,2,1,50,1,0', '0,600,4,2,1,50,1,1');
+    const report = diffBase(candidate, ACTIVE_BASE);
+    expect(report.critical).toContain('TimingPoints');
+  });
+
+  it('ignores an inherited (negative) [TimingPoints] line in the comparison', () => {
+    // Inherited points are per-section slider velocity, excluded from the
+    // base comparison. Adding one to the candidate must not trip critical or
+    // notice even though it changes the raw line count.
+    const candidate = ACTIVE_BASE.replace(
+      '[TimingPoints]\n0,500,4,2,1,50,1,0',
+      '[TimingPoints]\n0,500,4,2,1,50,1,0\n1000,-50,4,2,1,50,0,0',
+    );
+    const report = diffBase(candidate, ACTIVE_BASE);
+    expect(report.critical).not.toContain('TimingPoints');
+    expect(report.notice).not.toContain('TimingPoints');
+  });
+
   it('ignores [Editor] changes', () => {
     const candidate = ACTIVE_BASE.replace('Bookmarks: 1000,2000', 'Bookmarks: 3000');
     const report = diffBase(candidate, ACTIVE_BASE);

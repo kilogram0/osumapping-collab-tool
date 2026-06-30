@@ -8,7 +8,7 @@
  * (rewrite the section so the chosen buckets match the active base).
  */
 
-import { parseSections, OsuSection, stringifySections, parseTimingPoints, isPositiveTimingPoint } from './osuParser';
+import { parseSections, OsuSection, stringifySections, parseTimingPoints, isPositiveTimingPoint, type TimingPoint } from './osuParser';
 
 export interface DiffReport {
   critical: string[];
@@ -82,6 +82,50 @@ function arraysEqual(a: string[], b: string[]): boolean {
 }
 
 /**
+ * Timing-significant fields of a timing point: offset, beat length, meter, and
+ * the uninherited flag. These define the map's *timing and structure* — a
+ * positive (uninherited) point that disagrees with the base on any of them is a
+ * genuine BPM/timing conflict and stays critical.
+ *
+ * Deliberately excluded: `sampleSet`, `sampleIndex`, `volume`, and `effects`.
+ * The first three are the hitsounding group and volume; `effects` is the
+ * kiai / omit-barline flags. All are per-difficulty cosmetic settings, not
+ * shared timing, so a positive point that differs *only* in them is a
+ * whitelisted change that does NOT trip the critical modal. This is safe for
+ * any point the uploaded section actually carries: on download the merge
+ * engine lets a section's positive point win over the base's at the same
+ * offset, so the mapper's change reaches the final map even though the base
+ * isn't promoted. A full-difficulty upload carries every positive; a
+ * single-section upload only carries those inside its [startMs, endMs) range,
+ * so a cosmetic change to an out-of-range positive is dropped rather than
+ * promoted — acceptable, since cross-section timing is the base's concern.
+ */
+function timingSignature(tp: TimingPoint): string {
+  return [tp.time, tp.beatLength, tp.meter, tp.uninherited].join(',');
+}
+
+/**
+ * True if two [TimingPoints] line lists differ on any timing-significant field
+ * (see {@link timingSignature}) — i.e. the difference is more than a hitsounding
+ * group / volume change and so warrants the critical modal. A change in the
+ * count or order of the points is always treated as a critical difference.
+ */
+function timingPointsCriticallyDiffer(candidateLines: string[], activeLines: string[]): boolean {
+  // Positive (uninherited / BPM) points only. Inherited (negative) points are
+  // per-section slider velocity and are excluded from the base comparison
+  // (SPECIFICATION.md §8). The active base contains only positives by
+  // construction, but filtering here makes the function honor that contract
+  // regardless of what it is handed.
+  const candidate = parseTimingPoints(candidateLines).filter(isPositiveTimingPoint);
+  const active = parseTimingPoints(activeLines).filter(isPositiveTimingPoint);
+  if (candidate.length !== active.length) return true;
+  for (let i = 0; i < candidate.length; i++) {
+    if (timingSignature(candidate[i]) !== timingSignature(active[i])) return true;
+  }
+  return false;
+}
+
+/**
  * Diff a candidate base against the active base.
  *
  * Buckets (per SPECIFICATION.md §8):
@@ -119,12 +163,13 @@ export function diffBase(candidateBase: string, activeBase: string): DiffReport 
 
   // TimingPoints (positive only — buildCandidateBase already filtered the
   // candidate; the active base contains only positives by construction).
-  // Line-list comparison, so no per-key entry in `values`.
+  // Compared on timing-significant fields only, so a positive point that
+  // changed only its hitsounding group / volume / effects (kiai) is
+  // whitelisted (see timingPointsCriticallyDiffer). Line-list comparison, so
+  // no per-key entry in `values`.
   const candidateTiming = getSection(candidate, 'TimingPoints');
   const activeTiming = getSection(active, 'TimingPoints');
-  const candidateTpLines = getDataLines(candidateTiming?.lines ?? []);
-  const activeTpLines = getDataLines(activeTiming?.lines ?? []);
-  if (!arraysEqual(candidateTpLines, activeTpLines)) {
+  if (timingPointsCriticallyDiffer(candidateTiming?.lines ?? [], activeTiming?.lines ?? [])) {
     critical.push('TimingPoints');
   }
 
